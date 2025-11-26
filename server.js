@@ -1,0 +1,360 @@
+const express = require('express');
+const cors = require('cors');
+const { Pool } = require('pg');
+
+const app = express();
+const PORT = 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// PostgreSQL
+const pool = new Pool({
+  host: process.env.DB_HOST || 'anais-postgres-2s8h7q',
+  port: process.env.DB_PORT || 5432,
+  database: process.env.DB_NAME || 'db',
+  user: process.env.DB_USER || 'admin',
+  password: process.env.DB_PASSWORD || '18061979Anais.',
+});
+
+// Test conexión e inicializar DB
+(async () => {
+  try {
+    await pool.query('SELECT NOW()');
+    console.log('✅ Conectado a PostgreSQL');
+    
+    // Crear tablas
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ingredientes (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        proveedor_id INTEGER,
+        precio DECIMAL(10, 2) DEFAULT 0,
+        unidad VARCHAR(50) DEFAULT 'kg',
+        stock_actual DECIMAL(10, 2) DEFAULT 0,
+        stock_minimo DECIMAL(10, 2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS recetas (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        categoria VARCHAR(100) DEFAULT 'principal',
+        precio_venta DECIMAL(10, 2) DEFAULT 0,
+        porciones INTEGER DEFAULT 1,
+        ingredientes JSONB DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS proveedores (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        contacto VARCHAR(255) DEFAULT '',
+        telefono VARCHAR(50) DEFAULT '',
+        email VARCHAR(255) DEFAULT '',
+        direccion TEXT DEFAULT '',
+        notas TEXT DEFAULT '',
+        ingredientes INTEGER[] DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS pedidos (
+        id SERIAL PRIMARY KEY,
+        proveedor_id INTEGER NOT NULL,
+        fecha DATE NOT NULL,
+        ingredientes JSONB NOT NULL,
+        total DECIMAL(10, 2) NOT NULL,
+        estado VARCHAR(50) DEFAULT 'pendiente',
+        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_recepcion TIMESTAMP,
+        total_recibido DECIMAL(10, 2)
+      );
+      
+      CREATE TABLE IF NOT EXISTS ventas (
+        id SERIAL PRIMARY KEY,
+        receta_id INTEGER REFERENCES recetas(id) ON DELETE CASCADE,
+        cantidad INTEGER NOT NULL,
+        precio_unitario DECIMAL(10, 2) NOT NULL,
+        total DECIMAL(10, 2) NOT NULL,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
+      CREATE INDEX IF NOT EXISTS idx_ventas_receta ON ventas(receta_id);
+    `);
+    console.log('✅ Tablas inicializadas');
+  } catch (err) {
+    console.error('❌ Error DB:', err.message);
+  }
+})();
+
+// Root
+app.get('/', (req, res) => {
+  res.json({ 
+    message: '🍽️ La Caleta 102 API',
+    version: '2.0.0',
+    status: 'running'
+  });
+});
+
+// ========== INGREDIENTES ==========
+app.get('/api/ingredients', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM ingredientes ORDER BY id');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ingredients', async (req, res) => {
+  try {
+    const { nombre, proveedorId, precio, unidad, stockActual, stockMinimo } = req.body;
+    const result = await pool.query(
+      'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [nombre, proveedorId || null, precio || 0, unidad || 'kg', stockActual || 0, stockMinimo || 0]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/ingredients/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, proveedorId, precio, unidad, stockActual, stockMinimo } = req.body;
+    const result = await pool.query(
+      'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6 WHERE id=$7 RETURNING *',
+      [nombre, proveedorId || null, precio || 0, unidad, stockActual || 0, stockMinimo || 0, id]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/ingredients/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ingredientes WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== RECETAS ==========
+app.get('/api/recipes', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM recetas ORDER BY id');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/recipes', async (req, res) => {
+  try {
+    const { nombre, categoria, precioVenta, porciones, ingredientes } = req.body;
+    const result = await pool.query(
+      'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [nombre, categoria || 'principal', precioVenta || 0, porciones || 1, JSON.stringify(ingredientes || [])]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/recipes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, categoria, precioVenta, porciones, ingredientes } = req.body;
+    const result = await pool.query(
+      'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5 WHERE id=$6 RETURNING *',
+      [nombre, categoria, precioVenta || 0, porciones || 1, JSON.stringify(ingredientes || []), id]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/recipes/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM recetas WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== PROVEEDORES ==========
+app.get('/api/suppliers', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM proveedores ORDER BY id');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/suppliers', async (req, res) => {
+  try {
+    const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
+    const result = await pool.query(
+      'INSERT INTO proveedores (nombre, contacto, telefono, email, direccion, notas, ingredientes) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || []]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/suppliers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
+    const result = await pool.query(
+      'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 RETURNING *',
+      [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/suppliers/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM proveedores WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== PEDIDOS ==========
+app.get('/api/orders', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM pedidos ORDER BY fecha DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/orders', async (req, res) => {
+  try {
+    const { proveedorId, fecha, ingredientes, total, estado } = req.body;
+    const result = await pool.query(
+      'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
+    const result = await pool.query(
+      'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 RETURNING *',
+      [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/orders/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM pedidos WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== VENTAS ==========
+app.get('/api/sales', async (req, res) => {
+  try {
+    const { fecha } = req.query;
+    let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id';
+    let params = [];
+    
+    if (fecha) {
+      query += ' WHERE DATE(v.fecha) = $1';
+      params.push(fecha);
+    }
+    
+    query += ' ORDER BY v.fecha DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sales', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { recetaId, cantidad } = req.body;
+    
+    await client.query('BEGIN');
+    
+    // Obtener receta con ingredientes
+    const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1', [recetaId]);
+    if (recetaResult.rows.length === 0) {
+      throw new Error('Receta no encontrada');
+    }
+    
+    const receta = recetaResult.rows[0];
+    const precioUnitario = parseFloat(receta.precio_venta);
+    const total = precioUnitario * cantidad;
+    
+    // Registrar venta
+    const ventaResult = await client.query(
+      'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total) VALUES ($1, $2, $3, $4) RETURNING *',
+      [recetaId, cantidad, precioUnitario, total]
+    );
+    
+    // Descontar ingredientes del stock
+    const ingredientes = receta.ingredientes;
+    for (const ing of ingredientes) {
+      await client.query(
+        'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
+        [ing.cantidad * cantidad, ing.ingredienteId]
+      );
+    }
+    
+    await client.query('COMMIT');
+    res.status(201).json(ventaResult.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/sales/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ventas WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Start
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 API corriendo en puerto ${PORT}`);
+  console.log(`📍 La Caleta 102 Dashboard API v2.0`);
+});
