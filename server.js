@@ -352,7 +352,100 @@ app.delete('/api/sales/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// ========== BALANCE Y ESTADÍSTICAS ==========
+app.get('/api/balance/mes', async (req, res) => {
+  try {
+    const { mes, ano } = req.query;
+    const mesActual = mes || new Date().getMonth() + 1;
+    const anoActual = ano || new Date().getFullYear();
+    
+    // Ingresos del mes
+    const ventasMes = await pool.query(
+      `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
+       FROM ventas 
+       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2`,
+      [mesActual, anoActual]
+    );
+    
+    // Costos del mes (calculado desde ingredientes de recetas vendidas)
+    const costosMes = await pool.query(
+      `SELECT COALESCE(SUM(v.cantidad * r.costo_total), 0) as costos
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
+      [mesActual, anoActual]
+    );
+    
+    // Plato más vendido
+    const platoMasVendido = await pool.query(
+      `SELECT r.nombre, SUM(v.cantidad) as total_vendido
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
+       GROUP BY r.nombre
+       ORDER BY total_vendido DESC
+       LIMIT 1`,
+      [mesActual, anoActual]
+    );
+    
+    // Distribución de ventas por plato
+    const ventasPorPlato = await pool.query(
+      `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
+       GROUP BY r.nombre
+       ORDER BY total_ingresos DESC`,
+      [mesActual, anoActual]
+    );
+    
+    // Inversión en inventario
+    const inventario = await pool.query(
+      `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor_inventario
+       FROM ingredientes`
+    );
+    
+    const ingresos = parseFloat(ventasMes.rows[0].ingresos);
+    const costos = parseFloat(costosMes.rows[0].costos);
+    const ganancia = ingresos - costos;
+    const margen = ingresos > 0 ? ((ganancia / ingresos) * 100).toFixed(2) : 0;
+    
+    res.json({
+      ingresos,
+      costos,
+      ganancia,
+      margen,
+      num_ventas: ventasMes.rows[0].num_ventas,
+      plato_mas_vendido: platoMasVendido.rows[0] || null,
+      ventas_por_plato: ventasPorPlato.rows,
+      valor_inventario: parseFloat(inventario.rows[0].valor_inventario)
+    });
+  } catch (error) {
+    console.error('Error obteniendo balance:', error);
+    res.status(500).json({ error: 'Error obteniendo balance' });
+  }
+});
 
+// Comparativa mensual
+app.get('/api/balance/comparativa', async (req, res) => {
+  try {
+    const meses = await pool.query(
+      `SELECT 
+         TO_CHAR(fecha, 'YYYY-MM') as mes,
+         SUM(total) as ingresos,
+         COUNT(*) as num_ventas
+       FROM ventas
+       GROUP BY TO_CHAR(fecha, 'YYYY-MM')
+       ORDER BY mes DESC
+       LIMIT 12`
+    );
+    
+    res.json(meses.rows);
+  } catch (error) {
+    console.error('Error obteniendo comparativa:', error);
+    res.status(500).json({ error: 'Error obteniendo comparativa' });
+  }
+});
 // Start
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 API corriendo en puerto ${PORT}`);
