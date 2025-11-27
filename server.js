@@ -221,9 +221,9 @@ app.put('/api/suppliers/:id', async (req, res) => {
     const { id } = req.params;
     const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
     const result = await pool.query(
-      'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 RETURNING *',
-      [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id]
-    );
+  'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 RETURNING *',
+  [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id]
+);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
