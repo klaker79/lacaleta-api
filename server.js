@@ -372,7 +372,7 @@ const costosMes = await pool.query(
   `SELECT COALESCE(SUM(
     v.cantidad * (
       SELECT COALESCE(SUM(ri.cantidad * i.precio), 0)
-      FROM receta_ingredientes ri
+      FROM recetas_ingredientes ri
       JOIN ingredientes i ON ri.ingrediente_id = i.id
       WHERE ri.receta_id = v.receta_id
     )
