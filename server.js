@@ -159,10 +159,10 @@ app.get('/api/recipes', async (req, res) => {
 
 app.post('/api/recipes', async (req, res) => {
   try {
-    const { nombre, categoria, precioVenta, porciones, ingredientes } = req.body;
+    const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
     const result = await pool.query(
       'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [nombre, categoria || 'principal', precioVenta || 0, porciones || 1, JSON.stringify(ingredientes || [])]
+      [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || [])]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -173,10 +173,10 @@ app.post('/api/recipes', async (req, res) => {
 app.put('/api/recipes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, categoria, precioVenta, porciones, ingredientes } = req.body;
+    const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
     const result = await pool.query(
       'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5 WHERE id=$6 RETURNING *',
-      [nombre, categoria, precioVenta || 0, porciones || 1, JSON.stringify(ingredientes || []), id]
+      [nombre, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), id]
     );
     res.json(result.rows[0] || {});
   } catch (err) {
