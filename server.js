@@ -382,6 +382,40 @@ const costosMes = await pool.query(
   [mesActual, anoActual]
 );
     
+    app.get('/api/balance/mes', async (req, res) => {
+  try {
+    const { mes, ano } = req.query;
+    const mesActual = mes || new Date().getMonth() + 1;
+    const anoActual = ano || new Date().getFullYear();
+
+    // Ingresos del mes
+    const ventasMes = await pool.query(
+      `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
+       FROM ventas
+       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2`,
+      [mesActual, anoActual]
+    );
+
+    // Costos del mes - retorna 0 si no hay ventas
+    const costosMes = await pool.query(
+      `SELECT COALESCE(SUM(
+        v.cantidad * (
+          SELECT COALESCE(SUM(ri.cantidad * i.precio), 0)
+          FROM recetas_ingredientes ri
+          JOIN ingredientes i ON ri.ingrediente_id = i.id
+          WHERE ri.receta_id = v.receta_id
+        )
+      ), 0) as costos
+      FROM ventas v
+      WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
+      [mesActual, anoActual]
+    );
+
+    const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;
+    const costos = parseFloat(costosMes.rows[0].costos) || 0;
+    const ganancia = ingresos - costos;
+    const margen = ingresos > 0 ? ((ganancia / ingresos) * 100).toFixed(1) : 0;
+
     // Plato más vendido
     const platoMasVendido = await pool.query(
       `SELECT r.nombre, SUM(v.cantidad) as total_vendido
@@ -393,8 +427,8 @@ const costosMes = await pool.query(
        LIMIT 1`,
       [mesActual, anoActual]
     );
-    
-    // Distribución de ventas por plato
+
+    // Ventas por plato
     const ventasPorPlato = await pool.query(
       `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
        FROM ventas v
@@ -404,31 +438,27 @@ const costosMes = await pool.query(
        ORDER BY total_ingresos DESC`,
       [mesActual, anoActual]
     );
-    
-    // Inversión en inventario
-    const inventario = await pool.query(
-      `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor_inventario
+
+    // Valor del inventario
+    const valorInventario = await pool.query(
+      `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
        FROM ingredientes`
     );
-    
-    const ingresos = parseFloat(ventasMes.rows[0].ingresos);
-    const costos = parseFloat(costosMes.rows[0].costos);
-    const ganancia = ingresos - costos;
-    const margen = ingresos > 0 ? ((ganancia / ingresos) * 100).toFixed(2) : 0;
-    
+
     res.json({
       ingresos,
       costos,
       ganancia,
-      margen,
-      num_ventas: ventasMes.rows[0].num_ventas,
+      margen: parseFloat(margen),
+      num_ventas: parseInt(ventasMes.rows[0].num_ventas) || 0,
       plato_mas_vendido: platoMasVendido.rows[0] || null,
-      ventas_por_plato: ventasPorPlato.rows,
-      valor_inventario: parseFloat(inventario.rows[0].valor_inventario)
+      ventas_por_plato: ventasPorPlato.rows || [],
+      valor_inventario: parseFloat(valorInventario.rows[0].valor) || 0
     });
+
   } catch (error) {
     console.error('Error obteniendo balance:', error);
-    res.status(500).json({ error: 'Error obteniendo balance' });
+    res.status(500).json({ error: error.message });
   }
 });
 
