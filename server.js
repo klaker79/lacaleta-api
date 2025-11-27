@@ -368,13 +368,19 @@ app.get('/api/balance/mes', async (req, res) => {
     );
     
     // Costos del mes (calculado desde ingredientes de recetas vendidas)
-    const costosMes = await pool.query(
-      `SELECT COALESCE(SUM(v.cantidad * r.costo_total), 0) as costos
-       FROM ventas v
-       JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
-      [mesActual, anoActual]
-    );
+const costosMes = await pool.query(
+  `SELECT COALESCE(SUM(
+    v.cantidad * (
+      SELECT COALESCE(SUM(ri.cantidad * i.precio), 0)
+      FROM receta_ingredientes ri
+      JOIN ingredientes i ON ri.ingrediente_id = i.id
+      WHERE ri.receta_id = v.receta_id
+    )
+  ), 0) as costos
+  FROM ventas v
+  WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
+  [mesActual, anoActual]
+);
     
     // Plato más vendido
     const platoMasVendido = await pool.query(
