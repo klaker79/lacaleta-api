@@ -224,7 +224,7 @@ app.put('/api/suppliers/:id', async (req, res) => {
       'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 RETURNING *',
       [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id]
     );
-    res.json(result.rows[0] || {});
+    res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
