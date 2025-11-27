@@ -355,37 +355,9 @@ app.delete('/api/sales/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 // ========== BALANCE Y ESTADÍSTICAS ==========
 app.get('/api/balance/mes', async (req, res) => {
-  try {
-    const { mes, ano } = req.query;
-    const mesActual = mes || new Date().getMonth() + 1;
-    const anoActual = ano || new Date().getFullYear();
-    
-    // Ingresos del mes
-    const ventasMes = await pool.query(
-      `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
-       FROM ventas 
-       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2`,
-      [mesActual, anoActual]
-    );
-    
-    // Costos del mes (calculado desde ingredientes de recetas vendidas)
-const costosMes = await pool.query(
-  `SELECT COALESCE(SUM(
-    v.cantidad * (
-      SELECT COALESCE(SUM(ri.cantidad * i.precio), 0)
-      FROM recetas_ingredientes ri
-      JOIN ingredientes i ON ri.ingrediente_id = i.id
-      WHERE ri.receta_id = v.receta_id
-    )
-  ), 0) as costos
-  FROM ventas v
-  WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
-  [mesActual, anoActual]
-);
-    
-    app.get('/api/balance/mes', async (req, res) => {
   try {
     const { mes, ano } = req.query;
     const mesActual = mes || new Date().getMonth() + 1;
@@ -399,23 +371,27 @@ const costosMes = await pool.query(
       [mesActual, anoActual]
     );
 
-    // Costos del mes - retorna 0 si no hay ventas
-    const costosMes = await pool.query(
-      `SELECT COALESCE(SUM(
-        v.cantidad * (
-          SELECT COALESCE(SUM(ri.cantidad * i.precio), 0)
-          FROM recetas_ingredientes ri
-          JOIN ingredientes i ON ri.ingrediente_id = i.id
-          WHERE ri.receta_id = v.receta_id
-        )
-      ), 0) as costos
-      FROM ventas v
-      WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
+    // Costos - calculados desde ingredientes de recetas (usando JSONB)
+    const ventasDetalle = await pool.query(
+      `SELECT v.cantidad, r.ingredientes
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
       [mesActual, anoActual]
     );
 
+    let costos = 0;
+    for (const venta of ventasDetalle.rows) {
+      const ingredientes = venta.ingredientes;
+      for (const ing of ingredientes) {
+        const ingResult = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
+        if (ingResult.rows.length > 0) {
+          costos += parseFloat(ingResult.rows[0].precio) * ing.cantidad * venta.cantidad;
+        }
+      }
+    }
+
     const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;
-    const costos = parseFloat(costosMes.rows[0].costos) || 0;
     const ganancia = ingresos - costos;
     const margen = ingresos > 0 ? ((ganancia / ingresos) * 100).toFixed(1) : 0;
 
@@ -482,9 +458,10 @@ app.get('/api/balance/comparativa', async (req, res) => {
     res.json(meses.rows);
   } catch (error) {
     console.error('Error obteniendo comparativa:', error);
-    res.status(500).json({ error: 'Error obteniendo comparativa' });
+    res.status(500).json({ error: error.message });
   }
 });
+
 // Start
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 API corriendo en puerto ${PORT}`);
