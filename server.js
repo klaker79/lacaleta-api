@@ -329,8 +329,8 @@ app.post('/api/sales', async (req, res) => {
     const total = precioUnitario * cantidad;
 
     // Validar stock suficiente antes de vender
-    const ingredientes = receta.ingredientes;
-    for (const ing of ingredientes) {
+    const ingredientesReceta = receta.ingredientes;
+    for (const ing of ingredientesReceta) {
       const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
       if (stockResult.rows.length > 0) {
         const stockActual = parseFloat(stockResult.rows[0].stock_actual);
