@@ -113,10 +113,13 @@ app.get('/api/ingredients', async (req, res) => {
 
 app.post('/api/ingredients', async (req, res) => {
   try {
-    const { nombre, proveedorId, precio, unidad, stockActual, stockMinimo } = req.body;
+    const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
+const finalStockActual = stockActual ?? stock_actual ?? 0;
+const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
+const finalProveedorId = proveedorId ?? proveedor_id ?? null;
     const result = await pool.query(
       'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [nombre, proveedorId || null, precio || 0, unidad || 'kg', stockActual || 0, stockMinimo || 0]
+      [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -127,10 +130,13 @@ app.post('/api/ingredients', async (req, res) => {
 app.put('/api/ingredients/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, proveedorId, precio, unidad, stockActual, stockMinimo } = req.body;
+   const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
+    const finalStockActual = stockActual ?? stock_actual ?? 0;
+    const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
+    const finalProveedorId = proveedorId ?? proveedor_id ?? null;
     const result = await pool.query(
       'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6 WHERE id=$7 RETURNING *',
-      [nombre, proveedorId || null, precio || 0, unidad, stockActual || 0, stockMinimo || 0, id]
+      [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, id]
     );
     res.json(result.rows[0] || {});
   } catch (err) {
