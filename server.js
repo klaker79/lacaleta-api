@@ -327,7 +327,20 @@ app.post('/api/sales', async (req, res) => {
     const receta = recetaResult.rows[0];
     const precioUnitario = parseFloat(receta.precio_venta);
     const total = precioUnitario * cantidad;
-    
+
+    // Validar stock suficiente antes de vender
+    const ingredientes = receta.ingredientes;
+    for (const ing of ingredientes) {
+      const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
+      if (stockResult.rows.length > 0) {
+        const stockActual = parseFloat(stockResult.rows[0].stock_actual);
+        const stockNecesario = ing.cantidad * cantidad;
+        if (stockActual < stockNecesario) {
+          throw new Error(`Stock insuficiente de ${stockResult.rows[0].nombre}: necesitas ${stockNecesario}, tienes ${stockActual}`);
+        }
+      }
+    }
+
     // Registrar venta
     const ventaResult = await client.query(
       'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total) VALUES ($1, $2, $3, $4) RETURNING *',
