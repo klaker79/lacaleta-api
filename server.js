@@ -1,6 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
 
 const app = express();
 const PORT = 3000;
