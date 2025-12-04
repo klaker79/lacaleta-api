@@ -323,40 +323,40 @@ app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== PROVEEDORES ==========
-app.get('/api/suppliers', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM proveedores ORDER BY id');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.get('/api/suppliers', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM proveedores WHERE restaurante_id=$1 ORDER BY id', [req.restauranteId]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.post('/api/suppliers', async (req, res) => {
-  try {
-    const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
-    const result = await pool.query(
-      'INSERT INTO proveedores (nombre, contacto, telefono, email, direccion, notas, ingredientes) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || []]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.post('/api/suppliers', authMiddleware, async (req, res) => {
+    try {
+        const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
+        const result = await pool.query(
+            'INSERT INTO proveedores (nombre, contacto, telefono, email, direccion, notas, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], req.restauranteId]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.put('/api/suppliers/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
-    const result = await pool.query(
-  'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 RETURNING *',
-  [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id]
-);
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
+        const result = await pool.query(
+            'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
+            [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id, req.restauranteId]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.delete('/api/suppliers/:id', async (req, res) => {
