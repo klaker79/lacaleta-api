@@ -415,26 +415,26 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== VENTAS ==========
-app.get('/api/sales', async (req, res) => {
-  try {
-    const { fecha } = req.query;
-    let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id';
-    let params = [];
-    
-    if (fecha) {
-      query += ' WHERE DATE(v.fecha) = $1';
-      params.push(fecha);
+app.get('/api/sales', authMiddleware, async (req, res) => {
+    try {
+        const { fecha } = req.query;
+        let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1';
+        let params = [req.restauranteId];
+
+        if (fecha) {
+            query += ' AND DATE(v.fecha) = $2';
+            params.push(fecha);
+        }
+
+        query += ' ORDER BY v.fecha DESC';
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-    
-    query += ' ORDER BY v.fecha DESC';
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
-app.post('/api/sales', async (req, res) => {
+app.post('/api/sales', authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
     const { recetaId, cantidad } = req.body;
@@ -466,9 +466,9 @@ app.post('/api/sales', async (req, res) => {
 
     // Registrar venta
     const ventaResult = await client.query(
-      'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total) VALUES ($1, $2, $3, $4) RETURNING *',
-      [recetaId, cantidad, precioUnitario, total]
-    );
+            'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, restaurante_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [recetaId, cantidad, precioUnitario, total, req.restauranteId]
+        );
     
     // Descontar ingredientes del stock
     const ingredientes = receta.ingredientes;
@@ -489,17 +489,17 @@ app.post('/api/sales', async (req, res) => {
   }
 });
 
-app.delete('/api/sales/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM ventas WHERE id=$1', [req.params.id]);
-    res.json({ message: 'Eliminado' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM ventas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        res.json({ message: 'Eliminado' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== BALANCE Y ESTADÍSTICAS ==========
-app.get('/api/balance/mes', async (req, res) => {
+app.get('/api/balance/mes', authMiddleware, async (req, res) => {
   try {
     const { mes, ano } = req.query;
     const mesActual = mes || new Date().getMonth() + 1;
@@ -507,20 +507,20 @@ app.get('/api/balance/mes', async (req, res) => {
 
     // Ingresos del mes
     const ventasMes = await pool.query(
-      `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
-       FROM ventas
-       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2`,
-      [mesActual, anoActual]
-    );
+            `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
+            FROM ventas
+            WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2 AND restaurante_id = $3`,
+            [mesActual, anoActual, req.restauranteId]
+        );
 
     // Costos - calculados desde ingredientes de recetas (usando JSONB)
     const ventasDetalle = await pool.query(
-      `SELECT v.cantidad, r.ingredientes
-       FROM ventas v
-       JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2`,
-      [mesActual, anoActual]
-    );
+            `SELECT v.cantidad, r.ingredientes
+            FROM ventas v
+            JOIN recetas r ON v.receta_id = r.id
+            WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3`,
+            [mesActual, anoActual, req.restauranteId]
+        );
 
     let costos = 0;
     for (const venta of ventasDetalle.rows) {
@@ -539,32 +539,33 @@ app.get('/api/balance/mes', async (req, res) => {
 
     // Plato más vendido
     const platoMasVendido = await pool.query(
-      `SELECT r.nombre, SUM(v.cantidad) as total_vendido
-       FROM ventas v
-       JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
-       GROUP BY r.nombre
-       ORDER BY total_vendido DESC
-       LIMIT 1`,
-      [mesActual, anoActual]
-    );
+            `SELECT r.nombre, SUM(v.cantidad) as total_vendido
+            FROM ventas v
+            JOIN recetas r ON v.receta_id = r.id
+            WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3
+            GROUP BY r.nombre
+            ORDER BY total_vendido DESC
+            LIMIT 1`,
+            [mesActual, anoActual, req.restauranteId]
+        );
 
     // Ventas por plato
     const ventasPorPlato = await pool.query(
-      `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
-       FROM ventas v
-       JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
-       GROUP BY r.nombre
-       ORDER BY total_ingresos DESC`,
-      [mesActual, anoActual]
-    );
+            `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
+            FROM ventas v
+            JOIN recetas r ON v.receta_id = r.id
+            WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3
+            GROUP BY r.nombre
+            ORDER BY total_ingresos DESC`,
+            [mesActual, anoActual, req.restauranteId]
+        );
 
     // Valor del inventario
     const valorInventario = await pool.query(
-      `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
-       FROM ingredientes`
-    );
+            `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
+            FROM ingredientes WHERE restaurante_id = $1`,
+            [req.restauranteId]
+        );
 
     res.json({
       ingresos,
