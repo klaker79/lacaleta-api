@@ -116,6 +116,104 @@ const pool = new Pool({
     console.error('❌ Error DB:', err.message);
   }
 })();
+// ========== AUTENTICACIÓN ==========
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email y contraseña requeridos' });
+    }
+    
+    const result = await pool.query(
+      'SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id WHERE u.email = $1',
+      [email]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+    
+    const user = result.rows[0];
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+    
+    const token = jwt.sign(
+      { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        nombre: user.nombre,
+        rol: user.rol,
+        restaurante: user.restaurante_nombre
+      }
+    });
+  } catch (err) {
+    console.error('Error login:', err);
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Registro de nuevo restaurante
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { restauranteNombre, email, password, nombreUsuario } = req.body;
+    
+    if (!restauranteNombre || !email || !password) {
+      return res.status(400).json({ error: 'Todos los campos son requeridos' });
+    }
+    
+    // Verificar si email ya existe
+    const existingUser = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: 'El email ya está registrado' });
+    }
+    
+    // Crear restaurante
+    const restauranteResult = await pool.query(
+      'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
+      [restauranteNombre, email]
+    );
+    const restauranteId = restauranteResult.rows[0].id;
+    
+    // Crear usuario admin
+    const passwordHash = await bcrypt.hash(password, 10);
+    const userResult = await pool.query(
+      'INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [restauranteId, email, passwordHash, nombreUsuario || 'Admin', 'admin']
+    );
+    
+    const token = jwt.sign(
+      { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    res.status(201).json({
+      token,
+      user: {
+        id: userResult.rows[0].id,
+        email,
+        nombre: nombreUsuario || 'Admin',
+        rol: 'admin',
+        restaurante: restauranteNombre
+      }
+    });
+  } catch (err) {
+    console.error('Error registro:', err);
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
 
 // Root
 app.get('/', (req, res) => {
