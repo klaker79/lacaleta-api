@@ -359,36 +359,36 @@ app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
     }
 });
 
-app.delete('/api/suppliers/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM proveedores WHERE id=$1', [req.params.id]);
-    res.json({ message: 'Eliminado' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM proveedores WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        res.json({ message: 'Eliminado' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== PEDIDOS ==========
-app.get('/api/orders', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM pedidos ORDER BY fecha DESC');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.get('/api/orders', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 ORDER BY fecha DESC', [req.restauranteId]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.post('/api/orders', async (req, res) => {
-  try {
-    const { proveedorId, fecha, ingredientes, total, estado } = req.body;
-    const result = await pool.query(
-      'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente']
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.post('/api/orders', authMiddleware, async (req, res) => {
+    try {
+        const { proveedorId, fecha, ingredientes, total, estado } = req.body;
+        const result = await pool.query(
+            'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente', req.restauranteId]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.put('/api/orders/:id', async (req, res) => {
