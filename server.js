@@ -234,37 +234,37 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
     }
 });
 
-app.post('/api/ingredients', async (req, res) => {
-  try {
-    const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
-const finalStockActual = stockActual ?? stock_actual ?? 0;
-const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
-const finalProveedorId = proveedorId ?? proveedor_id ?? null;
-    const result = await pool.query(
-      'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, id]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.post('/api/ingredients', authMiddleware, async (req, res) => {
+    try {
+        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
+        const finalStockActual = stockActual ?? stock_actual ?? 0;
+        const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
+        const finalProveedorId = proveedorId ?? proveedor_id ?? null;
+        const result = await pool.query(
+            'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, req.restauranteId]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.put('/api/ingredients/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-   const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
-    const finalStockActual = stockActual ?? stock_actual ?? 0;
-    const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
-    const finalProveedorId = proveedorId ?? proveedor_id ?? null;
-    const result = await pool.query(
-      'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6 WHERE id=$7 RETURNING *',
-      [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, id]
-    );
-    res.json(result.rows[0] || {});
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stockMinimo, stock_minimo } = req.body;
+        const finalStockActual = stockActual ?? stock_actual ?? 0;
+        const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
+        const finalProveedorId = proveedorId ?? proveedor_id ?? null;
+        const result = await pool.query(
+            'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6 WHERE id=$7 AND restaurante_id=$8 RETURNING *',
+            [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, id, req.restauranteId]
+        );
+        res.json(result.rows[0] || {});
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.delete('/api/ingredients/:id', async (req, res) => {
