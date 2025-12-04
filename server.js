@@ -253,7 +253,7 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stockMinimo, stock_minimo } = req.body;
+        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
         const finalStockActual = stockActual ?? stock_actual ?? 0;
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
