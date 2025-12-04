@@ -267,23 +267,23 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     }
 });
 
-app.delete('/api/ingredients/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM ingredientes WHERE id=$1', [req.params.id]);
-    res.json({ message: 'Eliminado' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        res.json({ message: 'Eliminado' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== RECETAS ==========
-app.get('/api/recipes', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM recetas ORDER BY id');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.get('/api/recipes', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 ORDER BY id', [req.restauranteId]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.post('/api/recipes', async (req, res) => {
