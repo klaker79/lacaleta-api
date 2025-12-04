@@ -225,13 +225,13 @@ app.get('/', (req, res) => {
 });
 
 // ========== INGREDIENTES ==========
-app.get('/api/ingredients', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM ingredientes ORDER BY id');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.get('/api/ingredients', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM ingredientes WHERE restaurante_id = $1 ORDER BY id', [req.restauranteId]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.post('/api/ingredients', async (req, res) => {
