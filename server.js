@@ -391,27 +391,27 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     }
 });
 
-app.put('/api/orders/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
-    const result = await pool.query(
-      'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 RETURNING *',
-      [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id]
-    );
-    res.json(result.rows[0] || {});
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.put('/api/orders/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
+        const result = await pool.query(
+            'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
+            [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id, req.restauranteId]
+        );
+        res.json(result.rows[0] || {});
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.delete('/api/orders/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM pedidos WHERE id=$1', [req.params.id]);
-    res.json({ message: 'Eliminado' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM pedidos WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        res.json({ message: 'Eliminado' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== VENTAS ==========
