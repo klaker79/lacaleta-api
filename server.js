@@ -286,40 +286,40 @@ app.get('/api/recipes', authMiddleware, async (req, res) => {
     }
 });
 
-app.post('/api/recipes', async (req, res) => {
-  try {
-    const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
-    const result = await pool.query(
-      'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || [])]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.post('/api/recipes', authMiddleware, async (req, res) => {
+    try {
+        const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
+        const result = await pool.query(
+            'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), req.restauranteId]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.put('/api/recipes/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
-    const result = await pool.query(
-      'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5 WHERE id=$6 RETURNING *',
-      [nombre, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), id]
-    );
-    res.json(result.rows[0] || {});
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
+        const result = await pool.query(
+            'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5 WHERE id=$6 AND restaurante_id=$7 RETURNING *',
+            [nombre, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), id, req.restauranteId]
+        );
+        res.json(result.rows[0] || {});
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.delete('/api/recipes/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM recetas WHERE id=$1', [req.params.id]);
-    res.json({ message: 'Eliminado' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM recetas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        res.json({ message: 'Eliminado' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== PROVEEDORES ==========
