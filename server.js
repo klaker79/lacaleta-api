@@ -15,6 +15,27 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(express.json());
+
+// Middleware de autenticación
+const authMiddleware = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token no proporcionado' });
+  }
+  
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    req.restauranteId = decoded.restauranteId;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+};
+
+// PostgreSQL
 
 // PostgreSQL
 const pool = new Pool({
