@@ -62,9 +62,6 @@ const pool = new Pool({
         unidad VARCHAR(50) DEFAULT 'kg',
         stock_actual DECIMAL(10, 2) DEFAULT 0,
         stock_minimo DECIMAL(10, 2) DEFAULT 0,
-        stock_real DECIMAL(10, 2),
-        ultima_actualizacion_stock TIMESTAMP,
-        restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       
