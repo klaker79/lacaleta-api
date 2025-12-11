@@ -276,6 +276,92 @@ app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== INVENTARIO AVANZADO ==========
+
+// GET: Obtener inventario completo con precio medio y stock real
+app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        i.id,
+        i.nombre,
+        i.unidad,
+        i.stock_actual as stock_virtual,
+        i.stock_real,
+        i.stock_minimo,
+        i.proveedor_id,
+        i.ultima_actualizacion_stock,
+        (i.stock_actual - COALESCE(i.stock_real, 0)) as diferencia,
+        COALESCE(
+          (SELECT 
+            SUM(
+              (ingrediente->>'cantidad')::numeric * 
+              (ingrediente->>'precioUnitario')::numeric
+            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
+           FROM pedidos p, 
+           jsonb_array_elements(p.ingredientes) as ingrediente
+           WHERE (ingrediente->>'ingredienteId')::integer = i.id 
+           AND p.estado = 'recibido'
+           AND p.restaurante_id = $1
+          ), i.precio
+        ) as precio_medio,
+        (i.stock_actual * COALESCE(
+          (SELECT 
+            SUM(
+              (ingrediente->>'cantidad')::numeric * 
+              (ingrediente->>'precioUnitario')::numeric
+            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
+           FROM pedidos p, 
+           jsonb_array_elements(p.ingredientes) as ingrediente
+           WHERE (ingrediente->>'ingredienteId')::integer = i.id 
+           AND p.estado = 'recibido'
+           AND p.restaurante_id = $1
+          ), i.precio
+        )) as valor_stock
+      FROM ingredientes i
+      WHERE i.restaurante_id = $1
+      ORDER BY i.id
+    `, [req.restauranteId]);
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error inventario completo:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT: Actualizar stock real de un ingrediente
+app.put('/api/inventory/:id/stock-real', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stock_real } = req.body;
+    
+    const result = await pool.query(
+      `UPDATE ingredientes 
+       SET stock_real = $1, 
+           ultima_actualizacion_stock = CURRENT_TIMESTAMP 
+       WHERE id = $2 AND restaurante_id = $3 
+       RETURNING *`,
+      [stock_real, id, req.restauranteId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Ingrediente no encontrado' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error actualizando stock real:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+```
+
+---
+
+**Añade eso en GitHub, haz commit:**
+```
+feat: añadir endpoints inventario avanzado
 // ========== RECETAS ==========
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
