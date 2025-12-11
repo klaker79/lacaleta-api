@@ -16,6 +16,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.json());
+app.options('*', cors());
 
 // Middleware de autenticación
 const authMiddleware = (req, res, next) => {
