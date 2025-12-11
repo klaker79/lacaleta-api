@@ -11,7 +11,7 @@ const PORT = 3000;
 
 // Middleware
 app.use(cors({
-  origin: ['https://klaker79.github.io', 'http://localhost:5500'],
+  origin: '*',
   credentials: true
 }));
 app.use(express.json());
