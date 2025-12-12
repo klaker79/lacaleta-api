@@ -63,21 +63,37 @@ app.use(helmet({
 }));
 
 // CORS: Solo orígenes permitidos
-app.use(cors({
-    origin: (origin, callback) => {
-        // Permitir requests sin origin (Postman, curl, etc.) solo en desarrollo
-        if (!origin && config.NODE_ENV !== 'production') {
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Log para debug
+        console.log('🌐 CORS Request from origin:', origin);
+        console.log('✅ Allowed origins:', config.ALLOWED_ORIGINS);
+
+        // Permitir requests sin origin (curl, Postman, server-to-server)
+        if (!origin) {
             return callback(null, true);
         }
+
+        // Verificar si el origin está permitido
         if (config.ALLOWED_ORIGINS.includes(origin)) {
             return callback(null, true);
         }
-        callback(new Error('No permitido por CORS'));
+
+        // No permitido - pero no lanzar error, solo rechazar
+        console.log('❌ CORS blocked for origin:', origin);
+        callback(null, false);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    optionsSuccessStatus: 200 // Para navegadores legacy
+};
+
+// Aplicar CORS
+app.use(cors(corsOptions));
+
+// Manejar preflight OPTIONS explícitamente para todas las rutas
+app.options('*', cors(corsOptions));
 
 // Parser JSON con límite de tamaño
 app.use(express.json({ limit: '10mb' }));
