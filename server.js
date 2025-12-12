@@ -297,9 +297,9 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
         COALESCE(
           (SELECT 
             SUM(
-              (ingrediente->>'cantidad')::numeric * 
-              (ingrediente->>'precioUnitario')::numeric
-            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
+  (ingrediente->>'cantidad')::numeric *
+  COALESCE((ingrediente->>'precioReal')::numeric, (ingrediente->>'precioUnitario')::numeric)
+) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
            FROM pedidos p, 
            jsonb_array_elements(p.ingredientes) as ingrediente
            WHERE (ingrediente->>'ingredienteId')::integer = i.id 
@@ -310,9 +310,9 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
         (i.stock_actual * COALESCE(
           (SELECT 
             SUM(
-              (ingrediente->>'cantidad')::numeric * 
-              (ingrediente->>'precioUnitario')::numeric
-            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
+  (ingrediente->>'cantidad')::numeric *
+  COALESCE((ingrediente->>'precioReal')::numeric, (ingrediente->>'precioUnitario')::numeric)
+) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
            FROM pedidos p, 
            jsonb_array_elements(p.ingredientes) as ingrediente
            WHERE (ingrediente->>'ingredienteId')::integer = i.id 
