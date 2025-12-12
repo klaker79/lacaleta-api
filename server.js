@@ -679,6 +679,78 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
     }
 });
 
+app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { ventas } = req.body; // Array de { receta: "nombre", cantidad: N, total: M, fecha: "ISO" }
+
+        if (!Array.isArray(ventas)) {
+            return res.status(400).json({ error: 'Formato inválido: se esperaba un array "ventas"' });
+        }
+
+        await client.query('BEGIN');
+
+        const resultados = {
+            procesados: 0,
+            fallidos: 0,
+            errores: []
+        };
+
+        // 1. Obtener todas las recetas del restaurante para búsqueda rápida
+        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
+        const recetasMap = new Map();
+        recetasResult.rows.forEach(r => {
+            recetasMap.set(r.nombre.toLowerCase().trim(), r);
+        });
+
+        for (const venta of ventas) {
+            const nombreReceta = (venta.receta || '').toLowerCase().trim();
+            const cantidad = parseInt(venta.cantidad) || 1;
+
+            // Buscar receta (match exacto insensible a mayúsculas)
+            const receta = recetasMap.get(nombreReceta);
+
+            if (!receta) {
+                resultados.fallidos++;
+                resultados.errores.push({ receta: venta.receta, error: 'Receta no encontrada' });
+                continue;
+            }
+
+            const total = parseFloat(venta.total) || (parseFloat(receta.precio_venta) * cantidad);
+            const fecha = venta.fecha || new Date().toISOString();
+
+            // 2. Registrar venta
+            await client.query(
+                'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6)',
+                [receta.id, cantidad, receta.precio_venta, total, fecha, req.restauranteId]
+            );
+
+            // 3. Descontar stock (Permitir negativo)
+            const ingredientesReceta = receta.ingredientes; // JSONB array
+            if (Array.isArray(ingredientesReceta)) {
+                for (const ing of ingredientesReceta) {
+                    await client.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                        [ing.cantidad * cantidad, ing.ingredienteId, req.restauranteId]
+                    );
+                }
+            }
+
+            resultados.procesados++;
+        }
+
+        await client.query('COMMIT');
+        res.json(resultados);
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error carga masiva ventas', { error: err.message });
+        res.status(500).json({ error: 'Error interno procesando carga masiva' });
+    } finally {
+        client.release();
+    }
+});
+
 // ========== BALANCE Y ESTADÍSTICAS ==========
 app.get('/api/balance/mes', authMiddleware, async (req, res) => {
     try {
