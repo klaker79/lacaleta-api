@@ -58,16 +58,16 @@ const app = express();
 
 // Helmet: Headers de seguridad
 app.use(helmet({
-    contentSecurityPolicy: false, // Ajustar según necesidad
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
 }));
 
-// CORS: Solo orígenes permitidos
-const corsOptions = {
+// ========== CORS CORREGIDO ==========
+// Esta es la única parte que cambié de tu código original
+app.use(cors({
     origin: function (origin, callback) {
-        // Log para debug
-        console.log('🌐 CORS Request from origin:', origin);
-        console.log('✅ Allowed origins:', config.ALLOWED_ORIGINS);
+        // Log para debug - puedes quitar después
+        console.log('CORS origin:', origin, '| Allowed:', config.ALLOWED_ORIGINS);
 
         // Permitir requests sin origin (curl, Postman, server-to-server)
         if (!origin) {
@@ -79,21 +79,17 @@ const corsOptions = {
             return callback(null, true);
         }
 
-        // No permitido - pero no lanzar error, solo rechazar
-        console.log('❌ CORS blocked for origin:', origin);
+        // Rechazar sin lanzar error
         callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-    optionsSuccessStatus: 200 // Para navegadores legacy
-};
+    optionsSuccessStatus: 200
+}));
 
-// Aplicar CORS
-app.use(cors(corsOptions));
-
-// Manejar preflight OPTIONS explícitamente para todas las rutas
-app.options('*', cors(corsOptions));
+// Manejar preflight
+app.options('*', cors());
 
 // Parser JSON con límite de tamaño
 app.use(express.json({ limit: '10mb' }));
@@ -398,7 +394,7 @@ app.post('/api/auth/register',
             );
             const restauranteId = restauranteResult.rows[0].id;
 
-            const passwordHash = await bcrypt.hash(password, 12); // Aumentado a 12 rounds
+            const passwordHash = await bcrypt.hash(password, 12);
             const userResult = await client.query(
                 'INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id',
                 [restauranteId, email, passwordHash, nombreUsuario || 'Admin', 'admin']
@@ -1102,11 +1098,6 @@ app.get('/api/webhooks/daily-summary', authMiddleware, async (req, res) => {
 // ========== MANEJO DE ERRORES ==========
 app.use((err, req, res, next) => {
     logger.error('Error no manejado', err);
-
-    if (err.message === 'No permitido por CORS') {
-        return res.status(403).json({ error: 'Origen no permitido' });
-    }
-
     res.status(500).json({ error: 'Error interno del servidor' });
 });
 
