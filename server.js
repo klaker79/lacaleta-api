@@ -455,6 +455,42 @@ app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => 
     }
 });
 
+// Endpoint para consolidar stock (Igualar Ficticio a Real)
+app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { adjustments } = req.body; // Array de { id, stock_real }
+
+        await client.query('BEGIN');
+
+        const updated = [];
+        for (const item of adjustments) {
+            // Actualizamos TANTO stock_real COMO stock_actual (el ficticio)
+            const result = await client.query(
+                `UPDATE ingredientes
+         SET stock_real = $1,
+             stock_actual = $1,
+             ultima_actualizacion_stock = CURRENT_TIMESTAMP
+         WHERE id = $2 AND restaurante_id = $3
+         RETURNING *`,
+                [item.stock_real, item.id, req.restauranteId]
+            );
+            if (result.rows.length > 0) {
+                updated.push(result.rows[0]);
+            }
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true, updated: updated.length, items: updated });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error consolidando stock:', err);
+        res.status(500).json({ error: 'Error interno al consolidar' });
+    } finally {
+        client.release();
+    }
+});
+
 // ========== RECETAS ==========
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
