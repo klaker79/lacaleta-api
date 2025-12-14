@@ -149,20 +149,20 @@ const pool = new Pool({
         restaurante_id INTEGER NOT NULL
       );
 
-      -- Tabla de Ajustes (Detalle del movimiento)
-      CREATE TABLE IF NOT EXISTS inventory_adjustments (
+      -- Tabla de Ajustes (Detalle del movimiento) - V2 (Fresh Schema)
+      CREATE TABLE IF NOT EXISTS inventory_adjustments_v2 (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
         cantidad DECIMAL(10, 2) NOT NULL,
         motivo VARCHAR(100) NOT NULL,
         notas TEXT,
         fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        usuario_id INTEGER, -- Opcional, si hay login
+        usuario_id INTEGER, 
         restaurante_id INTEGER NOT NULL
       );
 
-      -- Tabla de Snapshots (Auditoría del estado antes/después)
-      CREATE TABLE IF NOT EXISTS inventory_snapshots (
+      -- Tabla de Snapshots (Auditoría del estado antes/después) - V2 (Fresh Schema)
+      CREATE TABLE IF NOT EXISTS inventory_snapshots_v2 (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
         fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -493,46 +493,69 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
 
         await client.query('BEGIN');
 
-        // 1. Guardar Snapshots (Auditoría)
+        // 1. Guardar Snapshots (Auditoría V2)
         if (snapshots && Array.isArray(snapshots)) {
             for (const snap of snapshots) {
-                const diff = parseFloat(snap.stock_real) - parseFloat(snap.stock_virtual);
+                // Validación Estricta de Tipos
+                const ingId = parseInt(snap.id, 10);
+                const real = parseFloat(snap.stock_real);
+                const virtual = parseFloat(snap.stock_virtual);
+
+                // Si alguno es NaN, saltamos (o lanzamos error, pero mejor prevenir crash)
+                if (isNaN(ingId)) continue;
+
+                // Asegurar valores numéricos seguros (default 0 ya debería venir validado, pero insistimos)
+                const safeReal = isNaN(real) ? 0 : real;
+                const safeVirtual = isNaN(virtual) ? 0 : virtual;
+                const diff = safeReal - safeVirtual;
+
                 await client.query(
-                    `INSERT INTO inventory_snapshots 
+                    `INSERT INTO inventory_snapshots_v2 
                      (ingrediente_id, stock_virtual, stock_real, diferencia, restaurante_id) 
                      VALUES ($1, $2, $3, $4, $5)`,
-                    [snap.id, snap.stock_virtual, snap.stock_real, diff, req.restauranteId]
+                    [ingId, safeVirtual.toFixed(2), safeReal.toFixed(2), diff.toFixed(2), req.restauranteId]
                 );
             }
         }
 
-        // 2. Guardar Ajustes Desglosados
+        // 2. Guardar Ajustes Desglosados (V2)
         if (adjustments && Array.isArray(adjustments)) {
             for (const adj of adjustments) {
+                const ingId = parseInt(adj.ingrediente_id, 10);
+                const cantidad = parseFloat(adj.cantidad);
+                const motivo = adj.motivo ? String(adj.motivo).substring(0, 100) : 'Ajuste';
+                const notas = adj.notas ? String(adj.notas) : '';
+
+                if (isNaN(ingId)) continue;
+                const safeCant = isNaN(cantidad) ? 0 : cantidad;
+
                 await client.query(
-                    `INSERT INTO inventory_adjustments 
+                    `INSERT INTO inventory_adjustments_v2 
                      (ingrediente_id, cantidad, motivo, notas, restaurante_id) 
                      VALUES ($1, $2, $3, $4, $5)`,
-                    [adj.ingrediente_id, adj.cantidad, adj.motivo, adj.notas || '', req.restauranteId]
+                    [ingId, safeCant.toFixed(2), motivo, notas, req.restauranteId]
                 );
             }
         }
 
         // 3. Actualizar Stock Maestro
-        // En lógica ERP pura, stock_actual = stock_virtual + sum(adjustments).
-        // Pero para evitar errores de redondeo acumulados, confiamos en el conteo físico final (stock_real).
-        // Se asume que el frontend ha validado que virtual + ajustes == real.
         const updated = [];
         if (finalStock && Array.isArray(finalStock)) {
             for (const item of finalStock) {
+                const ingId = parseInt(item.id, 10);
+                const real = parseFloat(item.stock_real);
+
+                if (isNaN(ingId)) continue;
+                const safeReal = isNaN(real) ? 0 : real;
+
                 const result = await client.query(
                     `UPDATE ingredientes
                      SET stock_real = $1,
-                         stock_actual = $1, -- Sincronizamos sistema
+                         stock_actual = $1, 
                          ultima_actualizacion_stock = CURRENT_TIMESTAMP
                      WHERE id = $2 AND restaurante_id = $3
                      RETURNING *`,
-                    [item.stock_real, item.id, req.restauranteId]
+                    [safeReal.toFixed(2), ingId, req.restauranteId]
                 );
                 if (result.rows.length > 0) {
                     updated.push(result.rows[0]);
@@ -544,8 +567,8 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
         res.json({ success: true, updated: updated.length, items: updated });
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error('Error consolidando stock:', err);
-        res.status(500).json({ error: 'Error interno al consolidar' });
+        console.error('CRITICAL ERROR in /api/inventory/consolidate:', err); // Log detallado
+        res.status(500).json({ error: 'Error interno en la consolidación de datos: ' + err.message });
     } finally {
         client.release();
     }
