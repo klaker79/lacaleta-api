@@ -491,6 +491,33 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
         // finalStock: Array simple para actualizar el maestro [{ id, stock_real }]
         const { adjustments, snapshots, finalStock } = req.body;
 
+        if (!req.restauranteId) {
+            return res.status(401).json({ error: 'No autorizado: Restaurante ID nulo' });
+        }
+
+        // Just-in-Time Schema Creation (Asegurar que las tablas existen)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_adjustments_v2 (
+                id SERIAL PRIMARY KEY,
+                ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+                cantidad DECIMAL(10, 2) NOT NULL,
+                motivo VARCHAR(100) NOT NULL,
+                notas TEXT,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                usuario_id INTEGER, 
+                restaurante_id INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS inventory_snapshots_v2 (
+                id SERIAL PRIMARY KEY,
+                ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                stock_virtual DECIMAL(10, 2) NOT NULL,
+                stock_real DECIMAL(10, 2) NOT NULL,
+                diferencia DECIMAL(10, 2) NOT NULL,
+                restaurante_id INTEGER NOT NULL
+            );
+        `);
+
         await client.query('BEGIN');
 
         // 1. Guardar Snapshots (Auditoría V2)
