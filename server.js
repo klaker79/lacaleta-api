@@ -577,8 +577,8 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
 
                 const result = await client.query(
                     `UPDATE ingredientes
-                     SET stock_real = $1,
-                         stock_actual = $1, 
+                     SET stock_actual = $1, -- Actualizamos la referencia oficial
+                         stock_real = NULL, -- Limpiamos el conteo físico para la próxima vez
                          ultima_actualizacion_stock = CURRENT_TIMESTAMP
                      WHERE id = $2 AND restaurante_id = $3
                      RETURNING *`,
