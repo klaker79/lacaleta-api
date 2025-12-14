@@ -3,6 +3,8 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
 
 // ========== CONFIGURACIÓN ==========
 const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
@@ -40,14 +42,21 @@ app.options('*', cors());
 // Parser JSON (solo una vez)
 app.use(express.json());
 
-// Logging simple
+// Logging Persistente
+const LOG_FILE = path.join(__dirname, 'server.log');
 const log = (level, message, data = {}) => {
-    console.log(JSON.stringify({
+    const logEntry = JSON.stringify({
         timestamp: new Date().toISOString(),
         level,
         message,
         ...data
-    }));
+    });
+    console.log(logEntry);
+
+    // Append to file
+    fs.appendFile(LOG_FILE, logEntry + '\n', (err) => {
+        if (err) console.error('Error writing to log file:', err);
+    });
 };
 
 // ========== BASE DE DATOS ==========
@@ -201,6 +210,14 @@ const authMiddleware = (req, res, next) => {
     }
 };
 
+const requireAdmin = (req, res, next) => {
+    if (!req.user || req.user.rol !== 'admin') {
+        log('warn', 'Acceso denegado a ruta protegida', { user: req.user ? req.user.email : 'anon', url: req.originalUrl });
+        return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
+    }
+    next();
+};
+
 // ========== ENDPOINTS PÚBLICOS ==========
 app.get('/', (req, res) => {
     res.json({
@@ -318,7 +335,86 @@ app.post('/api/auth/register', async (req, res) => {
         });
     } catch (err) {
         log('error', 'Error registro', { error: err.message });
-        res.status(500).json({ error: 'Error en el servidor' });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// ========== GESTIÓN DE EQUIPO (MULTI-CUENTA) ==========
+
+// 1. Listar el equipo
+app.get('/api/team', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT id, nombre, email, rol, created_at FROM usuarios WHERE restaurante_id = $1 ORDER BY created_at DESC',
+            [req.restauranteId]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error listando equipo', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// 2. Invitar / Crear Usuario (Solo Admin)
+app.post('/api/team/invite', authMiddleware, requireAdmin, async (req, res) => {
+    try {
+        const { nombre, email, password, rol } = req.body;
+
+        if (!nombre || !email || !password) {
+            return res.status(400).json({ error: 'Faltan datos requeridos (nombre, email, password)' });
+        }
+
+        // Verificar si existe el email globalmente (clave única)
+        const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
+        if (check.rows.length > 0) {
+            return res.status(400).json({ error: 'Este email ya está registrado' });
+        }
+
+        const passwordHash = await bcrypt.hash(password, 10);
+
+        // Rol por defecto 'usuario' si no se especifica
+        const nuevoRol = rol || 'usuario';
+
+        const result = await pool.query(
+            'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id, nombre, email, rol',
+            [req.restauranteId, nombre, email, passwordHash, nuevoRol]
+        );
+
+        log('info', 'Nuevo usuario de equipo creado', { admin: req.user.email, newUser: email });
+        res.json(result.rows[0]);
+
+    } catch (err) {
+        log('error', 'Error creando usuario equipo', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// 3. Eliminar Usuario (Solo Admin)
+app.delete('/api/team/:id', authMiddleware, requireAdmin, async (req, res) => {
+    try {
+        const userIdToDelete = parseInt(req.params.id);
+
+        // Evitar auto-borrado
+        if (userIdToDelete === req.user.userId) {
+            return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
+        }
+
+        // Asegurar que el usuario a borrar pertenece al MISMO restaurante
+        const result = await pool.query(
+            'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
+            [userIdToDelete, req.restauranteId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
+        }
+
+        log('info', 'Usuario eliminado del equipo', { admin: req.user.email, deletedId: userIdToDelete });
+        res.json({ success: true, message: 'Usuario eliminado' });
+
+    } catch (err) {
+        log('error', 'Error eliminando usuario', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
     }
 });
 
@@ -387,7 +483,11 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
         i.stock_minimo,
         i.proveedor_id,
         i.ultima_actualizacion_stock,
-        (i.stock_actual - COALESCE(i.stock_real, 0)) as diferencia,
+        i.ultima_actualizacion_stock,
+        CASE 
+            WHEN i.stock_real IS NULL THEN NULL 
+            ELSE (i.stock_real - i.stock_actual) 
+        END as diferencia,
         COALESCE(
           (SELECT 
             SUM(
