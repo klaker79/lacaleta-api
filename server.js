@@ -145,13 +145,30 @@ const pool = new Pool({
         restaurante_id INTEGER NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS mermas (
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        restaurante_id INTEGER NOT NULL
+      );
+
+      -- Tabla de Ajustes (Detalle del movimiento)
+      CREATE TABLE IF NOT EXISTS inventory_adjustments (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
         cantidad DECIMAL(10, 2) NOT NULL,
         motivo VARCHAR(100) NOT NULL,
         notas TEXT,
         fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        usuario_id INTEGER, -- Opcional, si hay login
+        restaurante_id INTEGER NOT NULL
+      );
+
+      -- Tabla de Snapshots (Auditoría del estado antes/después)
+      CREATE TABLE IF NOT EXISTS inventory_snapshots (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        stock_virtual DECIMAL(10, 2) NOT NULL,
+        stock_real DECIMAL(10, 2) NOT NULL,
+        diferencia DECIMAL(10, 2) NOT NULL,
         restaurante_id INTEGER NOT NULL
       );
 
@@ -465,38 +482,61 @@ app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => 
     }
 });
 
-// Endpoint para consolidar stock (Igualar Ficticio a Real)
+// Endpoint para consolidar stock con lógica de Ajustes (ERP)
 app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { adjustments, mermas } = req.body; // Array de { id, stock_real } y Array de mermas
+        // adjustments: Array de splits específicos [{ ingrediente_id, cantidad, motivo, notas }]
+        // snapshots: Array histórico [{ id (ing_id), stock_virtual, stock_real }]
+        // finalStock: Array simple para actualizar el maestro [{ id, stock_real }]
+        const { adjustments, snapshots, finalStock } = req.body;
 
         await client.query('BEGIN');
 
-        const updated = [];
-        for (const item of adjustments) {
-            // Actualizamos TANTO stock_real COMO stock_actual (el ficticio)
-            const result = await client.query(
-                `UPDATE ingredientes
-         SET stock_real = $1,
-             stock_actual = $1,
-             ultima_actualizacion_stock = CURRENT_TIMESTAMP
-         WHERE id = $2 AND restaurante_id = $3
-         RETURNING *`,
-                [item.stock_real, item.id, req.restauranteId]
-            );
-            if (result.rows.length > 0) {
-                updated.push(result.rows[0]);
+        // 1. Guardar Snapshots (Auditoría)
+        if (snapshots && Array.isArray(snapshots)) {
+            for (const snap of snapshots) {
+                const diff = parseFloat(snap.stock_real) - parseFloat(snap.stock_virtual);
+                await client.query(
+                    `INSERT INTO inventory_snapshots 
+                     (ingrediente_id, stock_virtual, stock_real, diferencia, restaurante_id) 
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [snap.id, snap.stock_virtual, snap.stock_real, diff, req.restauranteId]
+                );
             }
         }
 
-        // Registrar mermas si existen
-        if (mermas && Array.isArray(mermas)) {
-            for (const merma of mermas) {
+        // 2. Guardar Ajustes Desglosados
+        if (adjustments && Array.isArray(adjustments)) {
+            for (const adj of adjustments) {
                 await client.query(
-                    'INSERT INTO mermas (ingrediente_id, cantidad, motivo, notas, restaurante_id) VALUES ($1, $2, $3, $4, $5)',
-                    [merma.id, merma.diferencia, merma.motivo || 'Otros', merma.notas || '', req.restauranteId]
+                    `INSERT INTO inventory_adjustments 
+                     (ingrediente_id, cantidad, motivo, notas, restaurante_id) 
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [adj.ingrediente_id, adj.cantidad, adj.motivo, adj.notas || '', req.restauranteId]
                 );
+            }
+        }
+
+        // 3. Actualizar Stock Maestro
+        // En lógica ERP pura, stock_actual = stock_virtual + sum(adjustments).
+        // Pero para evitar errores de redondeo acumulados, confiamos en el conteo físico final (stock_real).
+        // Se asume que el frontend ha validado que virtual + ajustes == real.
+        const updated = [];
+        if (finalStock && Array.isArray(finalStock)) {
+            for (const item of finalStock) {
+                const result = await client.query(
+                    `UPDATE ingredientes
+                     SET stock_real = $1,
+                         stock_actual = $1, -- Sincronizamos sistema
+                         ultima_actualizacion_stock = CURRENT_TIMESTAMP
+                     WHERE id = $2 AND restaurante_id = $3
+                     RETURNING *`,
+                    [item.stock_real, item.id, req.restauranteId]
+                );
+                if (result.rows.length > 0) {
+                    updated.push(result.rows[0]);
+                }
             }
         }
 
