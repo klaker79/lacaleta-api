@@ -145,6 +145,16 @@ const pool = new Pool({
         restaurante_id INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS mermas (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        cantidad DECIMAL(10, 2) NOT NULL,
+        motivo VARCHAR(100) NOT NULL,
+        notas TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        restaurante_id INTEGER NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
       CREATE INDEX IF NOT EXISTS idx_ventas_receta ON ventas(receta_id);
       CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
@@ -459,7 +469,7 @@ app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => 
 app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { adjustments } = req.body; // Array de { id, stock_real }
+        const { adjustments, mermas } = req.body; // Array de { id, stock_real } y Array de mermas
 
         await client.query('BEGIN');
 
@@ -480,6 +490,16 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
             }
         }
 
+        // Registrar mermas si existen
+        if (mermas && Array.isArray(mermas)) {
+            for (const merma of mermas) {
+                await client.query(
+                    'INSERT INTO mermas (ingrediente_id, cantidad, motivo, notas, restaurante_id) VALUES ($1, $2, $3, $4, $5)',
+                    [merma.id, merma.diferencia, merma.motivo || 'Otros', merma.notas || '', req.restauranteId]
+                );
+            }
+        }
+
         await client.query('COMMIT');
         res.json({ success: true, updated: updated.length, items: updated });
     } catch (err) {
@@ -488,6 +508,94 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno al consolidar' });
     } finally {
         client.release();
+    }
+});
+
+// ========== ANÁLISIS AVANZADO ==========
+app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
+    try {
+        // 1. Obtener ventas agregadas por receta
+        const ventas = await pool.query(
+            `SELECT r.id, r.nombre, r.categoria, r.precio_venta, 
+                    SUM(v.cantidad) as cantidad_vendida,
+                    SUM(v.total) as total_ventas
+             FROM ventas v
+             JOIN recetas r ON v.receta_id = r.id
+             WHERE v.restaurante_id = $1
+             GROUP BY r.id, r.nombre, r.categoria, r.precio_venta`,
+            [req.restauranteId]
+        );
+
+        if (ventas.rows.length === 0) {
+            return res.json([]);
+        }
+
+        // 2. Calcular costes para margen
+        const analisis = [];
+        const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
+        const promedioPopularidad = totalVentasRestaurante / ventas.rows.length; // Mix medio
+
+        let sumaMargenes = 0;
+
+        for (const plato of ventas.rows) {
+            // Calcular coste (simplificado, idealmente cacheado o pre-calculado)
+            const recetaResult = await pool.query('SELECT ingredientes FROM recetas WHERE id = $1', [plato.id]);
+            const ingredientes = recetaResult.rows[0].ingredientes;
+            let costePlato = 0;
+            if (ingredientes) {
+                for (const ing of ingredientes) {
+                    const ingDb = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
+                    if (ingDb.rows.length > 0) {
+                        costePlato += parseFloat(ingDb.rows[0].precio) * ing.cantidad;
+                    }
+                }
+            }
+
+            const margenContribucion = parseFloat(plato.precio_venta) - costePlato;
+            sumaMargenes += margenContribucion * parseFloat(plato.cantidad_vendida);
+
+            analisis.push({
+                ...plato,
+                coste: costePlato,
+                margen: margenContribucion,
+                popularidad: parseFloat(plato.cantidad_vendida)
+            });
+        }
+
+        const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
+
+        // 3. Clasificar BCG
+        // Estrella: Alta Popularidad, Alto Margen
+        // Caballo: Alta Popularidad, Bajo Margen
+        // Puzzle: Baja Popularidad, Alto Margen
+        // Perro: Baja Popularidad, Bajo Margen
+
+        const resultado = analisis.map(p => {
+            const esPopular = p.popularidad >= (promedioPopularidad * 0.7); // Umbral del 70% del promedio (común en ingeniería de menu)
+            const esRentable = p.margen >= promedioMargen;
+
+            let clasificacion = 'perro';
+            if (esPopular && esRentable) clasificacion = 'estrella';
+            else if (esPopular && !esRentable) clasificacion = 'caballo';
+            else if (!esPopular && esRentable) clasificacion = 'puzzle';
+
+            return {
+                ...p,
+                clasificacion,
+                metricas: {
+                    esPopular,
+                    esRentable,
+                    promedioPopularidad,
+                    promedioMargen
+                }
+            };
+        });
+
+        res.json(resultado);
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Error analizando menú' });
     }
 });
 
