@@ -116,6 +116,46 @@ const pool = new Pool({
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+        await pool.query(`
+  CREATE TABLE IF NOT EXISTS snapshots_diarios (
+    id SERIAL PRIMARY KEY,
+    restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+    fecha DATE NOT NULL,
+    
+    -- INGRESOS
+    ingresos_ventas DECIMAL(10,2) DEFAULT 0,
+    
+    -- COSTES
+    costes_producto DECIMAL(10,2) DEFAULT 0,
+    compras_dia DECIMAL(10,2) DEFAULT 0,
+    
+    -- RESULTADOS
+    margen_bruto DECIMAL(10,2) DEFAULT 0,
+    margen_bruto_pct DECIMAL(5,2) DEFAULT 0,
+    
+    -- GASTOS FIJOS
+    gastos_fijos_alquiler DECIMAL(10,2) DEFAULT 0,
+    gastos_fijos_personal DECIMAL(10,2) DEFAULT 0,
+    gastos_fijos_suministros DECIMAL(10,2) DEFAULT 0,
+    gastos_fijos_otros DECIMAL(10,2) DEFAULT 0,
+    gastos_fijos_total DECIMAL(10,2) DEFAULT 0,
+    
+    -- RESULTADO FINAL
+    beneficio_neto DECIMAL(10,2) DEFAULT 0,
+    rentabilidad_pct DECIMAL(5,2) DEFAULT 0,
+    
+    -- METADATA
+    num_ventas INTEGER DEFAULT 0,
+    num_pedidos INTEGER DEFAULT 0,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(restaurante_id, fecha)
+  );
+  
+  CREATE INDEX IF NOT EXISTS idx_snapshots_fecha ON snapshots_diarios(restaurante_id, fecha DESC);
+`);
 
         // MIGRACIÓN: Añadir columna familia si no existe
         try {
@@ -1235,6 +1275,181 @@ app.get('/api/balance/comparativa', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== SNAPSHOTS DIARIOS ==========
+
+// POST /api/snapshots/daily - Guardar snapshot del día
+app.post('/api/snapshots/daily', authMiddleware, async (req, res) => {
+  try {
+    const { restaurante_id } = req.user;
+    const { fecha, datos } = req.body;
+
+    if (!fecha) {
+      return res.status(400).json({ error: 'Fecha requerida' });
+    }
+
+    let snapshot = datos || {};
+
+    if (!datos) {
+      // Calcular ventas del día
+      const ventasResult = await pool.query(
+        `SELECT 
+          COUNT(*) as num_ventas,
+          COALESCE(SUM(total), 0) as ingresos_ventas
+         FROM ventas 
+         WHERE DATE(fecha) = $1 AND restaurante_id = $2`,
+        [fecha, restaurante_id]
+      );
+
+      // Calcular pedidos del día
+      const pedidosResult = await pool.query(
+        `SELECT 
+          COUNT(*) as num_pedidos,
+          COALESCE(SUM(total), 0) as compras_dia
+         FROM pedidos 
+         WHERE DATE(fecha) = $1 AND restaurante_id = $2`,
+        [fecha, restaurante_id]
+      );
+
+      // Calcular coste de producto
+      const costesResult = await pool.query(
+        `SELECT COALESCE(SUM(
+          (SELECT SUM((ingredientes->>'cantidad')::DECIMAL * 
+                     (SELECT precio FROM ingredientes WHERE id = (ingredientes->>'ingredienteId')::INTEGER))
+           FROM jsonb_array_elements(r.ingredientes) ingredientes)
+         * v.cantidad), 0) as costes_producto
+         FROM ventas v
+         JOIN recetas r ON v.receta_id = r.id
+         WHERE DATE(v.fecha) = $1 AND v.restaurante_id = $2`,
+        [fecha, restaurante_id]
+      );
+
+      const ingresos = parseFloat(ventasResult.rows[0].ingresos_ventas) || 0;
+      const costes = parseFloat(costesResult.rows[0].costes_producto) || 0;
+      const compras = parseFloat(pedidosResult.rows[0].compras_dia) || 0;
+      const margen_bruto = ingresos - costes;
+      const margen_bruto_pct = ingresos > 0 ? (margen_bruto / ingresos) * 100 : 0;
+
+      snapshot = {
+        ingresos_ventas: ingresos,
+        costes_producto: costes,
+        compras_dia: compras,
+        margen_bruto: margen_bruto,
+        margen_bruto_pct: margen_bruto_pct,
+        num_ventas: parseInt(ventasResult.rows[0].num_ventas) || 0,
+        num_pedidos: parseInt(pedidosResult.rows[0].num_pedidos) || 0
+      };
+    }
+
+    const result = await pool.query(
+      `INSERT INTO snapshots_diarios (
+        restaurante_id, fecha, 
+        ingresos_ventas, costes_producto, compras_dia, 
+        margen_bruto, margen_bruto_pct,
+        gastos_fijos_alquiler, gastos_fijos_personal, gastos_fijos_suministros, gastos_fijos_otros, gastos_fijos_total,
+        beneficio_neto, rentabilidad_pct,
+        num_ventas, num_pedidos
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      ON CONFLICT (restaurante_id, fecha) 
+      DO UPDATE SET
+        ingresos_ventas = EXCLUDED.ingresos_ventas,
+        costes_producto = EXCLUDED.costes_producto,
+        compras_dia = EXCLUDED.compras_dia,
+        margen_bruto = EXCLUDED.margen_bruto,
+        margen_bruto_pct = EXCLUDED.margen_bruto_pct,
+        gastos_fijos_alquiler = EXCLUDED.gastos_fijos_alquiler,
+        gastos_fijos_personal = EXCLUDED.gastos_fijos_personal,
+        gastos_fijos_suministros = EXCLUDED.gastos_fijos_suministros,
+        gastos_fijos_otros = EXCLUDED.gastos_fijos_otros,
+        gastos_fijos_total = EXCLUDED.gastos_fijos_total,
+        beneficio_neto = EXCLUDED.beneficio_neto,
+        rentabilidad_pct = EXCLUDED.rentabilidad_pct,
+        num_ventas = EXCLUDED.num_ventas,
+        num_pedidos = EXCLUDED.num_pedidos,
+        updated_at = NOW()
+      RETURNING *`,
+      [
+        restaurante_id, fecha,
+        snapshot.ingresos_ventas || 0,
+        snapshot.costes_producto || 0,
+        snapshot.compras_dia || 0,
+        snapshot.margen_bruto || 0,
+        snapshot.margen_bruto_pct || 0,
+        snapshot.gastos_fijos_alquiler || 0,
+        snapshot.gastos_fijos_personal || 0,
+        snapshot.gastos_fijos_suministros || 0,
+        snapshot.gastos_fijos_otros || 0,
+        snapshot.gastos_fijos_total || 0,
+        snapshot.beneficio_neto || 0,
+        snapshot.rentabilidad_pct || 0,
+        snapshot.num_ventas || 0,
+        snapshot.num_pedidos || 0
+      ]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    log('error', 'Error guardando snapshot', { error: error.message });
+    res.status(500).json({ error: 'Error guardando snapshot diario' });
+  }
+});
+
+// GET /api/snapshots - Obtener histórico
+app.get('/api/snapshots', authMiddleware, async (req, res) => {
+  try {
+    const { restaurante_id } = req.user;
+    const { desde, hasta, limit = 30 } = req.query;
+
+    let query = `SELECT * FROM snapshots_diarios WHERE restaurante_id = $1`;
+    const params = [restaurante_id];
+
+    if (desde) {
+      params.push(desde);
+      query += ` AND fecha >= $${params.length}`;
+    }
+
+    if (hasta) {
+      params.push(hasta);
+      query += ` AND fecha <= $${params.length}`;
+    }
+
+    query += ` ORDER BY fecha DESC LIMIT $${params.length + 1}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    log('error', 'Error obteniendo snapshots', { error: error.message });
+    res.status(500).json({ error: 'Error obteniendo histórico' });
+  }
+});
+
+// GET /api/snapshots/stats - Estadísticas agregadas
+app.get('/api/snapshots/stats', authMiddleware, async (req, res) => {
+  try {
+    const { restaurante_id } = req.user;
+    const { dias = 30 } = req.query;
+
+    const result = await pool.query(
+      `SELECT 
+        COUNT(*) as total_dias,
+        COALESCE(AVG(ingresos_ventas), 0) as avg_ingresos_dia,
+        COALESCE(AVG(margen_bruto), 0) as avg_margen_dia,
+        COALESCE(AVG(margen_bruto_pct), 0) as avg_margen_pct,
+        COALESCE(AVG(beneficio_neto), 0) as avg_beneficio_dia,
+        COALESCE(SUM(ingresos_ventas), 0) as total_ingresos,
+        COALESCE(SUM(beneficio_neto), 0) as total_beneficio
+       FROM snapshots_diarios 
+       WHERE restaurante_id = $1 
+       AND fecha >= CURRENT_DATE - INTERVAL '${parseInt(dias)} days'`,
+      [restaurante_id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    log('error', 'Error obteniendo stats', { error: error.message });
+    res.status(500).json({ error: 'Error obteniendo estadísticas' });
+  }
+});
 // ========== 404 ==========
 app.use((req, res) => {
     res.status(404).json({ error: 'Ruta no encontrada' });
