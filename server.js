@@ -102,10 +102,25 @@ const pool = new Pool({
         stock_actual DECIMAL(10, 2) DEFAULT 0,
         stock_minimo DECIMAL(10, 2) DEFAULT 0,
         stock_real DECIMAL(10, 2),
+        familia VARCHAR(50) DEFAULT 'alimento',
         ultima_actualizacion_stock TIMESTAMP,
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- MIGRACIÓN: Añadir columna familia si no existe
+      try {
+          await pool.query(`
+            DO $$ 
+            BEGIN 
+              IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ingredientes' AND column_name = 'familia') THEN 
+                ALTER TABLE ingredientes ADD COLUMN familia VARCHAR(50) DEFAULT 'alimento'; 
+              END IF; 
+            END $$;
+        `);
+      } catch (e) {
+          log('warn', 'Error en migración de columna familia', { error: e.message });
+      }
 
       CREATE TABLE IF NOT EXISTS recetas (
         id SERIAL PRIMARY KEY,
@@ -430,13 +445,14 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
     try {
-        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
+        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia } = req.body;
         const finalStockActual = stockActual ?? stock_actual ?? 0;
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
+        const finalFamilia = familia || 'alimento';
         const result = await pool.query(
-            'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [nombre, finalProveedorId, precio || 0, unidad || 'kg', finalStockActual, finalStockMinimo, req.restauranteId]
+            'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [nombre, finalProveedorId, precio || 0, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -447,13 +463,14 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo } = req.body;
+        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia } = req.body;
         const finalStockActual = stockActual ?? stock_actual ?? 0;
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
+        const finalFamilia = familia || 'alimento';
         const result = await pool.query(
-            'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6 WHERE id=$7 AND restaurante_id=$8 RETURNING *',
-            [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, id, req.restauranteId]
+            'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
+            [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
