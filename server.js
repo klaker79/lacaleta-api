@@ -5,12 +5,10 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
-
 // ========== CONFIGURACIÓN ==========
 const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
 const PORT = process.env.PORT || 3000;
-
-// CORS: Orígenes permitidos
+// CORS: Orígenes permitidos (Combinar entorno + defaults)
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'http://localhost:5500',
@@ -20,12 +18,12 @@ const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
     : [];
 const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
-
 const app = express();
-
 // ========== MIDDLEWARE ==========
+// CORS configuración mejorada
 app.use(cors({
     origin: function (origin, callback) {
+        // Permitir requests sin origin (curl, Postman)
         if (!origin) return callback(null, true);
         if (ALLOWED_ORIGINS.includes(origin)) {
             callback(null, true);
@@ -38,11 +36,11 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
 }));
-
+// Manejar preflight explícitamente
 app.options('*', cors());
+// Parser JSON (solo una vez)
 app.use(express.json());
-
-// Logging
+// Logging Persistente
 const LOG_FILE = path.join(__dirname, 'server.log');
 const log = (level, message, data = {}) => {
     const logEntry = JSON.stringify({
@@ -52,11 +50,11 @@ const log = (level, message, data = {}) => {
         ...data
     });
     console.log(logEntry);
+    // Append to file
     fs.appendFile(LOG_FILE, logEntry + '\n', (err) => {
         if (err) console.error('Error writing to log file:', err);
     });
 };
-
 // ========== BASE DE DATOS ==========
 const pool = new Pool({
     host: process.env.DB_HOST || 'anais-postgres-2s8h7q',
@@ -65,160 +63,131 @@ const pool = new Pool({
     user: process.env.DB_USER || 'admin',
     password: process.env.DB_PASSWORD || '18061979Anais.',
 });
-
-// Inicializar DB
+// Test conexión e inicializar DB
 (async () => {
     try {
         await pool.query('SELECT NOW()');
         log('info', 'Conectado a PostgreSQL');
-
-        // Crear tablas existentes
+        // Crear tablas
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS restaurantes (
-                id SERIAL PRIMARY KEY,
-                nombre VARCHAR(255) NOT NULL,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY,
-                restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                nombre VARCHAR(255) NOT NULL,
-                rol VARCHAR(50) DEFAULT 'usuario',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS ingredientes (
-                id SERIAL PRIMARY KEY,
-                nombre VARCHAR(255) NOT NULL,
-                proveedor_id INTEGER,
-                precio DECIMAL(10, 2) DEFAULT 0,
-                unidad VARCHAR(50) DEFAULT 'kg',
-                stock_actual DECIMAL(10, 2) DEFAULT 0,
-                stock_minimo DECIMAL(10, 2) DEFAULT 0,
-                stock_real DECIMAL(10, 2),
-                familia VARCHAR(50) DEFAULT 'alimento',
-                ultima_actualizacion_stock TIMESTAMP,
-                restaurante_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS recetas (
-                id SERIAL PRIMARY KEY,
-                nombre VARCHAR(255) NOT NULL,
-                codigo VARCHAR(50),
-                categoria VARCHAR(100) DEFAULT 'principal',
-                precio_venta DECIMAL(10, 2) DEFAULT 0,
-                porciones INTEGER DEFAULT 1,
-                ingredientes JSONB DEFAULT '[]',
-                restaurante_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS proveedores (
-                id SERIAL PRIMARY KEY,
-                nombre VARCHAR(255) NOT NULL,
-                contacto VARCHAR(255) DEFAULT '',
-                telefono VARCHAR(50) DEFAULT '',
-                email VARCHAR(255) DEFAULT '',
-                direccion TEXT DEFAULT '',
-                notas TEXT DEFAULT '',
-                ingredientes INTEGER[] DEFAULT '{}',
-                restaurante_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS pedidos (
-                id SERIAL PRIMARY KEY,
-                proveedor_id INTEGER NOT NULL,
-                fecha DATE NOT NULL,
-                ingredientes JSONB NOT NULL,
-                total DECIMAL(10, 2) NOT NULL,
-                estado VARCHAR(50) DEFAULT 'pendiente',
-                fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                fecha_recepcion TIMESTAMP,
-                total_recibido DECIMAL(10, 2),
-                restaurante_id INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ventas (
-                id SERIAL PRIMARY KEY,
-                receta_id INTEGER REFERENCES recetas(id) ON DELETE CASCADE,
-                cantidad INTEGER NOT NULL,
-                precio_unitario DECIMAL(10, 2) NOT NULL,
-                total DECIMAL(10, 2) NOT NULL,
-                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                restaurante_id INTEGER NOT NULL
-            );
-
-            -- =============================================
-            -- NUEVA TABLA: REGISTROS DIARIOS (CIERRES)
-            -- =============================================
-            CREATE TABLE IF NOT EXISTS daily_records (
-                id SERIAL PRIMARY KEY,
-                fecha DATE NOT NULL,
-                ventas_total DECIMAL(12, 2) DEFAULT 0,
-                ventas_count INTEGER DEFAULT 0,
-                compras_total DECIMAL(12, 2) DEFAULT 0,
-                compras_count INTEGER DEFAULT 0,
-                margen_bruto DECIMAL(12, 2) DEFAULT 0,
-                food_cost_percent DECIMAL(5, 2) DEFAULT 0,
-                objetivo_diario DECIMAL(12, 2) DEFAULT 0,
-                objetivo_cumplido BOOLEAN DEFAULT false,
-                gastos_fijos_prorrateados DECIMAL(12, 2) DEFAULT 0,
-                beneficio_neto DECIMAL(12, 2) DEFAULT 0,
-                notas TEXT,
-                cerrado BOOLEAN DEFAULT false,
-                restaurante_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(fecha, restaurante_id)
-            );
-
-            -- Tabla para configuración de gastos fijos por restaurante
-            CREATE TABLE IF NOT EXISTS config_gastos (
-                id SERIAL PRIMARY KEY,
-                restaurante_id INTEGER NOT NULL UNIQUE,
-                alquiler DECIMAL(10, 2) DEFAULT 1000,
-                personal DECIMAL(10, 2) DEFAULT 3000,
-                suministros DECIMAL(10, 2) DEFAULT 500,
-                otros DECIMAL(10, 2) DEFAULT 300,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            -- Índices para optimización
-            CREATE INDEX IF NOT EXISTS idx_daily_records_fecha ON daily_records(fecha);
-            CREATE INDEX IF NOT EXISTS idx_daily_records_restaurante ON daily_records(restaurante_id);
-            CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
-            CREATE INDEX IF NOT EXISTS idx_ventas_receta ON ventas(receta_id);
-            CREATE INDEX IF NOT EXISTS idx_pedidos_fecha ON pedidos(fecha);
-            CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
-            CREATE INDEX IF NOT EXISTS idx_ingredientes_restaurante ON ingredientes(restaurante_id);
-        `);
-
-        // Migración: añadir columna codigo a recetas si no existe
+      CREATE TABLE IF NOT EXISTS restaurantes (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS usuarios (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        nombre VARCHAR(255) NOT NULL,
+        rol VARCHAR(50) DEFAULT 'usuario',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS ingredientes (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        proveedor_id INTEGER,
+        precio DECIMAL(10, 2) DEFAULT 0,
+        unidad VARCHAR(50) DEFAULT 'kg',
+        stock_actual DECIMAL(10, 2) DEFAULT 0,
+        stock_minimo DECIMAL(10, 2) DEFAULT 0,
+        stock_real DECIMAL(10, 2),
+        familia VARCHAR(50) DEFAULT 'alimento',
+        ultima_actualizacion_stock TIMESTAMP,
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+        // MIGRACIÓN: Añadir columna familia si no existe
         try {
             await pool.query(`
-                DO $$ 
-                BEGIN 
-                    IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'recetas' AND column_name = 'codigo') THEN 
-                        ALTER TABLE recetas ADD COLUMN codigo VARCHAR(50); 
-                    END IF; 
-                END $$;
-            `);
+            DO $$ 
+            BEGIN 
+              IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ingredientes' AND column_name = 'familia') THEN 
+                ALTER TABLE ingredientes ADD COLUMN familia VARCHAR(50) DEFAULT 'alimento'; 
+              END IF; 
+            END $$;
+        `);
         } catch (e) {
-            log('warn', 'Migración columna codigo', { error: e.message });
+            log('warn', 'Error en migración de columna familia', { error: e.message });
         }
-
-        log('info', 'Tablas inicializadas (incluida daily_records)');
+        await pool.query(`
+      CREATE TABLE IF NOT EXISTS recetas (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        categoria VARCHAR(100) DEFAULT 'principal',
+        precio_venta DECIMAL(10, 2) DEFAULT 0,
+        porciones INTEGER DEFAULT 1,
+        ingredientes JSONB DEFAULT '[]',
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS proveedores (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(255) NOT NULL,
+        contacto VARCHAR(255) DEFAULT '',
+        telefono VARCHAR(50) DEFAULT '',
+        email VARCHAR(255) DEFAULT '',
+        direccion TEXT DEFAULT '',
+        notas TEXT DEFAULT '',
+        ingredientes INTEGER[] DEFAULT '{}',
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS pedidos (
+        id SERIAL PRIMARY KEY,
+        proveedor_id INTEGER NOT NULL,
+        fecha DATE NOT NULL,
+        ingredientes JSONB NOT NULL,
+        total DECIMAL(10, 2) NOT NULL,
+        estado VARCHAR(50) DEFAULT 'pendiente',
+        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_recepcion TIMESTAMP,
+        total_recibido DECIMAL(10, 2),
+        restaurante_id INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ventas (
+        id SERIAL PRIMARY KEY,
+        receta_id INTEGER REFERENCES recetas(id) ON DELETE CASCADE,
+        cantidad INTEGER NOT NULL,
+        precio_unitario DECIMAL(10, 2) NOT NULL,
+        total DECIMAL(10, 2) NOT NULL,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        restaurante_id INTEGER NOT NULL
+      );
+      -- Tabla de Ajustes (Detalle del movimiento) - V2 (Fresh Schema)
+      CREATE TABLE IF NOT EXISTS inventory_adjustments_v2 (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        cantidad DECIMAL(10, 2) NOT NULL,
+        motivo VARCHAR(100) NOT NULL,
+        notas TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        usuario_id INTEGER, 
+        restaurante_id INTEGER NOT NULL
+      );
+      -- Tabla de Snapshots (Auditoría del estado antes/después) - V2 (Fresh Schema)
+      CREATE TABLE IF NOT EXISTS inventory_snapshots_v2 (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        stock_virtual DECIMAL(10, 2) NOT NULL,
+        stock_real DECIMAL(10, 2) NOT NULL,
+        diferencia DECIMAL(10, 2) NOT NULL,
+        restaurante_id INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
+      CREATE INDEX IF NOT EXISTS idx_ventas_receta ON ventas(receta_id);
+      CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
+      CREATE INDEX IF NOT EXISTS idx_ingredientes_restaurante ON ingredientes(restaurante_id);
+    `);
+        log('info', 'Tablas inicializadas');
     } catch (err) {
         log('error', 'Error DB', { error: err.message });
     }
 })();
-
 // ========== MIDDLEWARE DE AUTENTICACIÓN ==========
 const authMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -235,37 +204,34 @@ const authMiddleware = (req, res, next) => {
         return res.status(401).json({ error: 'Token inválido' });
     }
 };
-
 const requireAdmin = (req, res, next) => {
     if (!req.user || req.user.rol !== 'admin') {
+        log('warn', 'Acceso denegado a ruta protegida', { user: req.user ? req.user.email : 'anon', url: req.originalUrl });
         return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
     }
     next();
 };
-
 // ========== ENDPOINTS PÚBLICOS ==========
 app.get('/', (req, res) => {
     res.json({
-        message: '🍽️ MindLoop CostOS API',
-        version: '2.2.0',
-        status: 'running',
-        features: ['daily-tracking', 'inventory', 'sales', 'orders']
+        message: '🍽️ La Caleta 102 API',
+        version: '2.1.0',
+        status: 'running'
     });
 });
-
+// Health Check
 app.get('/api/health', async (req, res) => {
     try {
         await pool.query('SELECT 1');
         res.json({
             status: 'healthy',
             timestamp: new Date().toISOString(),
-            version: '2.2.0'
+            cors_origins: ALLOWED_ORIGINS
         });
     } catch (e) {
         res.status(503).json({ status: 'unhealthy' });
     }
 });
-
 // ========== AUTENTICACIÓN ==========
 app.post('/api/auth/login', async (req, res) => {
     try {
@@ -273,30 +239,24 @@ app.post('/api/auth/login', async (req, res) => {
         if (!email || !password) {
             return res.status(400).json({ error: 'Email y contraseña requeridos' });
         }
-
         const result = await pool.query(
             'SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id WHERE u.email = $1',
             [email]
         );
-
         if (result.rows.length === 0) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
-
         const user = result.rows[0];
         const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
-
         const token = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
-
         log('info', 'Login exitoso', { userId: user.id, email });
-
         res.json({
             token,
             user: {
@@ -304,8 +264,7 @@ app.post('/api/auth/login', async (req, res) => {
                 email: user.email,
                 nombre: user.nombre,
                 rol: user.rol,
-                restaurante: user.restaurante_nombre,
-                restauranteId: user.restaurante_id
+                restaurante: user.restaurante_nombre
             }
         });
     } catch (err) {
@@ -313,45 +272,32 @@ app.post('/api/auth/login', async (req, res) => {
         res.status(500).json({ error: 'Error en el servidor' });
     }
 });
-
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { restauranteNombre, email, password, nombreUsuario } = req.body;
         if (!restauranteNombre || !email || !password) {
             return res.status(400).json({ error: 'Todos los campos son requeridos' });
         }
-
         const existingUser = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(400).json({ error: 'El email ya está registrado' });
         }
-
         const restauranteResult = await pool.query(
             'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
             [restauranteNombre, email]
         );
         const restauranteId = restauranteResult.rows[0].id;
-
-        // Crear configuración de gastos por defecto
-        await pool.query(
-            'INSERT INTO config_gastos (restaurante_id) VALUES ($1) ON CONFLICT DO NOTHING',
-            [restauranteId]
-        );
-
         const passwordHash = await bcrypt.hash(password, 10);
         const userResult = await pool.query(
             'INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [restauranteId, email, passwordHash, nombreUsuario || 'Admin', 'admin']
         );
-
         const token = jwt.sign(
             { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
-
         log('info', 'Registro exitoso', { restauranteId, email });
-
         res.status(201).json({
             token,
             user: {
@@ -359,8 +305,7 @@ app.post('/api/auth/register', async (req, res) => {
                 email,
                 nombre: nombreUsuario || 'Admin',
                 rol: 'admin',
-                restaurante: restauranteNombre,
-                restauranteId
+                restaurante: restauranteNombre
             }
         });
     } catch (err) {
@@ -368,365 +313,69 @@ app.post('/api/auth/register', async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
-// ========== GESTIÓN DE EQUIPO ==========
+// ========== GESTIÓN DE EQUIPO (MULTI-CUENTA) ==========
+// 1. Listar el equipo
 app.get('/api/team', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, nombre, email, rol, created_at as fecha_registro FROM usuarios WHERE restaurante_id = $1 ORDER BY created_at DESC',
+            'SELECT id, nombre, email, rol, created_at FROM usuarios WHERE restaurante_id = $1 ORDER BY created_at DESC',
             [req.restauranteId]
         );
         res.json(result.rows);
     } catch (err) {
+        log('error', 'Error listando equipo', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
+// 2. Invitar / Crear Usuario (Solo Admin)
 app.post('/api/team/invite', authMiddleware, requireAdmin, async (req, res) => {
     try {
         const { nombre, email, password, rol } = req.body;
         if (!nombre || !email || !password) {
-            return res.status(400).json({ error: 'Faltan datos requeridos' });
+            return res.status(400).json({ error: 'Faltan datos requeridos (nombre, email, password)' });
         }
-
+        // Verificar si existe el email globalmente (clave única)
         const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
         if (check.rows.length > 0) {
             return res.status(400).json({ error: 'Este email ya está registrado' });
         }
-
         const passwordHash = await bcrypt.hash(password, 10);
+        // Rol por defecto 'usuario' si no se especifica
+        const nuevoRol = rol || 'usuario';
         const result = await pool.query(
             'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id, nombre, email, rol',
-            [req.restauranteId, nombre, email, passwordHash, rol || 'usuario']
+            [req.restauranteId, nombre, email, passwordHash, nuevoRol]
         );
-
+        log('info', 'Nuevo usuario de equipo creado', { admin: req.user.email, newUser: email });
         res.json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error creando usuario equipo', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
+// 3. Eliminar Usuario (Solo Admin)
 app.delete('/api/team/:id', authMiddleware, requireAdmin, async (req, res) => {
     try {
         const userIdToDelete = parseInt(req.params.id);
+        // Evitar auto-borrado
         if (userIdToDelete === req.user.userId) {
             return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
         }
-
+        // Asegurar que el usuario a borrar pertenece al MISMO restaurante
         const result = await pool.query(
             'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
             [userIdToDelete, req.restauranteId]
         );
-
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Usuario no encontrado' });
+            return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
         }
-
-        res.json({ success: true });
+        log('info', 'Usuario eliminado del equipo', { admin: req.user.email, deletedId: userIdToDelete });
+        res.json({ success: true, message: 'Usuario eliminado' });
     } catch (err) {
+        log('error', 'Error eliminando usuario', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
-// =============================================
-// ========== CONTROL DIARIO (NUEVO) ==========
-// =============================================
-
-// Obtener configuración de gastos fijos
-app.get('/api/config/gastos', authMiddleware, async (req, res) => {
-    try {
-        let result = await pool.query(
-            'SELECT * FROM config_gastos WHERE restaurante_id = $1',
-            [req.restauranteId]
-        );
-
-        if (result.rows.length === 0) {
-            // Crear configuración por defecto si no existe
-            result = await pool.query(
-                'INSERT INTO config_gastos (restaurante_id) VALUES ($1) RETURNING *',
-                [req.restauranteId]
-            );
-        }
-
-        res.json(result.rows[0]);
-    } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// Actualizar configuración de gastos fijos
-app.put('/api/config/gastos', authMiddleware, async (req, res) => {
-    try {
-        const { alquiler, personal, suministros, otros } = req.body;
-
-        const result = await pool.query(
-            `INSERT INTO config_gastos (restaurante_id, alquiler, personal, suministros, otros, updated_at)
-             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-             ON CONFLICT (restaurante_id) 
-             DO UPDATE SET alquiler = $2, personal = $3, suministros = $4, otros = $5, updated_at = CURRENT_TIMESTAMP
-             RETURNING *`,
-            [req.restauranteId, alquiler || 0, personal || 0, suministros || 0, otros || 0]
-        );
-
-        res.json(result.rows[0]);
-    } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// Obtener datos de un día específico (calculados en tiempo real)
-app.get('/api/daily/:fecha', authMiddleware, async (req, res) => {
-    try {
-        const { fecha } = req.params;
-
-        // Obtener ventas del día
-        const ventasResult = await pool.query(
-            `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count 
-             FROM ventas 
-             WHERE DATE(fecha) = $1 AND restaurante_id = $2`,
-            [fecha, req.restauranteId]
-        );
-
-        // Obtener compras del día
-        const comprasResult = await pool.query(
-            `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count 
-             FROM pedidos 
-             WHERE DATE(fecha) = $1 AND restaurante_id = $2 AND estado = 'recibido'`,
-            [fecha, req.restauranteId]
-        );
-
-        // Obtener configuración de gastos
-        const gastosResult = await pool.query(
-            'SELECT * FROM config_gastos WHERE restaurante_id = $1',
-            [req.restauranteId]
-        );
-
-        const gastos = gastosResult.rows[0] || { alquiler: 1000, personal: 3000, suministros: 500, otros: 300 };
-        const gastosFijosMensuales = parseFloat(gastos.alquiler) + parseFloat(gastos.personal) + 
-                                      parseFloat(gastos.suministros) + parseFloat(gastos.otros);
-
-        // Calcular días del mes para prorrateo
-        const fechaObj = new Date(fecha);
-        const diasMes = new Date(fechaObj.getFullYear(), fechaObj.getMonth() + 1, 0).getDate();
-        const objetivoDiario = gastosFijosMensuales / diasMes;
-
-        const ventasTotal = parseFloat(ventasResult.rows[0].total);
-        const comprasTotal = parseFloat(comprasResult.rows[0].total);
-        const margenBruto = ventasTotal - comprasTotal;
-        const foodCostPercent = ventasTotal > 0 ? (comprasTotal / ventasTotal) * 100 : 0;
-        const objetivoCumplido = ventasTotal >= objetivoDiario;
-        const gastosFijosProrrateados = gastosFijosMensuales / diasMes;
-        const beneficioNeto = margenBruto - gastosFijosProrrateados;
-
-        // Buscar registro existente o devolver datos calculados
-        const recordResult = await pool.query(
-            'SELECT * FROM daily_records WHERE fecha = $1 AND restaurante_id = $2',
-            [fecha, req.restauranteId]
-        );
-
-        const response = {
-            fecha,
-            ventas_total: ventasTotal,
-            ventas_count: parseInt(ventasResult.rows[0].count),
-            compras_total: comprasTotal,
-            compras_count: parseInt(comprasResult.rows[0].count),
-            margen_bruto: margenBruto,
-            food_cost_percent: foodCostPercent,
-            objetivo_diario: objetivoDiario,
-            objetivo_cumplido: objetivoCumplido,
-            gastos_fijos_prorrateados: gastosFijosProrrateados,
-            beneficio_neto: beneficioNeto,
-            cerrado: recordResult.rows[0]?.cerrado || false,
-            notas: recordResult.rows[0]?.notas || ''
-        };
-
-        res.json(response);
-    } catch (err) {
-        log('error', 'Error obteniendo datos diarios', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// Guardar/Actualizar registro diario (cierre automático o manual)
-app.post('/api/daily/:fecha', authMiddleware, async (req, res) => {
-    try {
-        const { fecha } = req.params;
-        const { notas, cerrado } = req.body;
-
-        // Calcular datos actuales
-        const ventasResult = await pool.query(
-            `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count 
-             FROM ventas WHERE DATE(fecha) = $1 AND restaurante_id = $2`,
-            [fecha, req.restauranteId]
-        );
-
-        const comprasResult = await pool.query(
-            `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count 
-             FROM pedidos WHERE DATE(fecha) = $1 AND restaurante_id = $2 AND estado = 'recibido'`,
-            [fecha, req.restauranteId]
-        );
-
-        const gastosResult = await pool.query(
-            'SELECT * FROM config_gastos WHERE restaurante_id = $1',
-            [req.restauranteId]
-        );
-
-        const gastos = gastosResult.rows[0] || { alquiler: 1000, personal: 3000, suministros: 500, otros: 300 };
-        const gastosFijosMensuales = parseFloat(gastos.alquiler) + parseFloat(gastos.personal) + 
-                                      parseFloat(gastos.suministros) + parseFloat(gastos.otros);
-
-        const fechaObj = new Date(fecha);
-        const diasMes = new Date(fechaObj.getFullYear(), fechaObj.getMonth() + 1, 0).getDate();
-        const objetivoDiario = gastosFijosMensuales / diasMes;
-
-        const ventasTotal = parseFloat(ventasResult.rows[0].total);
-        const comprasTotal = parseFloat(comprasResult.rows[0].total);
-        const margenBruto = ventasTotal - comprasTotal;
-        const foodCostPercent = ventasTotal > 0 ? (comprasTotal / ventasTotal) * 100 : 0;
-        const objetivoCumplido = ventasTotal >= objetivoDiario;
-        const gastosFijosProrrateados = gastosFijosMensuales / diasMes;
-        const beneficioNeto = margenBruto - gastosFijosProrrateados;
-
-        // Upsert del registro diario
-        const result = await pool.query(
-            `INSERT INTO daily_records 
-             (fecha, ventas_total, ventas_count, compras_total, compras_count, margen_bruto, 
-              food_cost_percent, objetivo_diario, objetivo_cumplido, gastos_fijos_prorrateados, 
-              beneficio_neto, notas, cerrado, restaurante_id, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
-             ON CONFLICT (fecha, restaurante_id) 
-             DO UPDATE SET 
-                ventas_total = $2, ventas_count = $3, compras_total = $4, compras_count = $5,
-                margen_bruto = $6, food_cost_percent = $7, objetivo_diario = $8, objetivo_cumplido = $9,
-                gastos_fijos_prorrateados = $10, beneficio_neto = $11, notas = COALESCE($12, daily_records.notas),
-                cerrado = COALESCE($13, daily_records.cerrado), updated_at = CURRENT_TIMESTAMP
-             RETURNING *`,
-            [fecha, ventasTotal, ventasResult.rows[0].count, comprasTotal, comprasResult.rows[0].count,
-             margenBruto, foodCostPercent, objetivoDiario, objetivoCumplido, gastosFijosProrrateados,
-             beneficioNeto, notas, cerrado, req.restauranteId]
-        );
-
-        log('info', 'Registro diario guardado', { fecha, restauranteId: req.restauranteId });
-        res.json(result.rows[0]);
-    } catch (err) {
-        log('error', 'Error guardando registro diario', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// Obtener historial de registros diarios
-app.get('/api/daily', authMiddleware, async (req, res) => {
-    try {
-        const { mes, ano, limit } = req.query;
-        
-        let query = `
-            SELECT * FROM daily_records 
-            WHERE restaurante_id = $1
-        `;
-        const params = [req.restauranteId];
-        let paramIndex = 2;
-
-        if (mes && ano) {
-            query += ` AND EXTRACT(MONTH FROM fecha) = $${paramIndex} AND EXTRACT(YEAR FROM fecha) = $${paramIndex + 1}`;
-            params.push(mes, ano);
-            paramIndex += 2;
-        }
-
-        query += ` ORDER BY fecha DESC`;
-
-        if (limit) {
-            query += ` LIMIT $${paramIndex}`;
-            params.push(parseInt(limit));
-        }
-
-        const result = await pool.query(query, params);
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// Obtener resumen mensual (desde registros diarios)
-app.get('/api/daily/summary/month', authMiddleware, async (req, res) => {
-    try {
-        const { mes, ano } = req.query;
-        const mesActual = mes || new Date().getMonth() + 1;
-        const anoActual = ano || new Date().getFullYear();
-
-        const result = await pool.query(
-            `SELECT 
-                COUNT(*) as dias_registrados,
-                COALESCE(SUM(ventas_total), 0) as total_ventas,
-                COALESCE(SUM(compras_total), 0) as total_compras,
-                COALESCE(SUM(margen_bruto), 0) as total_margen,
-                COALESCE(AVG(food_cost_percent), 0) as avg_food_cost,
-                COALESCE(SUM(beneficio_neto), 0) as total_beneficio,
-                COUNT(CASE WHEN objetivo_cumplido THEN 1 END) as dias_objetivo_cumplido
-             FROM daily_records
-             WHERE EXTRACT(MONTH FROM fecha) = $1 
-               AND EXTRACT(YEAR FROM fecha) = $2 
-               AND restaurante_id = $3`,
-            [mesActual, anoActual, req.restauranteId]
-        );
-
-        // Obtener configuración de gastos
-        const gastosResult = await pool.query(
-            'SELECT * FROM config_gastos WHERE restaurante_id = $1',
-            [req.restauranteId]
-        );
-
-        const gastos = gastosResult.rows[0] || { alquiler: 1000, personal: 3000, suministros: 500, otros: 300 };
-        const gastosFijosMensuales = parseFloat(gastos.alquiler) + parseFloat(gastos.personal) + 
-                                      parseFloat(gastos.suministros) + parseFloat(gastos.otros);
-
-        const summary = result.rows[0];
-        const totalVentas = parseFloat(summary.total_ventas);
-        const totalMargen = parseFloat(summary.total_margen);
-        const beneficioReal = totalMargen - gastosFijosMensuales;
-        
-        // Break-even
-        const margenPorcentaje = totalVentas > 0 ? totalMargen / totalVentas : 0.7;
-        const breakEven = margenPorcentaje > 0 ? gastosFijosMensuales / margenPorcentaje : 0;
-
-        res.json({
-            mes: mesActual,
-            ano: anoActual,
-            dias_registrados: parseInt(summary.dias_registrados),
-            total_ventas: totalVentas,
-            total_compras: parseFloat(summary.total_compras),
-            total_margen: totalMargen,
-            avg_food_cost: parseFloat(summary.avg_food_cost),
-            gastos_fijos: gastosFijosMensuales,
-            beneficio_neto: beneficioReal,
-            rentabilidad: totalVentas > 0 ? (beneficioReal / totalVentas) * 100 : 0,
-            break_even_mensual: breakEven,
-            break_even_diario: breakEven / 30,
-            dias_objetivo_cumplido: parseInt(summary.dias_objetivo_cumplido)
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// Obtener datos de últimos N días para gráfico
-app.get('/api/daily/chart/:dias', authMiddleware, async (req, res) => {
-    try {
-        const dias = parseInt(req.params.dias) || 7;
-
-        const result = await pool.query(
-            `SELECT fecha, ventas_total, compras_total, margen_bruto, objetivo_cumplido
-             FROM daily_records
-             WHERE restaurante_id = $1 AND fecha >= CURRENT_DATE - INTERVAL '${dias} days'
-             ORDER BY fecha ASC`,
-            [req.restauranteId]
-        );
-
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
 // ========== INGREDIENTES ==========
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
     try {
@@ -736,7 +385,6 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia } = req.body;
@@ -744,7 +392,6 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
         const finalFamilia = familia || 'alimento';
-
         const result = await pool.query(
             'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
             [nombre, finalProveedorId, precio || 0, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId]
@@ -754,7 +401,6 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
@@ -763,7 +409,6 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
         const finalFamilia = familia || 'alimento';
-
         const result = await pool.query(
             'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
             [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId]
@@ -773,7 +418,6 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
@@ -782,47 +426,101 @@ app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 // ========== INVENTARIO AVANZADO ==========
 app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT 
-                i.id, i.nombre, i.unidad, i.stock_actual as stock_virtual, i.stock_real,
-                i.stock_minimo, i.proveedor_id, i.ultima_actualizacion_stock,
-                CASE WHEN i.stock_real IS NULL THEN NULL ELSE (i.stock_real - i.stock_actual) END as diferencia,
-                COALESCE(i.precio, 0) as precio_medio,
-                (i.stock_actual * COALESCE(i.precio, 0)) as valor_stock
-            FROM ingredientes i
-            WHERE i.restaurante_id = $1
-            ORDER BY i.id
-        `, [req.restauranteId]);
+      SELECT 
+        i.id,
+        i.nombre,
+        i.unidad,
+        i.stock_actual as stock_virtual,
+        i.stock_real,
+        i.stock_minimo,
+        i.proveedor_id,
+        i.ultima_actualizacion_stock,
+        i.ultima_actualizacion_stock,
+        CASE 
+            WHEN i.stock_real IS NULL THEN NULL 
+            ELSE (i.stock_real - i.stock_actual) 
+        END as diferencia,
+        COALESCE(
+          (SELECT 
+            SUM(
+              (ingrediente->>'cantidad')::numeric *
+              COALESCE((ingrediente->>'precioReal')::numeric, (ingrediente->>'precioUnitario')::numeric)
+            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
+           FROM pedidos p, 
+           jsonb_array_elements(p.ingredientes) as ingrediente
+           WHERE (ingrediente->>'ingredienteId')::integer = i.id 
+           AND p.estado = 'recibido'
+           AND p.restaurante_id = $1
+          ), i.precio
+        ) as precio_medio,
+        (i.stock_actual * COALESCE(
+          (SELECT 
+            SUM(
+              (ingrediente->>'cantidad')::numeric *
+              COALESCE((ingrediente->>'precioReal')::numeric, (ingrediente->>'precioUnitario')::numeric)
+            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
+           FROM pedidos p, 
+           jsonb_array_elements(p.ingredientes) as ingrediente
+           WHERE (ingrediente->>'ingredienteId')::integer = i.id 
+           AND p.estado = 'recibido'
+           AND p.restaurante_id = $1
+          ), i.precio
+        )) as valor_stock
+      FROM ingredientes i
+      WHERE i.restaurante_id = $1
+      ORDER BY i.id
+    `, [req.restauranteId]);
         res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error inventario completo', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+app.put('/api/inventory/:id/stock-real', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { stock_real } = req.body;
+        const result = await pool.query(
+            `UPDATE ingredientes 
+       SET stock_real = $1, 
+           ultima_actualizacion_stock = CURRENT_TIMESTAMP 
+       WHERE id = $2 AND restaurante_id = $3 
+       RETURNING *`,
+            [stock_real, id, req.restauranteId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado' });
+        }
+        res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
-app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
+app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { adjustments, snapshots, finalStock } = req.body;
+        const { stocks } = req.body;
         await client.query('BEGIN');
-
         const updated = [];
-        if (finalStock && Array.isArray(finalStock)) {
-            for (const item of finalStock) {
-                const result = await client.query(
-                    `UPDATE ingredientes SET stock_actual = $1, stock_real = NULL, ultima_actualizacion_stock = CURRENT_TIMESTAMP
-                     WHERE id = $2 AND restaurante_id = $3 RETURNING *`,
-                    [item.stock_real, item.id, req.restauranteId]
-                );
-                if (result.rows.length > 0) updated.push(result.rows[0]);
+        for (const item of stocks) {
+            const result = await client.query(
+                `UPDATE ingredientes 
+         SET stock_real = $1, 
+             ultima_actualizacion_stock = CURRENT_TIMESTAMP 
+         WHERE id = $2 AND restaurante_id = $3 
+         RETURNING *`,
+                [item.stock_real, item.id, req.restauranteId]
+            );
+            if (result.rows.length > 0) {
+                updated.push(result.rows[0]);
             }
         }
-
         await client.query('COMMIT');
-        res.json({ success: true, updated: updated.length });
+        res.json({ success: true, updated: updated.length, items: updated });
     } catch (err) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: 'Error interno' });
@@ -830,7 +528,184 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
         client.release();
     }
 });
-
+// Endpoint para consolidar stock con lógica de Ajustes (ERP)
+app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        // adjustments: Array de splits específicos [{ ingrediente_id, cantidad, motivo, notas }]
+        // snapshots: Array histórico [{ id (ing_id), stock_virtual, stock_real }]
+        // finalStock: Array simple para actualizar el maestro [{ id, stock_real }]
+        const { adjustments, snapshots, finalStock } = req.body;
+        if (!req.restauranteId) {
+            return res.status(401).json({ error: 'No autorizado: Restaurante ID nulo' });
+        }
+        // Just-in-Time Schema Creation (Asegurar que las tablas existen)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_adjustments_v2 (
+                id SERIAL PRIMARY KEY,
+                ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+                cantidad DECIMAL(10, 2) NOT NULL,
+                motivo VARCHAR(100) NOT NULL,
+                notas TEXT,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                usuario_id INTEGER, 
+                restaurante_id INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS inventory_snapshots_v2 (
+                id SERIAL PRIMARY KEY,
+                ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                stock_virtual DECIMAL(10, 2) NOT NULL,
+                stock_real DECIMAL(10, 2) NOT NULL,
+                diferencia DECIMAL(10, 2) NOT NULL,
+                restaurante_id INTEGER NOT NULL
+            );
+        `);
+        await client.query('BEGIN');
+        // 1. Guardar Snapshots (Auditoría V2)
+        if (snapshots && Array.isArray(snapshots)) {
+            for (const snap of snapshots) {
+                // Validación Estricta de Tipos
+                const ingId = parseInt(snap.id, 10);
+                const real = parseFloat(snap.stock_real);
+                const virtual = parseFloat(snap.stock_virtual);
+                // Si alguno es NaN, saltamos (o lanzamos error, pero mejor prevenir crash)
+                if (isNaN(ingId)) continue;
+                // Asegurar valores numéricos seguros (default 0 ya debería venir validado, pero insistimos)
+                const safeReal = isNaN(real) ? 0 : real;
+                const safeVirtual = isNaN(virtual) ? 0 : virtual;
+                const diff = safeReal - safeVirtual;
+                await client.query(
+                    `INSERT INTO inventory_snapshots_v2 
+                     (ingrediente_id, stock_virtual, stock_real, diferencia, restaurante_id) 
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [ingId, safeVirtual.toFixed(2), safeReal.toFixed(2), diff.toFixed(2), req.restauranteId]
+                );
+            }
+        }
+        // 2. Guardar Ajustes Desglosados (V2)
+        if (adjustments && Array.isArray(adjustments)) {
+            for (const adj of adjustments) {
+                const ingId = parseInt(adj.ingrediente_id, 10);
+                const cantidad = parseFloat(adj.cantidad);
+                const motivo = adj.motivo ? String(adj.motivo).substring(0, 100) : 'Ajuste';
+                const notas = adj.notas ? String(adj.notas) : '';
+                if (isNaN(ingId)) continue;
+                const safeCant = isNaN(cantidad) ? 0 : cantidad;
+                await client.query(
+                    `INSERT INTO inventory_adjustments_v2 
+                     (ingrediente_id, cantidad, motivo, notas, restaurante_id) 
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [ingId, safeCant.toFixed(2), motivo, notas, req.restauranteId]
+                );
+            }
+        }
+        // 3. Actualizar Stock Maestro
+        const updated = [];
+        if (finalStock && Array.isArray(finalStock)) {
+            for (const item of finalStock) {
+                const ingId = parseInt(item.id, 10);
+                const real = parseFloat(item.stock_real);
+                if (isNaN(ingId)) continue;
+                const safeReal = isNaN(real) ? 0 : real;
+                const result = await client.query(
+                    `UPDATE ingredientes
+                     SET stock_actual = $1, -- Actualizamos la referencia oficial
+                         stock_real = NULL, -- Limpiamos el conteo físico para la próxima vez
+                         ultima_actualizacion_stock = CURRENT_TIMESTAMP
+                     WHERE id = $2 AND restaurante_id = $3
+                     RETURNING *`,
+                    [safeReal.toFixed(2), ingId, req.restauranteId]
+                );
+                if (result.rows.length > 0) {
+                    updated.push(result.rows[0]);
+                }
+            }
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, updated: updated.length, items: updated });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('CRITICAL ERROR in /api/inventory/consolidate:', err); // Log detallado
+        res.status(500).json({ error: 'Error interno en la consolidación de datos: ' + err.message });
+    } finally {
+        client.release();
+    }
+});
+// ========== ANÁLISIS AVANZADO ==========
+app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
+    try {
+        // 1. Obtener ventas agregadas por receta
+        const ventas = await pool.query(
+            `SELECT r.id, r.nombre, r.categoria, r.precio_venta, 
+                    SUM(v.cantidad) as cantidad_vendida,
+                    SUM(v.total) as total_ventas
+             FROM ventas v
+             JOIN recetas r ON v.receta_id = r.id
+             WHERE v.restaurante_id = $1
+             GROUP BY r.id, r.nombre, r.categoria, r.precio_venta`,
+            [req.restauranteId]
+        );
+        if (ventas.rows.length === 0) {
+            return res.json([]);
+        }
+        // 2. Calcular costes para margen
+        const analisis = [];
+        const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
+        const promedioPopularidad = totalVentasRestaurante / ventas.rows.length; // Mix medio
+        let sumaMargenes = 0;
+        for (const plato of ventas.rows) {
+            // Calcular coste (simplificado, idealmente cacheado o pre-calculado)
+            const recetaResult = await pool.query('SELECT ingredientes FROM recetas WHERE id = $1', [plato.id]);
+            const ingredientes = recetaResult.rows[0].ingredientes;
+            let costePlato = 0;
+            if (ingredientes) {
+                for (const ing of ingredientes) {
+                    const ingDb = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
+                    if (ingDb.rows.length > 0) {
+                        costePlato += parseFloat(ingDb.rows[0].precio) * ing.cantidad;
+                    }
+                }
+            }
+            const margenContribucion = parseFloat(plato.precio_venta) - costePlato;
+            sumaMargenes += margenContribucion * parseFloat(plato.cantidad_vendida);
+            analisis.push({
+                ...plato,
+                coste: costePlato,
+                margen: margenContribucion,
+                popularidad: parseFloat(plato.cantidad_vendida)
+            });
+        }
+        const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
+        // 3. Clasificar BCG
+        // Estrella: Alta Popularidad, Alto Margen
+        // Caballo: Alta Popularidad, Bajo Margen
+        // Puzzle: Baja Popularidad, Alto Margen
+        // Perro: Baja Popularidad, Bajo Margen
+        const resultado = analisis.map(p => {
+            const esPopular = p.popularidad >= (promedioPopularidad * 0.7); // Umbral del 70% del promedio (común en ingeniería de menu)
+            const esRentable = p.margen >= promedioMargen;
+            let clasificacion = 'perro';
+            if (esPopular && esRentable) clasificacion = 'estrella';
+            else if (esPopular && !esRentable) clasificacion = 'caballo';
+            else if (!esPopular && esRentable) clasificacion = 'puzzle';
+            return {
+                ...p,
+                clasificacion,
+                metricas: {
+                    esPopular,
+                    esRentable,
+                    promedioPopularidad,
+                    promedioMargen
+                }
+            };
+        });
+        res.json(resultado);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Error analizando menú' });
+    }
+});
 // ========== RECETAS ==========
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
@@ -840,34 +715,31 @@ app.get('/api/recipes', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.post('/api/recipes', authMiddleware, async (req, res) => {
     try {
-        const { nombre, codigo, categoria, precio_venta, porciones, ingredientes } = req.body;
+        const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
         const result = await pool.query(
-            'INSERT INTO recetas (nombre, codigo, categoria, precio_venta, porciones, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [nombre, codigo || null, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), req.restauranteId]
+            'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), req.restauranteId]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, codigo, categoria, precio_venta, porciones, ingredientes } = req.body;
+        const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
         const result = await pool.query(
-            'UPDATE recetas SET nombre=$1, codigo=$2, categoria=$3, precio_venta=$4, porciones=$5, ingredientes=$6 WHERE id=$7 AND restaurante_id=$8 RETURNING *',
-            [nombre, codigo || null, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), id, req.restauranteId]
+            'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5 WHERE id=$6 AND restaurante_id=$7 RETURNING *',
+            [nombre, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), id, req.restauranteId]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM recetas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
@@ -876,7 +748,6 @@ app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 // ========== PROVEEDORES ==========
 app.get('/api/suppliers', authMiddleware, async (req, res) => {
     try {
@@ -886,7 +757,6 @@ app.get('/api/suppliers', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.post('/api/suppliers', authMiddleware, async (req, res) => {
     try {
         const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
@@ -899,7 +769,6 @@ app.post('/api/suppliers', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
@@ -908,12 +777,11 @@ app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
             'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
             [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id, req.restauranteId]
         );
-        res.json(result.rows[0] || {});
+        res.status(201).json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM proveedores WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
@@ -922,7 +790,6 @@ app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 // ========== PEDIDOS ==========
 app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
@@ -932,7 +799,6 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         const { proveedorId, fecha, ingredientes, total, estado } = req.body;
@@ -940,41 +806,24 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
             'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
             [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente', req.restauranteId]
         );
-
-        // Auto-actualizar registro diario
-        await actualizarRegistroDiario(req.restauranteId, fecha, pool);
-
         res.status(201).json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.put('/api/orders/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
-        
-        // Obtener fecha del pedido para actualizar registro diario
-        const pedidoResult = await pool.query('SELECT fecha FROM pedidos WHERE id = $1', [id]);
-        const fechaPedido = pedidoResult.rows[0]?.fecha;
-
         const result = await pool.query(
             'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
             [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id, req.restauranteId]
         );
-
-        // Auto-actualizar registro diario
-        if (fechaPedido) {
-            await actualizarRegistroDiario(req.restauranteId, fechaPedido, pool);
-        }
-
         res.json(result.rows[0] || {});
     } catch (err) {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM pedidos WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
@@ -983,19 +832,16 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 // ========== VENTAS ==========
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha } = req.query;
         let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1';
         let params = [req.restauranteId];
-
         if (fecha) {
             query += ' AND DATE(v.fecha) = $2';
             params.push(fecha);
         }
-
         query += ' ORDER BY v.fecha DESC';
         const result = await pool.query(query, params);
         res.json(result.rows);
@@ -1003,44 +849,47 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
 app.post('/api/sales', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         const { recetaId, cantidad } = req.body;
         await client.query('BEGIN');
-
         const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2', [recetaId, req.restauranteId]);
         if (recetaResult.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Receta no encontrada' });
         }
-
         const receta = recetaResult.rows[0];
         const precioUnitario = parseFloat(receta.precio_venta);
         const total = precioUnitario * cantidad;
-
+        // Validar stock
+        const ingredientesReceta = receta.ingredientes;
+        for (const ing of ingredientesReceta) {
+            const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
+            if (stockResult.rows.length > 0) {
+                const stockActual = parseFloat(stockResult.rows[0].stock_actual);
+                const stockNecesario = ing.cantidad * cantidad;
+                if (stockActual < stockNecesario) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        error: `Stock insuficiente de ${stockResult.rows[0].nombre}: necesitas ${stockNecesario}, tienes ${stockActual}`
+                    });
+                }
+            }
+        }
         // Registrar venta
         const ventaResult = await client.query(
             'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, restaurante_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [recetaId, cantidad, precioUnitario, total, req.restauranteId]
         );
-
         // Descontar stock
-        const ingredientesReceta = receta.ingredientes;
         for (const ing of ingredientesReceta) {
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
                 [ing.cantidad * cantidad, ing.ingredienteId]
             );
         }
-
         await client.query('COMMIT');
-
-        // Auto-actualizar registro diario
-        const hoy = new Date().toISOString().split('T')[0];
-        await actualizarRegistroDiario(req.restauranteId, hoy, pool);
-
         res.status(201).json(ventaResult.rows[0]);
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1049,7 +898,6 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         client.release();
     }
 });
-
 app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM ventas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
@@ -1058,138 +906,161 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
-// ========== ANÁLISIS ==========
-app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
+app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
-        const ventas = await pool.query(
-            `SELECT r.id, r.nombre, r.categoria, r.precio_venta, 
-                    SUM(v.cantidad) as cantidad_vendida, SUM(v.total) as total_ventas
-             FROM ventas v JOIN recetas r ON v.receta_id = r.id
-             WHERE v.restaurante_id = $1 GROUP BY r.id, r.nombre, r.categoria, r.precio_venta`,
-            [req.restauranteId]
-        );
-
-        if (ventas.rows.length === 0) return res.json([]);
-
-        const analisis = [];
-        const totalVentas = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
-        const promedioPopularidad = totalVentas / ventas.rows.length;
-        let sumaMargenes = 0;
-
-        for (const plato of ventas.rows) {
-            const recetaResult = await pool.query('SELECT ingredientes FROM recetas WHERE id = $1', [plato.id]);
-            const ingredientes = recetaResult.rows[0].ingredientes;
-            let costePlato = 0;
-
-            if (ingredientes) {
-                for (const ing of ingredientes) {
-                    const ingDb = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
-                    if (ingDb.rows.length > 0) {
-                        costePlato += parseFloat(ingDb.rows[0].precio) * ing.cantidad;
-                    }
+        const { ventas } = req.body; // Array de { receta: "nombre", cantidad: N, total: M, fecha: "ISO" }
+        if (!Array.isArray(ventas)) {
+            return res.status(400).json({ error: 'Formato inválido: se esperaba un array "ventas"' });
+        }
+        await client.query('BEGIN');
+        const resultados = {
+            procesados: 0,
+            fallidos: 0,
+            errores: []
+        };
+        // 1. Obtener todas las recetas del restaurante para búsqueda rápida
+        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
+        const recetasMap = new Map();
+        recetasResult.rows.forEach(r => {
+            recetasMap.set(r.nombre.toLowerCase().trim(), r);
+        });
+        for (const venta of ventas) {
+            const nombreReceta = (venta.receta || '').toLowerCase().trim();
+            const cantidad = parseInt(venta.cantidad) || 1;
+            // Buscar receta (match exacto insensible a mayúsculas)
+            const receta = recetasMap.get(nombreReceta);
+            if (!receta) {
+                resultados.fallidos++;
+                resultados.errores.push({ receta: venta.receta, error: 'Receta no encontrada' });
+                continue;
+            }
+            const total = parseFloat(venta.total) || (parseFloat(receta.precio_venta) * cantidad);
+            const fecha = venta.fecha || new Date().toISOString();
+            // 2. Registrar venta
+            await client.query(
+                'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6)',
+                [receta.id, cantidad, receta.precio_venta, total, fecha, req.restauranteId]
+            );
+            // 3. Descontar stock (Permitir negativo)
+            const ingredientesReceta = receta.ingredientes; // JSONB array
+            if (Array.isArray(ingredientesReceta)) {
+                for (const ing of ingredientesReceta) {
+                    await client.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                        [ing.cantidad * cantidad, ing.ingredienteId, req.restauranteId]
+                    );
                 }
             }
-
-            const margen = parseFloat(plato.precio_venta) - costePlato;
-            sumaMargenes += margen * parseFloat(plato.cantidad_vendida);
-
-            analisis.push({
-                ...plato,
-                coste: costePlato,
-                margen,
-                popularidad: parseFloat(plato.cantidad_vendida)
-            });
+            resultados.procesados++;
         }
-
-        const promedioMargen = totalVentas > 0 ? sumaMargenes / totalVentas : 0;
-
-        const resultado = analisis.map(p => {
-            const esPopular = p.popularidad >= promedioPopularidad * 0.7;
-            const esRentable = p.margen >= promedioMargen;
-
-            let clasificacion = 'perro';
-            if (esPopular && esRentable) clasificacion = 'estrella';
-            else if (esPopular && !esRentable) clasificacion = 'caballo';
-            else if (!esPopular && esRentable) clasificacion = 'puzzle';
-
-            return { ...p, clasificacion };
-        });
-
-        res.json(resultado);
+        await client.query('COMMIT');
+        res.json(resultados);
     } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error carga masiva ventas', { error: err.message });
+        res.status(500).json({ error: 'Error interno procesando carga masiva' });
+    } finally {
+        client.release();
+    }
+});
+// ========== BALANCE Y ESTADÍSTICAS ==========
+app.get('/api/balance/mes', authMiddleware, async (req, res) => {
+    try {
+        const { mes, ano } = req.query;
+        const mesActual = mes || new Date().getMonth() + 1;
+        const anoActual = ano || new Date().getFullYear();
+        const ventasMes = await pool.query(
+            `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
+       FROM ventas
+       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2 AND restaurante_id = $3`,
+            [mesActual, anoActual, req.restauranteId]
+        );
+        const ventasDetalle = await pool.query(
+            `SELECT v.cantidad, r.ingredientes
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3`,
+            [mesActual, anoActual, req.restauranteId]
+        );
+        let costos = 0;
+        for (const venta of ventasDetalle.rows) {
+            const ingredientes = venta.ingredientes;
+            for (const ing of ingredientes) {
+                const ingResult = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
+                if (ingResult.rows.length > 0) {
+                    costos += parseFloat(ingResult.rows[0].precio) * ing.cantidad * venta.cantidad;
+                }
+            }
+        }
+        const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;
+        const ganancia = ingresos - costos;
+        const margen = ingresos > 0 ? ((ganancia / ingresos) * 100).toFixed(1) : 0;
+        const platoMasVendido = await pool.query(
+            `SELECT r.nombre, SUM(v.cantidad) as total_vendido
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3
+       GROUP BY r.nombre
+       ORDER BY total_vendido DESC
+       LIMIT 1`,
+            [mesActual, anoActual, req.restauranteId]
+        );
+        const ventasPorPlato = await pool.query(
+            `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
+       FROM ventas v
+       JOIN recetas r ON v.receta_id = r.id
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3
+       GROUP BY r.nombre
+       ORDER BY total_ingresos DESC`,
+            [mesActual, anoActual, req.restauranteId]
+        );
+        const valorInventario = await pool.query(
+            `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
+       FROM ingredientes WHERE restaurante_id = $1`,
+            [req.restauranteId]
+        );
+        res.json({
+            ingresos,
+            costos,
+            ganancia,
+            margen: parseFloat(margen),
+            num_ventas: parseInt(ventasMes.rows[0].num_ventas) || 0,
+            plato_mas_vendido: platoMasVendido.rows[0] || null,
+            ventas_por_plato: ventasPorPlato.rows || [],
+            valor_inventario: parseFloat(valorInventario.rows[0].valor) || 0
+        });
+    } catch (error) {
+        log('error', 'Error obteniendo balance', { error: error.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
-
-// ========== FUNCIÓN AUXILIAR: ACTUALIZAR REGISTRO DIARIO ==========
-async function actualizarRegistroDiario(restauranteId, fecha, poolConn) {
+app.get('/api/balance/comparativa', authMiddleware, async (req, res) => {
     try {
-        const fechaStr = typeof fecha === 'string' ? fecha.split('T')[0] : new Date(fecha).toISOString().split('T')[0];
-
-        // Obtener totales del día
-        const ventasResult = await poolConn.query(
-            `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count 
-             FROM ventas WHERE DATE(fecha) = $1 AND restaurante_id = $2`,
-            [fechaStr, restauranteId]
+        const meses = await pool.query(
+            `SELECT 
+         TO_CHAR(fecha, 'YYYY-MM') as mes,
+         SUM(total) as ingresos,
+         COUNT(*) as num_ventas
+       FROM ventas
+       WHERE restaurante_id = $1
+       GROUP BY TO_CHAR(fecha, 'YYYY-MM')
+       ORDER BY mes DESC
+       LIMIT 12`,
+            [req.restauranteId]
         );
-
-        const comprasResult = await poolConn.query(
-            `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count 
-             FROM pedidos WHERE DATE(fecha) = $1 AND restaurante_id = $2 AND estado = 'recibido'`,
-            [fechaStr, restauranteId]
-        );
-
-        const gastosResult = await poolConn.query(
-            'SELECT * FROM config_gastos WHERE restaurante_id = $1',
-            [restauranteId]
-        );
-
-        const gastos = gastosResult.rows[0] || { alquiler: 1000, personal: 3000, suministros: 500, otros: 300 };
-        const gastosFijosMensuales = parseFloat(gastos.alquiler || 0) + parseFloat(gastos.personal || 0) + 
-                                      parseFloat(gastos.suministros || 0) + parseFloat(gastos.otros || 0);
-
-        const fechaObj = new Date(fechaStr);
-        const diasMes = new Date(fechaObj.getFullYear(), fechaObj.getMonth() + 1, 0).getDate();
-        const objetivoDiario = gastosFijosMensuales / diasMes;
-
-        const ventasTotal = parseFloat(ventasResult.rows[0].total);
-        const comprasTotal = parseFloat(comprasResult.rows[0].total);
-        const margenBruto = ventasTotal - comprasTotal;
-        const foodCostPercent = ventasTotal > 0 ? (comprasTotal / ventasTotal) * 100 : 0;
-        const objetivoCumplido = ventasTotal >= objetivoDiario;
-        const gastosFijosProrrateados = gastosFijosMensuales / diasMes;
-        const beneficioNeto = margenBruto - gastosFijosProrrateados;
-
-        await poolConn.query(
-            `INSERT INTO daily_records 
-             (fecha, ventas_total, ventas_count, compras_total, compras_count, margen_bruto, 
-              food_cost_percent, objetivo_diario, objetivo_cumplido, gastos_fijos_prorrateados, 
-              beneficio_neto, restaurante_id, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-             ON CONFLICT (fecha, restaurante_id) 
-             DO UPDATE SET 
-                ventas_total = $2, ventas_count = $3, compras_total = $4, compras_count = $5,
-                margen_bruto = $6, food_cost_percent = $7, objetivo_diario = $8, objetivo_cumplido = $9,
-                gastos_fijos_prorrateados = $10, beneficio_neto = $11, updated_at = CURRENT_TIMESTAMP`,
-            [fechaStr, ventasTotal, ventasResult.rows[0].count, comprasTotal, comprasResult.rows[0].count,
-             margenBruto, foodCostPercent, objetivoDiario, objetivoCumplido, gastosFijosProrrateados,
-             beneficioNeto, restauranteId]
-        );
-
-        log('info', 'Registro diario auto-actualizado', { fecha: fechaStr, restauranteId });
-    } catch (err) {
-        log('error', 'Error actualizando registro diario', { error: err.message });
+        res.json(meses.rows);
+    } catch (error) {
+        res.status(500).json({ error: 'Error interno' });
     }
-}
-
+});
 // ========== 404 ==========
 app.use((req, res) => {
     res.status(404).json({ error: 'Ruta no encontrada' });
 });
-
 // ========== INICIAR SERVIDOR ==========
 app.listen(PORT, '0.0.0.0', () => {
-    log('info', 'Servidor iniciado', { port: PORT, version: '2.2.0' });
-    console.log(`🚀 MindLoop CostOS API v2.2.0 corriendo en puerto ${PORT}`);
+    log('info', 'Servidor iniciado', { port: PORT, version: '2.1.0', cors: ALLOWED_ORIGINS });
+    console.log(`🚀 API corriendo en puerto ${PORT}`);
+    console.log(`📍 La Caleta 102 Dashboard API v2.1`);
 });
