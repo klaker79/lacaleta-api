@@ -242,7 +242,49 @@ const pool = new Pool({
       CREATE INDEX IF NOT EXISTS idx_ventas_diarias_fecha ON ventas_diarias_resumen(fecha);
     `);
 
-        log('info', 'Tablas inicializadas');
+        // ========== MIGRACIONES DE COLUMNAS ESTÁNDAR ==========
+        log('info', 'Ejecutando migraciones de columnas estándar...');
+
+        // Añadir columna 'codigo' a ingredientes
+        try {
+            await pool.query(`
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            `);
+        } catch (e) { log('warn', 'Migración ingredientes.codigo', { error: e.message }); }
+
+        // Añadir columna 'codigo' a recetas
+        try {
+            await pool.query(`
+                ALTER TABLE recetas ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
+                ALTER TABLE recetas ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            `);
+        } catch (e) { log('warn', 'Migración recetas.codigo', { error: e.message }); }
+
+        // Añadir columnas a proveedores
+        try {
+            await pool.query(`
+                ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
+                ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS cif VARCHAR(20);
+                ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            `);
+        } catch (e) { log('warn', 'Migración proveedores.codigo', { error: e.message }); }
+
+        // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
+        log('info', 'Limpiando tablas obsoletas...');
+
+        try {
+            await pool.query(`
+                DROP TABLE IF EXISTS daily_records CASCADE;
+                DROP TABLE IF EXISTS lanave_ventas_tpv CASCADE;
+                DROP TABLE IF EXISTS producto_id_tpv CASCADE;
+                DROP TABLE IF EXISTS snapshots_diarios CASCADE;
+                DROP TABLE IF EXISTS inventory_counts CASCADE;
+            `);
+            log('info', 'Tablas obsoletas eliminadas');
+        } catch (e) { log('warn', 'Error eliminando tablas obsoletas', { error: e.message }); }
+
+        log('info', 'Tablas y migraciones completadas');
     } catch (err) {
         log('error', 'Error DB', { error: err.message });
     }
