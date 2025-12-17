@@ -1558,14 +1558,13 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
                 r.nombre as receta,
                 SUM(v.cantidad) as cantidad_vendida,
                 AVG(v.precio_unitario) as precio_venta_unitario,
-                SUM(v.total) as total_ingresos,
-                COALESCE(r.coste_total, 0) as coste_por_unidad
+                SUM(v.total) as total_ingresos
             FROM ventas v
             JOIN recetas r ON v.receta_id = r.id
             WHERE v.restaurante_id = $1
               AND EXTRACT(MONTH FROM v.fecha) = $2
               AND EXTRACT(YEAR FROM v.fecha) = $3
-            GROUP BY DATE(v.fecha), r.id, r.nombre, r.coste_total
+            GROUP BY DATE(v.fecha), r.id, r.nombre
             ORDER BY DATE(v.fecha), r.nombre
         `, [req.restauranteId, mesActual, anoActual]);
 
@@ -1599,9 +1598,9 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
 
             const cantidadVendida = parseInt(row.cantidad_vendida);
             const totalIngresos = parseFloat(row.total_ingresos);
-            const costePorUnidad = parseFloat(row.coste_por_unidad) || 0;
-            const costeTotal = costePorUnidad * cantidadVendida;
-            const beneficio = totalIngresos - costeTotal;
+            // Sin coste calculado por ahora (TO-DO: calcular desde ingredientes de receta)
+            const costeTotal = 0;
+            const beneficio = totalIngresos;
 
             if (!recetasData[row.receta]) {
                 recetasData[row.receta] = { id: row.receta_id, dias: {}, totalVendidas: 0, totalIngresos: 0, totalCoste: 0, totalBeneficio: 0 };
