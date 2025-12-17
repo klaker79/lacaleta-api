@@ -1775,9 +1775,131 @@ app.use((err, req, res, next) => {
 });
 
 // ========== INICIAR SERVIDOR ==========
-app.listen(PORT, '0.0.0.0', () => {
-    log('info', 'Servidor iniciado', { port: PORT, version: '2.2.0', cors: ALLOWED_ORIGINS });
+const server = app.listen(PORT, '0.0.0.0', () => {
+    log('info', 'Servidor iniciado', { port: PORT, version: '2.4.0', cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
-    console.log(`📍 La Caleta 102 Dashboard API v2.2`);
+    console.log(`📍 La Caleta 102 Dashboard API v2.4 - PRODUCCIÓN`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
 });
+
+// ========== SISTEMA DE ALERTAS ==========
+const ALERT_EMAIL = process.env.ALERT_EMAIL || 'ikerameas@gmail.com';
+const ALERT_COOLDOWN = 5 * 60 * 1000; // 5 minutos entre alertas iguales
+let lastAlerts = {};
+
+async function sendAlert(type, message, details = {}) {
+    const alertKey = `${type}-${message}`;
+    const now = Date.now();
+
+    // Evitar spam de alertas
+    if (lastAlerts[alertKey] && (now - lastAlerts[alertKey]) < ALERT_COOLDOWN) {
+        return;
+    }
+    lastAlerts[alertKey] = now;
+
+    const alertData = {
+        type,
+        message,
+        details,
+        timestamp: new Date().toISOString(),
+        server: 'lacaleta-api',
+        environment: process.env.NODE_ENV || 'production'
+    };
+
+    log('alert', `🚨 ALERTA: ${message}`, alertData);
+
+    // Guardar alerta en archivo para debugging
+    try {
+        const alertsFile = path.join(__dirname, 'alerts.log');
+        fs.appendFileSync(alertsFile, JSON.stringify(alertData) + '\n');
+    } catch (e) {
+        console.error('Error guardando alerta:', e);
+    }
+
+    // TODO: Integrar con servicio de email (SendGrid, Mailgun, etc.)
+    // Por ahora, log a consola con formato destacado
+    console.error('═'.repeat(60));
+    console.error('🚨 ALERTA CRÍTICA 🚨');
+    console.error(`Tipo: ${type}`);
+    console.error(`Mensaje: ${message}`);
+    console.error(`Detalles: ${JSON.stringify(details, null, 2)}`);
+    console.error(`Timestamp: ${alertData.timestamp}`);
+    console.error('═'.repeat(60));
+}
+
+// ========== MANEJADORES DE ERRORES DE PROCESO ==========
+process.on('uncaughtException', (error) => {
+    sendAlert('CRITICAL', 'Excepción no capturada', {
+        error: error.message,
+        stack: error.stack
+    });
+    log('error', 'Uncaught Exception', { error: error.message, stack: error.stack });
+
+    // Dar tiempo para que se envíe la alerta antes de cerrar
+    setTimeout(() => {
+        process.exit(1);
+    }, 3000);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    sendAlert('ERROR', 'Promise rechazada sin manejar', {
+        reason: reason?.message || String(reason),
+        stack: reason?.stack
+    });
+    log('error', 'Unhandled Rejection', { reason: reason?.message || String(reason) });
+});
+
+// ========== GRACEFUL SHUTDOWN ==========
+const gracefulShutdown = async (signal) => {
+    log('info', `Recibida señal ${signal}. Iniciando shutdown graceful...`);
+    console.log(`\n🛑 Recibida señal ${signal}. Cerrando servidor...`);
+
+    // Dejar de aceptar nuevas conexiones
+    server.close(async () => {
+        log('info', 'Servidor HTTP cerrado');
+        console.log('✅ Servidor HTTP cerrado');
+
+        // Cerrar conexiones a la base de datos
+        try {
+            await pool.end();
+            log('info', 'Conexiones PostgreSQL cerradas');
+            console.log('✅ Conexiones PostgreSQL cerradas');
+        } catch (err) {
+            log('error', 'Error cerrando conexiones DB', { error: err.message });
+        }
+
+        log('info', 'Shutdown completado');
+        console.log('👋 Shutdown completado. Hasta pronto!');
+        process.exit(0);
+    });
+
+    // Forzar cierre si tarda demasiado
+    setTimeout(() => {
+        log('warn', 'Forzando shutdown después de timeout');
+        console.error('⚠️ Forzando cierre después de 30s...');
+        process.exit(1);
+    }, 30000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ========== HEALTH CHECK AVANZADO ==========
+setInterval(async () => {
+    try {
+        await pool.query('SELECT 1');
+    } catch (err) {
+        sendAlert('WARNING', 'Health check fallido - PostgreSQL no responde', {
+            error: err.message
+        });
+    }
+}, 60000); // Check cada 60 segundos
+
+// Log de inicio exitoso
+log('info', 'Sistema de monitoreo y alertas activado', {
+    alertEmail: ALERT_EMAIL,
+    healthCheckInterval: '60s',
+    gracefulShutdown: 'enabled'
+});
+console.log('📊 Sistema de monitoreo activado');
+console.log(`📧 Alertas configuradas para: ${ALERT_EMAIL}`);
