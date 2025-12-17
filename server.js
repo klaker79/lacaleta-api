@@ -5,41 +5,58 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+
 // ========== CONFIGURACIÓN ==========
 const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
 const PORT = process.env.PORT || 3000;
+
 // CORS: Orígenes permitidos (Combinar entorno + defaults)
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'http://localhost:5500',
-    'http://127.0.0.1:5500'
+    'http://127.0.0.1:5500',
+    'http://localhost:3000',
+    'http://localhost:8080'
 ];
 const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
     : [];
 const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
+
 const app = express();
-// ========== MIDDLEWARE ==========
-// CORS configuración mejorada
-app.use(cors({
-    origin: function (origin, callback) {
-        // Permitir requests sin origin (curl, Postman)
-        if (!origin) return callback(null, true);
-        if (ALLOWED_ORIGINS.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.log('⛔ CORS bloqueado para:', origin);
-            callback(null, false);
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
-}));
-// Manejar preflight explícitamente
-app.options('*', cors());
-// Parser JSON (solo una vez)
-app.use(express.json());
+
+// ========== MIDDLEWARE CORS MEJORADO ==========
+// Middleware manual para asegurar que CORS funciona en TODOS los casos
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    
+    // Permitir requests sin origin (curl, Postman, n8n)
+    if (!origin) {
+        res.header('Access-Control-Allow-Origin', '*');
+    } else if (ALLOWED_ORIGINS.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+    } else {
+        // Para desarrollo, permitir cualquier origen pero logear
+        console.log('⚠️ Origin no en whitelist:', origin);
+        res.header('Access-Control-Allow-Origin', origin);
+    }
+    
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-API-Key');
+    res.header('Access-Control-Max-Age', '86400'); // Cache preflight por 24h
+    
+    // Responder inmediatamente a OPTIONS (preflight)
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    
+    next();
+});
+
+// Parser JSON
+app.use(express.json({ limit: '10mb' }));
+
 // Logging Persistente
 const LOG_FILE = path.join(__dirname, 'server.log');
 const log = (level, message, data = {}) => {
@@ -50,11 +67,11 @@ const log = (level, message, data = {}) => {
         ...data
     });
     console.log(logEntry);
-    // Append to file
     fs.appendFile(LOG_FILE, logEntry + '\n', (err) => {
         if (err) console.error('Error writing to log file:', err);
     });
 };
+
 // ========== BASE DE DATOS ==========
 const pool = new Pool({
     host: process.env.DB_HOST || 'anais-postgres-2s8h7q',
@@ -63,11 +80,13 @@ const pool = new Pool({
     user: process.env.DB_USER || 'admin',
     password: process.env.DB_PASSWORD || '18061979Anais.',
 });
+
 // Test conexión e inicializar DB
 (async () => {
     try {
         await pool.query('SELECT NOW()');
         log('info', 'Conectado a PostgreSQL');
+
         // Crear tablas
         await pool.query(`
       CREATE TABLE IF NOT EXISTS restaurantes (
@@ -100,6 +119,7 @@ const pool = new Pool({
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
         // MIGRACIÓN: Añadir columna familia si no existe
         try {
             await pool.query(`
@@ -113,6 +133,7 @@ const pool = new Pool({
         } catch (e) {
             log('warn', 'Error en migración de columna familia', { error: e.message });
         }
+
         await pool.query(`
       CREATE TABLE IF NOT EXISTS recetas (
         id SERIAL PRIMARY KEY,
@@ -157,7 +178,6 @@ const pool = new Pool({
         fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         restaurante_id INTEGER NOT NULL
       );
-      -- Tabla de Ajustes (Detalle del movimiento) - V2 (Fresh Schema)
       CREATE TABLE IF NOT EXISTS inventory_adjustments_v2 (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
@@ -168,7 +188,6 @@ const pool = new Pool({
         usuario_id INTEGER, 
         restaurante_id INTEGER NOT NULL
       );
-      -- Tabla de Snapshots (Auditoría del estado antes/después) - V2 (Fresh Schema)
       CREATE TABLE IF NOT EXISTS inventory_snapshots_v2 (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
@@ -178,47 +197,98 @@ const pool = new Pool({
         diferencia DECIMAL(10, 2) NOT NULL,
         restaurante_id INTEGER NOT NULL
       );
+      -- Tabla para tokens de API (n8n, integraciones)
+      CREATE TABLE IF NOT EXISTS api_tokens (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        nombre VARCHAR(255) NOT NULL,
+        token_hash VARCHAR(255) NOT NULL,
+        ultimo_uso TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP
+      );
       CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
       CREATE INDEX IF NOT EXISTS idx_ventas_receta ON ventas(receta_id);
       CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
       CREATE INDEX IF NOT EXISTS idx_ingredientes_restaurante ON ingredientes(restaurante_id);
     `);
+
         log('info', 'Tablas inicializadas');
     } catch (err) {
         log('error', 'Error DB', { error: err.message });
     }
 })();
+
 // ========== MIDDLEWARE DE AUTENTICACIÓN ==========
 const authMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization;
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Token no proporcionado' });
+        log('warn', 'Auth fallido: Token no proporcionado', { 
+            url: req.originalUrl,
+            origin: req.headers.origin || 'sin-origin'
+        });
+        return res.status(401).json({ 
+            error: 'Token no proporcionado',
+            code: 'NO_TOKEN',
+            hint: 'Incluye header: Authorization: Bearer <tu_token>'
+        });
     }
+
     const token = authHeader.split(' ')[1];
+    
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded;
         req.restauranteId = decoded.restauranteId;
         next();
     } catch (error) {
-        return res.status(401).json({ error: 'Token inválido' });
+        log('warn', 'Auth fallido: Token inválido', { 
+            error: error.message,
+            url: req.originalUrl
+        });
+        
+        let errorMsg = 'Token inválido';
+        let code = 'INVALID_TOKEN';
+        
+        if (error.name === 'TokenExpiredError') {
+            errorMsg = 'Token expirado. Por favor, vuelve a iniciar sesión.';
+            code = 'TOKEN_EXPIRED';
+        }
+        
+        return res.status(401).json({ 
+            error: errorMsg,
+            code: code,
+            expiredAt: error.expiredAt || null
+        });
     }
 };
+
 const requireAdmin = (req, res, next) => {
-    if (!req.user || req.user.rol !== 'admin') {
-        log('warn', 'Acceso denegado a ruta protegida', { user: req.user ? req.user.email : 'anon', url: req.originalUrl });
+    if (!req.user || (req.user.rol !== 'admin' && req.user.rol !== 'api')) {
+        log('warn', 'Acceso denegado a ruta protegida', { 
+            user: req.user ? req.user.email : 'anon', 
+            url: req.originalUrl 
+        });
         return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
     }
     next();
 };
+
 // ========== ENDPOINTS PÚBLICOS ==========
 app.get('/', (req, res) => {
     res.json({
         message: '🍽️ La Caleta 102 API',
-        version: '2.1.0',
-        status: 'running'
+        version: '2.2.0',
+        status: 'running',
+        docs: {
+            health: '/api/health',
+            login: 'POST /api/auth/login',
+            register: 'POST /api/auth/register'
+        }
     });
 });
+
 // Health Check
 app.get('/api/health', async (req, res) => {
     try {
@@ -226,37 +296,50 @@ app.get('/api/health', async (req, res) => {
         res.json({
             status: 'healthy',
             timestamp: new Date().toISOString(),
+            version: '2.2.0',
             cors_origins: ALLOWED_ORIGINS
         });
     } catch (e) {
-        res.status(503).json({ status: 'unhealthy' });
+        res.status(503).json({ 
+            status: 'unhealthy',
+            error: e.message
+        });
     }
 });
+
 // ========== AUTENTICACIÓN ==========
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
+
         if (!email || !password) {
             return res.status(400).json({ error: 'Email y contraseña requeridos' });
         }
+
         const result = await pool.query(
             'SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id WHERE u.email = $1',
             [email]
         );
+
         if (result.rows.length === 0) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
+
         const user = result.rows[0];
         const validPassword = await bcrypt.compare(password, user.password_hash);
+
         if (!validPassword) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
+
         const token = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
+
         log('info', 'Login exitoso', { userId: user.id, email });
+
         res.json({
             token,
             user: {
@@ -264,7 +347,8 @@ app.post('/api/auth/login', async (req, res) => {
                 email: user.email,
                 nombre: user.nombre,
                 rol: user.rol,
-                restaurante: user.restaurante_nombre
+                restaurante: user.restaurante_nombre,
+                restauranteId: user.restaurante_id
             }
         });
     } catch (err) {
@@ -272,32 +356,103 @@ app.post('/api/auth/login', async (req, res) => {
         res.status(500).json({ error: 'Error en el servidor' });
     }
 });
+
+// Verificar token (útil para debugging y n8n)
+app.get('/api/auth/verify', authMiddleware, (req, res) => {
+    res.json({
+        valid: true,
+        user: {
+            id: req.user.userId,
+            email: req.user.email,
+            rol: req.user.rol,
+            restauranteId: req.restauranteId
+        },
+        tokenInfo: {
+            issuedAt: new Date(req.user.iat * 1000).toISOString(),
+            expiresAt: new Date(req.user.exp * 1000).toISOString()
+        }
+    });
+});
+
+// Generar token de API de larga duración (para n8n, Zapier, etc.)
+app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) => {
+    try {
+        const { nombre, duracionDias } = req.body;
+        const dias = duracionDias || 365; // Por defecto 1 año
+        
+        const token = jwt.sign(
+            { 
+                userId: req.user.userId, 
+                restauranteId: req.restauranteId, 
+                email: req.user.email, 
+                rol: 'api',
+                tipo: 'api_token'
+            },
+            JWT_SECRET,
+            { expiresIn: `${dias}d` }
+        );
+        
+        // Guardar hash del token para tracking (opcional)
+        const tokenHash = await bcrypt.hash(token.slice(-20), 5);
+        await pool.query(
+            'INSERT INTO api_tokens (restaurante_id, nombre, token_hash, expires_at) VALUES ($1, $2, $3, $4)',
+            [req.restauranteId, nombre || 'n8n Integration', tokenHash, new Date(Date.now() + dias * 24 * 60 * 60 * 1000)]
+        );
+        
+        log('info', 'API Token generado', { 
+            user: req.user.email, 
+            nombre: nombre || 'n8n Integration',
+            expiraDias: dias
+        });
+        
+        res.json({
+            success: true,
+            apiToken: token,
+            expiresAt: new Date(Date.now() + dias * 24 * 60 * 60 * 1000).toISOString(),
+            instrucciones: {
+                n8n: 'En n8n, configura Header Auth con: Name="Authorization", Value="Bearer ' + token.slice(0, 20) + '..."',
+                curl: `curl -H "Authorization: Bearer ${token.slice(0, 20)}..." https://tu-api/api/ingredients`
+            }
+        });
+    } catch (err) {
+        log('error', 'Error generando API token', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { restauranteNombre, email, password, nombreUsuario } = req.body;
+
         if (!restauranteNombre || !email || !password) {
             return res.status(400).json({ error: 'Todos los campos son requeridos' });
         }
+
         const existingUser = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(400).json({ error: 'El email ya está registrado' });
         }
+
         const restauranteResult = await pool.query(
             'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
             [restauranteNombre, email]
         );
         const restauranteId = restauranteResult.rows[0].id;
+
         const passwordHash = await bcrypt.hash(password, 10);
         const userResult = await pool.query(
             'INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [restauranteId, email, passwordHash, nombreUsuario || 'Admin', 'admin']
         );
+
         const token = jwt.sign(
             { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
+
         log('info', 'Registro exitoso', { restauranteId, email });
+
         res.status(201).json({
             token,
             user: {
@@ -313,8 +468,8 @@ app.post('/api/auth/register', async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 // ========== GESTIÓN DE EQUIPO (MULTI-CUENTA) ==========
-// 1. Listar el equipo
 app.get('/api/team', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
@@ -327,25 +482,27 @@ app.get('/api/team', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-// 2. Invitar / Crear Usuario (Solo Admin)
+
 app.post('/api/team/invite', authMiddleware, requireAdmin, async (req, res) => {
     try {
         const { nombre, email, password, rol } = req.body;
+
         if (!nombre || !email || !password) {
             return res.status(400).json({ error: 'Faltan datos requeridos (nombre, email, password)' });
         }
-        // Verificar si existe el email globalmente (clave única)
+
         const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
         if (check.rows.length > 0) {
             return res.status(400).json({ error: 'Este email ya está registrado' });
         }
+
         const passwordHash = await bcrypt.hash(password, 10);
-        // Rol por defecto 'usuario' si no se especifica
         const nuevoRol = rol || 'usuario';
         const result = await pool.query(
             'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id, nombre, email, rol',
             [req.restauranteId, nombre, email, passwordHash, nuevoRol]
         );
+
         log('info', 'Nuevo usuario de equipo creado', { admin: req.user.email, newUser: email });
         res.json(result.rows[0]);
     } catch (err) {
@@ -353,22 +510,24 @@ app.post('/api/team/invite', authMiddleware, requireAdmin, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
-// 3. Eliminar Usuario (Solo Admin)
+
 app.delete('/api/team/:id', authMiddleware, requireAdmin, async (req, res) => {
     try {
         const userIdToDelete = parseInt(req.params.id);
-        // Evitar auto-borrado
+
         if (userIdToDelete === req.user.userId) {
             return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
         }
-        // Asegurar que el usuario a borrar pertenece al MISMO restaurante
+
         const result = await pool.query(
             'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
             [userIdToDelete, req.restauranteId]
         );
+
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
         }
+
         log('info', 'Usuario eliminado del equipo', { admin: req.user.email, deletedId: userIdToDelete });
         res.json({ success: true, message: 'Usuario eliminado' });
     } catch (err) {
@@ -376,15 +535,18 @@ app.delete('/api/team/:id', authMiddleware, requireAdmin, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 // ========== INGREDIENTES ==========
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM ingredientes WHERE restaurante_id = $1 ORDER BY id', [req.restauranteId]);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error obteniendo ingredientes', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia } = req.body;
@@ -392,15 +554,18 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
         const finalFamilia = familia || 'alimento';
+
         const result = await pool.query(
             'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
             [nombre, finalProveedorId, precio || 0, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error creando ingrediente', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
@@ -409,23 +574,28 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
         const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
         const finalFamilia = familia || 'alimento';
+
         const result = await pool.query(
             'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
             [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
+        log('error', 'Error actualizando ingrediente', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
         res.json({ message: 'Eliminado' });
     } catch (err) {
+        log('error', 'Error eliminando ingrediente', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 // ========== INVENTARIO AVANZADO ==========
 app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
     try {
@@ -438,7 +608,6 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
         i.stock_real,
         i.stock_minimo,
         i.proveedor_id,
-        i.ultima_actualizacion_stock,
         i.ultima_actualizacion_stock,
         CASE 
             WHEN i.stock_real IS NULL THEN NULL 
@@ -474,16 +643,18 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
       WHERE i.restaurante_id = $1
       ORDER BY i.id
     `, [req.restauranteId]);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (err) {
         log('error', 'Error inventario completo', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 app.put('/api/inventory/:id/stock-real', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { stock_real } = req.body;
+
         const result = await pool.query(
             `UPDATE ingredientes 
        SET stock_real = $1, 
@@ -492,19 +663,23 @@ app.put('/api/inventory/:id/stock-real', authMiddleware, async (req, res) => {
        RETURNING *`,
             [stock_real, id, req.restauranteId]
         );
+
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Ingrediente no encontrado' });
         }
         res.json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error actualizando stock real', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         const { stocks } = req.body;
         await client.query('BEGIN');
+
         const updated = [];
         for (const item of stocks) {
             const result = await client.query(
@@ -519,62 +694,43 @@ app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => 
                 updated.push(result.rows[0]);
             }
         }
+
         await client.query('COMMIT');
         res.json({ success: true, updated: updated.length, items: updated });
     } catch (err) {
         await client.query('ROLLBACK');
+        log('error', 'Error bulk update stock', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     } finally {
         client.release();
     }
 });
+
 // Endpoint para consolidar stock con lógica de Ajustes (ERP)
 app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        // adjustments: Array de splits específicos [{ ingrediente_id, cantidad, motivo, notas }]
-        // snapshots: Array histórico [{ id (ing_id), stock_virtual, stock_real }]
-        // finalStock: Array simple para actualizar el maestro [{ id, stock_real }]
         const { adjustments, snapshots, finalStock } = req.body;
+
         if (!req.restauranteId) {
             return res.status(401).json({ error: 'No autorizado: Restaurante ID nulo' });
         }
-        // Just-in-Time Schema Creation (Asegurar que las tablas existen)
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS inventory_adjustments_v2 (
-                id SERIAL PRIMARY KEY,
-                ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
-                cantidad DECIMAL(10, 2) NOT NULL,
-                motivo VARCHAR(100) NOT NULL,
-                notas TEXT,
-                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                usuario_id INTEGER, 
-                restaurante_id INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS inventory_snapshots_v2 (
-                id SERIAL PRIMARY KEY,
-                ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
-                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                stock_virtual DECIMAL(10, 2) NOT NULL,
-                stock_real DECIMAL(10, 2) NOT NULL,
-                diferencia DECIMAL(10, 2) NOT NULL,
-                restaurante_id INTEGER NOT NULL
-            );
-        `);
+
         await client.query('BEGIN');
-        // 1. Guardar Snapshots (Auditoría V2)
+
+        // 1. Guardar Snapshots
         if (snapshots && Array.isArray(snapshots)) {
             for (const snap of snapshots) {
-                // Validación Estricta de Tipos
                 const ingId = parseInt(snap.id, 10);
                 const real = parseFloat(snap.stock_real);
                 const virtual = parseFloat(snap.stock_virtual);
-                // Si alguno es NaN, saltamos (o lanzamos error, pero mejor prevenir crash)
+
                 if (isNaN(ingId)) continue;
-                // Asegurar valores numéricos seguros (default 0 ya debería venir validado, pero insistimos)
+
                 const safeReal = isNaN(real) ? 0 : real;
                 const safeVirtual = isNaN(virtual) ? 0 : virtual;
                 const diff = safeReal - safeVirtual;
+
                 await client.query(
                     `INSERT INTO inventory_snapshots_v2 
                      (ingrediente_id, stock_virtual, stock_real, diferencia, restaurante_id) 
@@ -583,15 +739,19 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
                 );
             }
         }
-        // 2. Guardar Ajustes Desglosados (V2)
+
+        // 2. Guardar Ajustes
         if (adjustments && Array.isArray(adjustments)) {
             for (const adj of adjustments) {
                 const ingId = parseInt(adj.ingrediente_id, 10);
                 const cantidad = parseFloat(adj.cantidad);
                 const motivo = adj.motivo ? String(adj.motivo).substring(0, 100) : 'Ajuste';
                 const notas = adj.notas ? String(adj.notas) : '';
+
                 if (isNaN(ingId)) continue;
+
                 const safeCant = isNaN(cantidad) ? 0 : cantidad;
+
                 await client.query(
                     `INSERT INTO inventory_adjustments_v2 
                      (ingrediente_id, cantidad, motivo, notas, restaurante_id) 
@@ -600,42 +760,48 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
                 );
             }
         }
+
         // 3. Actualizar Stock Maestro
         const updated = [];
         if (finalStock && Array.isArray(finalStock)) {
             for (const item of finalStock) {
                 const ingId = parseInt(item.id, 10);
                 const real = parseFloat(item.stock_real);
+
                 if (isNaN(ingId)) continue;
+
                 const safeReal = isNaN(real) ? 0 : real;
+
                 const result = await client.query(
                     `UPDATE ingredientes
-                     SET stock_actual = $1, -- Actualizamos la referencia oficial
-                         stock_real = NULL, -- Limpiamos el conteo físico para la próxima vez
+                     SET stock_actual = $1,
+                         stock_real = NULL,
                          ultima_actualizacion_stock = CURRENT_TIMESTAMP
                      WHERE id = $2 AND restaurante_id = $3
                      RETURNING *`,
                     [safeReal.toFixed(2), ingId, req.restauranteId]
                 );
+
                 if (result.rows.length > 0) {
                     updated.push(result.rows[0]);
                 }
             }
         }
+
         await client.query('COMMIT');
         res.json({ success: true, updated: updated.length, items: updated });
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error('CRITICAL ERROR in /api/inventory/consolidate:', err); // Log detallado
-        res.status(500).json({ error: 'Error interno en la consolidación de datos: ' + err.message });
+        log('error', 'Error en consolidación', { error: err.message });
+        res.status(500).json({ error: 'Error interno: ' + err.message });
     } finally {
         client.release();
     }
 });
+
 // ========== ANÁLISIS AVANZADO ==========
 app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
     try {
-        // 1. Obtener ventas agregadas por receta
         const ventas = await pool.query(
             `SELECT r.id, r.nombre, r.categoria, r.precio_venta, 
                     SUM(v.cantidad) as cantidad_vendida,
@@ -646,20 +812,22 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta`,
             [req.restauranteId]
         );
+
         if (ventas.rows.length === 0) {
             return res.json([]);
         }
-        // 2. Calcular costes para margen
+
         const analisis = [];
         const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
-        const promedioPopularidad = totalVentasRestaurante / ventas.rows.length; // Mix medio
+        const promedioPopularidad = totalVentasRestaurante / ventas.rows.length;
         let sumaMargenes = 0;
+
         for (const plato of ventas.rows) {
-            // Calcular coste (simplificado, idealmente cacheado o pre-calculado)
             const recetaResult = await pool.query('SELECT ingredientes FROM recetas WHERE id = $1', [plato.id]);
-            const ingredientes = recetaResult.rows[0].ingredientes;
+            const ingredientes = recetaResult.rows[0]?.ingredientes || [];
             let costePlato = 0;
-            if (ingredientes) {
+
+            if (ingredientes && Array.isArray(ingredientes)) {
                 for (const ing of ingredientes) {
                     const ingDb = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
                     if (ingDb.rows.length > 0) {
@@ -667,8 +835,10 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                     }
                 }
             }
+
             const margenContribucion = parseFloat(plato.precio_venta) - costePlato;
             sumaMargenes += margenContribucion * parseFloat(plato.cantidad_vendida);
+
             analisis.push({
                 ...plato,
                 coste: costePlato,
@@ -676,19 +846,18 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                 popularidad: parseFloat(plato.cantidad_vendida)
             });
         }
+
         const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
-        // 3. Clasificar BCG
-        // Estrella: Alta Popularidad, Alto Margen
-        // Caballo: Alta Popularidad, Bajo Margen
-        // Puzzle: Baja Popularidad, Alto Margen
-        // Perro: Baja Popularidad, Bajo Margen
+
         const resultado = analisis.map(p => {
-            const esPopular = p.popularidad >= (promedioPopularidad * 0.7); // Umbral del 70% del promedio (común en ingeniería de menu)
+            const esPopular = p.popularidad >= (promedioPopularidad * 0.7);
             const esRentable = p.margen >= promedioMargen;
+
             let clasificacion = 'perro';
             if (esPopular && esRentable) clasificacion = 'estrella';
             else if (esPopular && !esRentable) clasificacion = 'caballo';
             else if (!esPopular && esRentable) clasificacion = 'puzzle';
+
             return {
                 ...p,
                 clasificacion,
@@ -700,21 +869,25 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                 }
             };
         });
+
         res.json(resultado);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Error analizando menú' });
+        log('error', 'Error análisis menú', { error: err.message });
+        res.status(500).json({ error: 'Error analizando menú', data: [] });
     }
 });
+
 // ========== RECETAS ==========
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 ORDER BY id', [req.restauranteId]);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error obteniendo recetas', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 app.post('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
@@ -724,9 +897,11 @@ app.post('/api/recipes', authMiddleware, async (req, res) => {
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error creando receta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
@@ -737,26 +912,32 @@ app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
         );
         res.json(result.rows[0] || {});
     } catch (err) {
+        log('error', 'Error actualizando receta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM recetas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
         res.json({ message: 'Eliminado' });
     } catch (err) {
+        log('error', 'Error eliminando receta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 // ========== PROVEEDORES ==========
 app.get('/api/suppliers', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM proveedores WHERE restaurante_id=$1 ORDER BY id', [req.restauranteId]);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error obteniendo proveedores', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 app.post('/api/suppliers', authMiddleware, async (req, res) => {
     try {
         const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
@@ -766,9 +947,11 @@ app.post('/api/suppliers', authMiddleware, async (req, res) => {
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error creando proveedor', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
@@ -779,26 +962,32 @@ app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error actualizando proveedor', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM proveedores WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
         res.json({ message: 'Eliminado' });
     } catch (err) {
+        log('error', 'Error eliminando proveedor', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 // ========== PEDIDOS ==========
 app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 ORDER BY fecha DESC', [req.restauranteId]);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error obteniendo pedidos', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         const { proveedorId, fecha, ingredientes, total, estado } = req.body;
@@ -808,9 +997,11 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        log('error', 'Error creando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.put('/api/orders/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
@@ -821,49 +1012,59 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
         );
         res.json(result.rows[0] || {});
     } catch (err) {
+        log('error', 'Error actualizando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM pedidos WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
         res.json({ message: 'Eliminado' });
     } catch (err) {
+        log('error', 'Error eliminando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 // ========== VENTAS ==========
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha } = req.query;
         let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1';
         let params = [req.restauranteId];
+
         if (fecha) {
             query += ' AND DATE(v.fecha) = $2';
             params.push(fecha);
         }
+
         query += ' ORDER BY v.fecha DESC';
         const result = await pool.query(query, params);
-        res.json(result.rows);
+        res.json(result.rows || []);
     } catch (err) {
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error obteniendo ventas', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 app.post('/api/sales', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         const { recetaId, cantidad } = req.body;
         await client.query('BEGIN');
+
         const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2', [recetaId, req.restauranteId]);
         if (recetaResult.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Receta no encontrada' });
         }
+
         const receta = recetaResult.rows[0];
         const precioUnitario = parseFloat(receta.precio_venta);
         const total = precioUnitario * cantidad;
-        // Validar stock
-        const ingredientesReceta = receta.ingredientes;
+
+        const ingredientesReceta = receta.ingredientes || [];
         for (const ing of ingredientesReceta) {
             const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
             if (stockResult.rows.length > 0) {
@@ -877,73 +1078,88 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
                 }
             }
         }
-        // Registrar venta
+
         const ventaResult = await client.query(
             'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, restaurante_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [recetaId, cantidad, precioUnitario, total, req.restauranteId]
         );
-        // Descontar stock
+
         for (const ing of ingredientesReceta) {
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
                 [ing.cantidad * cantidad, ing.ingredienteId]
             );
         }
+
         await client.query('COMMIT');
         res.status(201).json(ventaResult.rows[0]);
     } catch (err) {
         await client.query('ROLLBACK');
+        log('error', 'Error registrando venta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     } finally {
         client.release();
     }
 });
+
 app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
     try {
         await pool.query('DELETE FROM ventas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
         res.json({ message: 'Eliminado' });
     } catch (err) {
+        log('error', 'Error eliminando venta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
+// Endpoint para carga masiva de ventas (n8n compatible)
 app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { ventas } = req.body; // Array de { receta: "nombre", cantidad: N, total: M, fecha: "ISO" }
+        const { ventas } = req.body;
+
         if (!Array.isArray(ventas)) {
-            return res.status(400).json({ error: 'Formato inválido: se esperaba un array "ventas"' });
+            return res.status(400).json({ 
+                error: 'Formato inválido: se esperaba un array "ventas"',
+                ejemplo: { ventas: [{ receta: "Nombre Plato", cantidad: 1 }] }
+            });
         }
+
         await client.query('BEGIN');
+
         const resultados = {
             procesados: 0,
             fallidos: 0,
             errores: []
         };
-        // 1. Obtener todas las recetas del restaurante para búsqueda rápida
+
         const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
         const recetasMap = new Map();
         recetasResult.rows.forEach(r => {
             recetasMap.set(r.nombre.toLowerCase().trim(), r);
         });
+
         for (const venta of ventas) {
             const nombreReceta = (venta.receta || '').toLowerCase().trim();
             const cantidad = parseInt(venta.cantidad) || 1;
-            // Buscar receta (match exacto insensible a mayúsculas)
+
             const receta = recetasMap.get(nombreReceta);
+
             if (!receta) {
                 resultados.fallidos++;
                 resultados.errores.push({ receta: venta.receta, error: 'Receta no encontrada' });
                 continue;
             }
+
             const total = parseFloat(venta.total) || (parseFloat(receta.precio_venta) * cantidad);
             const fecha = venta.fecha || new Date().toISOString();
-            // 2. Registrar venta
+
             await client.query(
                 'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6)',
                 [receta.id, cantidad, receta.precio_venta, total, fecha, req.restauranteId]
             );
-            // 3. Descontar stock (Permitir negativo)
-            const ingredientesReceta = receta.ingredientes; // JSONB array
+
+            const ingredientesReceta = receta.ingredientes;
             if (Array.isArray(ingredientesReceta)) {
                 for (const ing of ingredientesReceta) {
                     await client.query(
@@ -952,9 +1168,17 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                     );
                 }
             }
+
             resultados.procesados++;
         }
+
         await client.query('COMMIT');
+        
+        log('info', 'Carga masiva ventas', { 
+            procesados: resultados.procesados, 
+            fallidos: resultados.fallidos 
+        });
+        
         res.json(resultados);
     } catch (err) {
         await client.query('ROLLBACK');
@@ -964,18 +1188,21 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         client.release();
     }
 });
+
 // ========== BALANCE Y ESTADÍSTICAS ==========
 app.get('/api/balance/mes', authMiddleware, async (req, res) => {
     try {
         const { mes, ano } = req.query;
         const mesActual = mes || new Date().getMonth() + 1;
         const anoActual = ano || new Date().getFullYear();
+
         const ventasMes = await pool.query(
             `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
        FROM ventas
        WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2 AND restaurante_id = $3`,
             [mesActual, anoActual, req.restauranteId]
         );
+
         const ventasDetalle = await pool.query(
             `SELECT v.cantidad, r.ingredientes
        FROM ventas v
@@ -983,9 +1210,10 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
        WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3`,
             [mesActual, anoActual, req.restauranteId]
         );
+
         let costos = 0;
         for (const venta of ventasDetalle.rows) {
-            const ingredientes = venta.ingredientes;
+            const ingredientes = venta.ingredientes || [];
             for (const ing of ingredientes) {
                 const ingResult = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
                 if (ingResult.rows.length > 0) {
@@ -993,9 +1221,11 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
                 }
             }
         }
+
         const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;
         const ganancia = ingresos - costos;
         const margen = ingresos > 0 ? ((ganancia / ingresos) * 100).toFixed(1) : 0;
+
         const platoMasVendido = await pool.query(
             `SELECT r.nombre, SUM(v.cantidad) as total_vendido
        FROM ventas v
@@ -1006,6 +1236,7 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
        LIMIT 1`,
             [mesActual, anoActual, req.restauranteId]
         );
+
         const ventasPorPlato = await pool.query(
             `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
        FROM ventas v
@@ -1015,11 +1246,13 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
        ORDER BY total_ingresos DESC`,
             [mesActual, anoActual, req.restauranteId]
         );
+
         const valorInventario = await pool.query(
             `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
        FROM ingredientes WHERE restaurante_id = $1`,
             [req.restauranteId]
         );
+
         res.json({
             ingresos,
             costos,
@@ -1035,6 +1268,7 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
 app.get('/api/balance/comparativa', authMiddleware, async (req, res) => {
     try {
         const meses = await pool.query(
@@ -1049,18 +1283,40 @@ app.get('/api/balance/comparativa', authMiddleware, async (req, res) => {
        LIMIT 12`,
             [req.restauranteId]
         );
-        res.json(meses.rows);
+        res.json(meses.rows || []);
     } catch (error) {
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error comparativa', { error: error.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
+
 // ========== 404 ==========
 app.use((req, res) => {
-    res.status(404).json({ error: 'Ruta no encontrada' });
+    res.status(404).json({ 
+        error: 'Ruta no encontrada',
+        path: req.originalUrl,
+        method: req.method
+    });
 });
+
+// ========== ERROR HANDLER GLOBAL ==========
+app.use((err, req, res, next) => {
+    log('error', 'Error no manejado', { 
+        error: err.message, 
+        stack: err.stack,
+        url: req.originalUrl 
+    });
+    res.status(500).json({ 
+        error: 'Error interno del servidor',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
 // ========== INICIAR SERVIDOR ==========
 app.listen(PORT, '0.0.0.0', () => {
-    log('info', 'Servidor iniciado', { port: PORT, version: '2.1.0', cors: ALLOWED_ORIGINS });
+    log('info', 'Servidor iniciado', { port: PORT, version: '2.2.0', cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
-    console.log(`📍 La Caleta 102 Dashboard API v2.1`);
+    console.log(`📍 La Caleta 102 Dashboard API v2.2`);
+    console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
 });
+
