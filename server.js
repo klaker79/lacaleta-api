@@ -1556,6 +1556,7 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
                 DATE(v.fecha) as fecha,
                 r.id as receta_id,
                 r.nombre as receta,
+                r.ingredientes as receta_ingredientes,
                 SUM(v.cantidad) as cantidad_vendida,
                 AVG(v.precio_unitario) as precio_venta_unitario,
                 SUM(v.total) as total_ingresos
@@ -1564,9 +1565,29 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
             WHERE v.restaurante_id = $1
               AND EXTRACT(MONTH FROM v.fecha) = $2
               AND EXTRACT(YEAR FROM v.fecha) = $3
-            GROUP BY DATE(v.fecha), r.id, r.nombre
+            GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes
             ORDER BY DATE(v.fecha), r.nombre
         `, [req.restauranteId, mesActual, anoActual]);
+
+        // Obtener precios de todos los ingredientes para calcular costes
+        const ingredientesPrecios = await pool.query(
+            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        const preciosMap = {};
+        ingredientesPrecios.rows.forEach(ing => {
+            preciosMap[ing.id] = parseFloat(ing.precio) || 0;
+        });
+
+        // Función para calcular coste de una receta
+        const calcularCosteReceta = (ingredientesReceta) => {
+            if (!ingredientesReceta || !Array.isArray(ingredientesReceta)) return 0;
+            return ingredientesReceta.reduce((sum, item) => {
+                const precio = preciosMap[item.ingredienteId] || 0;
+                const cantidad = parseFloat(item.cantidad) || 0;
+                return sum + (precio * cantidad);
+            }, 0);
+        };
 
         // Procesar datos en formato tipo Excel
         const ingredientesData = {};
@@ -1591,16 +1612,18 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
             ingredientesData[row.ingrediente].totalCantidad += parseFloat(row.cantidad_comprada);
         });
 
-        // Procesar ventas
+        // Procesar ventas CON CÁLCULO DE COSTES
         ventasDiarias.rows.forEach(row => {
             const fechaStr = row.fecha.toISOString().split('T')[0];
             diasSet.add(fechaStr);
 
             const cantidadVendida = parseInt(row.cantidad_vendida);
             const totalIngresos = parseFloat(row.total_ingresos);
-            // Sin coste calculado por ahora (TO-DO: calcular desde ingredientes de receta)
-            const costeTotal = 0;
-            const beneficio = totalIngresos;
+
+            // Calcular coste real desde ingredientes de la receta
+            const costePorUnidad = calcularCosteReceta(row.receta_ingredientes);
+            const costeTotal = costePorUnidad * cantidadVendida;
+            const beneficio = totalIngresos - costeTotal;
 
             if (!recetasData[row.receta]) {
                 recetasData[row.receta] = { id: row.receta_id, dias: {}, totalVendidas: 0, totalIngresos: 0, totalCoste: 0, totalBeneficio: 0 };
