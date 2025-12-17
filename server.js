@@ -1035,17 +1035,51 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/orders/:id', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
         const { id } = req.params;
         const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
-        const result = await pool.query(
+
+        await client.query('BEGIN');
+
+        const result = await client.query(
             'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
             [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id, req.restauranteId]
         );
+
+        // Si el pedido se marca como recibido, registrar los precios de compra diarios
+        if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
+            const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
+
+            for (const item of ingredientes) {
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
+                const cantidad = parseFloat(item.cantidad) || 0;
+                const total = precioReal * cantidad;
+
+                // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
+                await client.query(`
+                    INSERT INTO precios_compra_diarios 
+                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                    DO UPDATE SET 
+                        precio_unitario = EXCLUDED.precio_unitario,
+                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+                `, [item.ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
+            }
+
+            log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
+        }
+
+        await client.query('COMMIT');
         res.json(result.rows[0] || {});
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error actualizando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
