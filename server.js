@@ -1550,23 +1550,23 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
             ORDER BY p.fecha, i.nombre
         `, [req.restauranteId, mesActual, anoActual]);
 
-        // Obtener días del mes con ventas
+        // Obtener ventas directamente de la tabla ventas (agrupadas por día y receta)
         const ventasDiarias = await pool.query(`
             SELECT 
-                v.fecha,
+                DATE(v.fecha) as fecha,
                 r.id as receta_id,
                 r.nombre as receta,
-                v.cantidad_vendida,
-                v.precio_venta_unitario,
-                v.coste_ingredientes,
-                v.total_ingresos,
-                v.beneficio_bruto
-            FROM ventas_diarias_resumen v
+                SUM(v.cantidad) as cantidad_vendida,
+                AVG(v.precio_unitario) as precio_venta_unitario,
+                SUM(v.total) as total_ingresos,
+                COALESCE(r.coste_total, 0) as coste_por_unidad
+            FROM ventas v
             JOIN recetas r ON v.receta_id = r.id
             WHERE v.restaurante_id = $1
               AND EXTRACT(MONTH FROM v.fecha) = $2
               AND EXTRACT(YEAR FROM v.fecha) = $3
-            ORDER BY v.fecha, r.nombre
+            GROUP BY DATE(v.fecha), r.id, r.nombre, r.coste_total
+            ORDER BY DATE(v.fecha), r.nombre
         `, [req.restauranteId, mesActual, anoActual]);
 
         // Procesar datos en formato tipo Excel
@@ -1597,21 +1597,27 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
             const fechaStr = row.fecha.toISOString().split('T')[0];
             diasSet.add(fechaStr);
 
+            const cantidadVendida = parseInt(row.cantidad_vendida);
+            const totalIngresos = parseFloat(row.total_ingresos);
+            const costePorUnidad = parseFloat(row.coste_por_unidad) || 0;
+            const costeTotal = costePorUnidad * cantidadVendida;
+            const beneficio = totalIngresos - costeTotal;
+
             if (!recetasData[row.receta]) {
                 recetasData[row.receta] = { id: row.receta_id, dias: {}, totalVendidas: 0, totalIngresos: 0, totalCoste: 0, totalBeneficio: 0 };
             }
 
             recetasData[row.receta].dias[fechaStr] = {
-                vendidas: parseInt(row.cantidad_vendida),
+                vendidas: cantidadVendida,
                 precioVenta: parseFloat(row.precio_venta_unitario),
-                coste: parseFloat(row.coste_ingredientes),
-                ingresos: parseFloat(row.total_ingresos),
-                beneficio: parseFloat(row.beneficio_bruto)
+                coste: costeTotal,
+                ingresos: totalIngresos,
+                beneficio: beneficio
             };
-            recetasData[row.receta].totalVendidas += parseInt(row.cantidad_vendida);
-            recetasData[row.receta].totalIngresos += parseFloat(row.total_ingresos);
-            recetasData[row.receta].totalCoste += parseFloat(row.coste_ingredientes);
-            recetasData[row.receta].totalBeneficio += parseFloat(row.beneficio_bruto);
+            recetasData[row.receta].totalVendidas += cantidadVendida;
+            recetasData[row.receta].totalIngresos += totalIngresos;
+            recetasData[row.receta].totalCoste += costeTotal;
+            recetasData[row.receta].totalBeneficio += beneficio;
         });
 
         // Ordenar días
