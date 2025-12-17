@@ -29,7 +29,7 @@ const app = express();
 // Middleware manual para asegurar que CORS funciona en TODOS los casos
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    
+
     // Permitir requests sin origin (curl, Postman, n8n)
     if (!origin) {
         res.header('Access-Control-Allow-Origin', '*');
@@ -40,17 +40,17 @@ app.use((req, res, next) => {
         console.log('⚠️ Origin no en whitelist:', origin);
         res.header('Access-Control-Allow-Origin', origin);
     }
-    
+
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-API-Key');
     res.header('Access-Control-Max-Age', '86400'); // Cache preflight por 24h
-    
+
     // Responder inmediatamente a OPTIONS (preflight)
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
-    
+
     next();
 });
 
@@ -207,10 +207,39 @@ const pool = new Pool({
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMP
       );
+      -- NUEVAS TABLAS: Tracking Diario de Costes y Ventas
+      CREATE TABLE IF NOT EXISTS precios_compra_diarios (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        fecha DATE NOT NULL,
+        precio_unitario DECIMAL(10, 2) NOT NULL,
+        cantidad_comprada DECIMAL(10, 2) NOT NULL,
+        total_compra DECIMAL(10, 2) NOT NULL,
+        proveedor_id INTEGER,
+        notas TEXT,
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(ingrediente_id, fecha, restaurante_id)
+      );
+      CREATE TABLE IF NOT EXISTS ventas_diarias_resumen (
+        id SERIAL PRIMARY KEY,
+        receta_id INTEGER REFERENCES recetas(id) ON DELETE CASCADE,
+        fecha DATE NOT NULL,
+        cantidad_vendida INTEGER NOT NULL,
+        precio_venta_unitario DECIMAL(10, 2) NOT NULL,
+        coste_ingredientes DECIMAL(10, 2) NOT NULL,
+        total_ingresos DECIMAL(10, 2) NOT NULL,
+        beneficio_bruto DECIMAL(10, 2) NOT NULL,
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(receta_id, fecha, restaurante_id)
+      );
       CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
       CREATE INDEX IF NOT EXISTS idx_ventas_receta ON ventas(receta_id);
       CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
       CREATE INDEX IF NOT EXISTS idx_ingredientes_restaurante ON ingredientes(restaurante_id);
+      CREATE INDEX IF NOT EXISTS idx_precios_compra_fecha ON precios_compra_diarios(fecha);
+      CREATE INDEX IF NOT EXISTS idx_ventas_diarias_fecha ON ventas_diarias_resumen(fecha);
     `);
 
         log('info', 'Tablas inicializadas');
@@ -222,13 +251,13 @@ const pool = new Pool({
 // ========== MIDDLEWARE DE AUTENTICACIÓN ==========
 const authMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        log('warn', 'Auth fallido: Token no proporcionado', { 
+        log('warn', 'Auth fallido: Token no proporcionado', {
             url: req.originalUrl,
             origin: req.headers.origin || 'sin-origin'
         });
-        return res.status(401).json({ 
+        return res.status(401).json({
             error: 'Token no proporcionado',
             code: 'NO_TOKEN',
             hint: 'Incluye header: Authorization: Bearer <tu_token>'
@@ -236,27 +265,27 @@ const authMiddleware = (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    
+
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded;
         req.restauranteId = decoded.restauranteId;
         next();
     } catch (error) {
-        log('warn', 'Auth fallido: Token inválido', { 
+        log('warn', 'Auth fallido: Token inválido', {
             error: error.message,
             url: req.originalUrl
         });
-        
+
         let errorMsg = 'Token inválido';
         let code = 'INVALID_TOKEN';
-        
+
         if (error.name === 'TokenExpiredError') {
             errorMsg = 'Token expirado. Por favor, vuelve a iniciar sesión.';
             code = 'TOKEN_EXPIRED';
         }
-        
-        return res.status(401).json({ 
+
+        return res.status(401).json({
             error: errorMsg,
             code: code,
             expiredAt: error.expiredAt || null
@@ -266,9 +295,9 @@ const authMiddleware = (req, res, next) => {
 
 const requireAdmin = (req, res, next) => {
     if (!req.user || (req.user.rol !== 'admin' && req.user.rol !== 'api')) {
-        log('warn', 'Acceso denegado a ruta protegida', { 
-            user: req.user ? req.user.email : 'anon', 
-            url: req.originalUrl 
+        log('warn', 'Acceso denegado a ruta protegida', {
+            user: req.user ? req.user.email : 'anon',
+            url: req.originalUrl
         });
         return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
     }
@@ -279,12 +308,15 @@ const requireAdmin = (req, res, next) => {
 app.get('/', (req, res) => {
     res.json({
         message: '🍽️ La Caleta 102 API',
-        version: '2.2.0',
+        version: '2.3.0',
         status: 'running',
         docs: {
             health: '/api/health',
             login: 'POST /api/auth/login',
-            register: 'POST /api/auth/register'
+            register: 'POST /api/auth/register',
+            dailyPurchases: 'GET/POST /api/daily/purchases',
+            dailySales: 'GET /api/daily/sales',
+            monthlySummary: 'GET /api/monthly/summary'
         }
     });
 });
@@ -296,11 +328,11 @@ app.get('/api/health', async (req, res) => {
         res.json({
             status: 'healthy',
             timestamp: new Date().toISOString(),
-            version: '2.2.0',
+            version: '2.3.0',
             cors_origins: ALLOWED_ORIGINS
         });
     } catch (e) {
-        res.status(503).json({ 
+        res.status(503).json({
             status: 'unhealthy',
             error: e.message
         });
@@ -379,32 +411,32 @@ app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) =
     try {
         const { nombre, duracionDias } = req.body;
         const dias = duracionDias || 365; // Por defecto 1 año
-        
+
         const token = jwt.sign(
-            { 
-                userId: req.user.userId, 
-                restauranteId: req.restauranteId, 
-                email: req.user.email, 
+            {
+                userId: req.user.userId,
+                restauranteId: req.restauranteId,
+                email: req.user.email,
                 rol: 'api',
                 tipo: 'api_token'
             },
             JWT_SECRET,
             { expiresIn: `${dias}d` }
         );
-        
+
         // Guardar hash del token para tracking (opcional)
         const tokenHash = await bcrypt.hash(token.slice(-20), 5);
         await pool.query(
             'INSERT INTO api_tokens (restaurante_id, nombre, token_hash, expires_at) VALUES ($1, $2, $3, $4)',
             [req.restauranteId, nombre || 'n8n Integration', tokenHash, new Date(Date.now() + dias * 24 * 60 * 60 * 1000)]
         );
-        
-        log('info', 'API Token generado', { 
-            user: req.user.email, 
+
+        log('info', 'API Token generado', {
+            user: req.user.email,
             nombre: nombre || 'n8n Integration',
             expiraDias: dias
         });
-        
+
         res.json({
             success: true,
             apiToken: token,
@@ -1119,7 +1151,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         const { ventas } = req.body;
 
         if (!Array.isArray(ventas)) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Formato inválido: se esperaba un array "ventas"',
                 ejemplo: { ventas: [{ receta: "Nombre Plato", cantidad: 1 }] }
             });
@@ -1133,11 +1165,21 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             errores: []
         };
 
+        // Obtener recetas y precios de ingredientes
         const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
         const recetasMap = new Map();
         recetasResult.rows.forEach(r => {
             recetasMap.set(r.nombre.toLowerCase().trim(), r);
         });
+
+        const ingredientesResult = await client.query('SELECT id, precio FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]);
+        const ingredientesPrecios = new Map();
+        ingredientesResult.rows.forEach(i => {
+            ingredientesPrecios.set(i.id, parseFloat(i.precio) || 0);
+        });
+
+        // Acumulador para resumen diario
+        const resumenDiario = new Map(); // key: "recetaId-fecha", value: { cantidad, ingresos, coste }
 
         for (const venta of ventas) {
             const nombreReceta = (venta.receta || '').toLowerCase().trim();
@@ -1151,15 +1193,28 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                 continue;
             }
 
-            const total = parseFloat(venta.total) || (parseFloat(receta.precio_venta) * cantidad);
+            const precioVenta = parseFloat(receta.precio_venta);
+            const total = parseFloat(venta.total) || (precioVenta * cantidad);
             const fecha = venta.fecha || new Date().toISOString();
+            const fechaDate = fecha.split('T')[0]; // Solo la fecha sin hora
 
+            // Calcular coste de ingredientes para esta venta
+            let costeIngredientes = 0;
+            const ingredientesReceta = receta.ingredientes || [];
+            if (Array.isArray(ingredientesReceta)) {
+                for (const ing of ingredientesReceta) {
+                    const precioIng = ingredientesPrecios.get(ing.ingredienteId) || 0;
+                    costeIngredientes += precioIng * (ing.cantidad || 0) * cantidad;
+                }
+            }
+
+            // Registrar venta individual
             await client.query(
                 'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6)',
-                [receta.id, cantidad, receta.precio_venta, total, fecha, req.restauranteId]
+                [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId]
             );
 
-            const ingredientesReceta = receta.ingredientes;
+            // Descontar stock
             if (Array.isArray(ingredientesReceta)) {
                 for (const ing of ingredientesReceta) {
                     await client.query(
@@ -1169,16 +1224,58 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                 }
             }
 
+            // Acumular para resumen diario
+            const key = `${receta.id}-${fechaDate}`;
+            if (!resumenDiario.has(key)) {
+                resumenDiario.set(key, {
+                    recetaId: receta.id,
+                    fecha: fechaDate,
+                    precioVenta: precioVenta,
+                    cantidad: 0,
+                    ingresos: 0,
+                    coste: 0
+                });
+            }
+            const resumen = resumenDiario.get(key);
+            resumen.cantidad += cantidad;
+            resumen.ingresos += total;
+            resumen.coste += costeIngredientes;
+
             resultados.procesados++;
         }
 
+        // Actualizar tabla ventas_diarias_resumen (upsert)
+        for (const [key, data] of resumenDiario) {
+            await client.query(`
+                INSERT INTO ventas_diarias_resumen 
+                (receta_id, fecha, cantidad_vendida, precio_venta_unitario, coste_ingredientes, total_ingresos, beneficio_bruto, restaurante_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (receta_id, fecha, restaurante_id)
+                DO UPDATE SET 
+                    cantidad_vendida = ventas_diarias_resumen.cantidad_vendida + EXCLUDED.cantidad_vendida,
+                    coste_ingredientes = ventas_diarias_resumen.coste_ingredientes + EXCLUDED.coste_ingredientes,
+                    total_ingresos = ventas_diarias_resumen.total_ingresos + EXCLUDED.total_ingresos,
+                    beneficio_bruto = ventas_diarias_resumen.beneficio_bruto + EXCLUDED.beneficio_bruto
+            `, [
+                data.recetaId,
+                data.fecha,
+                data.cantidad,
+                data.precioVenta,
+                data.coste,
+                data.ingresos,
+                data.ingresos - data.coste,
+                req.restauranteId
+            ]);
+        }
+
         await client.query('COMMIT');
-        
-        log('info', 'Carga masiva ventas', { 
-            procesados: resultados.procesados, 
-            fallidos: resultados.fallidos 
+
+        log('info', 'Carga masiva ventas', {
+            procesados: resultados.procesados,
+            fallidos: resultados.fallidos,
+            resumenesActualizados: resumenDiario.size
         });
-        
+
         res.json(resultados);
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1290,9 +1387,270 @@ app.get('/api/balance/comparativa', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== TRACKING DIARIO DE COSTES/VENTAS ==========
+
+// Obtener precios de compra diarios
+app.get('/api/daily/purchases', authMiddleware, async (req, res) => {
+    try {
+        const { fecha, mes, ano } = req.query;
+        let query = `
+            SELECT p.*, i.nombre as ingrediente_nombre, i.unidad,
+                   pr.nombre as proveedor_nombre
+            FROM precios_compra_diarios p
+            LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
+            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+            WHERE p.restaurante_id = $1
+        `;
+        let params = [req.restauranteId];
+
+        if (fecha) {
+            query += ' AND p.fecha = $2';
+            params.push(fecha);
+        } else if (mes && ano) {
+            query += ' AND EXTRACT(MONTH FROM p.fecha) = $2 AND EXTRACT(YEAR FROM p.fecha) = $3';
+            params.push(mes, ano);
+        }
+
+        query += ' ORDER BY p.fecha DESC, i.nombre';
+
+        const result = await pool.query(query, params);
+        res.json(result.rows || []);
+    } catch (err) {
+        log('error', 'Error obteniendo compras diarias', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
+    }
+});
+
+// Registrar compras diarias (bulk - para n8n)
+app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { compras } = req.body;
+
+        if (!Array.isArray(compras)) {
+            return res.status(400).json({
+                error: 'Formato inválido: se esperaba un array "compras"',
+                ejemplo: { compras: [{ ingrediente: "Pulpo", precio: 26, cantidad: 10, fecha: "2025-12-17" }] }
+            });
+        }
+
+        await client.query('BEGIN');
+
+        const resultados = { procesados: 0, fallidos: 0, errores: [] };
+
+        // Obtener todos los ingredientes para búsqueda rápida
+        const ingredientesResult = await client.query(
+            'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        const ingredientesMap = new Map();
+        ingredientesResult.rows.forEach(i => {
+            ingredientesMap.set(i.nombre.toLowerCase().trim(), i.id);
+        });
+
+        for (const compra of compras) {
+            const nombreIng = (compra.ingrediente || '').toLowerCase().trim();
+            const ingredienteId = ingredientesMap.get(nombreIng);
+
+            if (!ingredienteId) {
+                resultados.fallidos++;
+                resultados.errores.push({ ingrediente: compra.ingrediente, error: 'Ingrediente no encontrado' });
+                continue;
+            }
+
+            const precio = parseFloat(compra.precio) || 0;
+            const cantidad = parseFloat(compra.cantidad) || 0;
+            const total = precio * cantidad;
+            const fecha = compra.fecha || new Date().toISOString().split('T')[0];
+
+            // Upsert: actualizar si existe, insertar si no
+            await client.query(`
+                INSERT INTO precios_compra_diarios 
+                (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                DO UPDATE SET 
+                    precio_unitario = EXCLUDED.precio_unitario,
+                    cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                    total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+            `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId]);
+
+            // Actualizar precio base del ingrediente
+            await client.query(
+                'UPDATE ingredientes SET precio = $1 WHERE id = $2',
+                [precio, ingredienteId]
+            );
+
+            resultados.procesados++;
+        }
+
+        await client.query('COMMIT');
+        log('info', 'Compras diarias importadas', { procesados: resultados.procesados, fallidos: resultados.fallidos });
+        res.json(resultados);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error importando compras diarias', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
+    }
+});
+
+// Obtener resumen diario de ventas
+app.get('/api/daily/sales', authMiddleware, async (req, res) => {
+    try {
+        const { fecha, mes, ano } = req.query;
+        let query = `
+            SELECT v.*, r.nombre as receta_nombre, r.categoria
+            FROM ventas_diarias_resumen v
+            LEFT JOIN recetas r ON v.receta_id = r.id
+            WHERE v.restaurante_id = $1
+        `;
+        let params = [req.restauranteId];
+
+        if (fecha) {
+            query += ' AND v.fecha = $2';
+            params.push(fecha);
+        } else if (mes && ano) {
+            query += ' AND EXTRACT(MONTH FROM v.fecha) = $2 AND EXTRACT(YEAR FROM v.fecha) = $3';
+            params.push(mes, ano);
+        }
+
+        query += ' ORDER BY v.fecha DESC, r.nombre';
+
+        const result = await pool.query(query, params);
+        res.json(result.rows || []);
+    } catch (err) {
+        log('error', 'Error obteniendo ventas diarias', { error: err.message });
+        res.status(500).json({ error: 'Error interno', data: [] });
+    }
+});
+
+// Resumen mensual completo (formato tipo Excel)
+app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
+    try {
+        const { mes, ano } = req.query;
+        const mesActual = parseInt(mes) || new Date().getMonth() + 1;
+        const anoActual = parseInt(ano) || new Date().getFullYear();
+
+        // Obtener días del mes con compras
+        const comprasDiarias = await pool.query(`
+            SELECT 
+                p.fecha,
+                i.id as ingrediente_id,
+                i.nombre as ingrediente,
+                p.precio_unitario,
+                p.cantidad_comprada,
+                p.total_compra
+            FROM precios_compra_diarios p
+            JOIN ingredientes i ON p.ingrediente_id = i.id
+            WHERE p.restaurante_id = $1
+              AND EXTRACT(MONTH FROM p.fecha) = $2
+              AND EXTRACT(YEAR FROM p.fecha) = $3
+            ORDER BY p.fecha, i.nombre
+        `, [req.restauranteId, mesActual, anoActual]);
+
+        // Obtener días del mes con ventas
+        const ventasDiarias = await pool.query(`
+            SELECT 
+                v.fecha,
+                r.id as receta_id,
+                r.nombre as receta,
+                v.cantidad_vendida,
+                v.precio_venta_unitario,
+                v.coste_ingredientes,
+                v.total_ingresos,
+                v.beneficio_bruto
+            FROM ventas_diarias_resumen v
+            JOIN recetas r ON v.receta_id = r.id
+            WHERE v.restaurante_id = $1
+              AND EXTRACT(MONTH FROM v.fecha) = $2
+              AND EXTRACT(YEAR FROM v.fecha) = $3
+            ORDER BY v.fecha, r.nombre
+        `, [req.restauranteId, mesActual, anoActual]);
+
+        // Procesar datos en formato tipo Excel
+        const ingredientesData = {};
+        const recetasData = {};
+        const diasSet = new Set();
+
+        // Procesar compras
+        comprasDiarias.rows.forEach(row => {
+            const fechaStr = row.fecha.toISOString().split('T')[0];
+            diasSet.add(fechaStr);
+
+            if (!ingredientesData[row.ingrediente]) {
+                ingredientesData[row.ingrediente] = { id: row.ingrediente_id, dias: {}, total: 0, totalCantidad: 0 };
+            }
+
+            ingredientesData[row.ingrediente].dias[fechaStr] = {
+                precio: parseFloat(row.precio_unitario),
+                cantidad: parseFloat(row.cantidad_comprada),
+                total: parseFloat(row.total_compra)
+            };
+            ingredientesData[row.ingrediente].total += parseFloat(row.total_compra);
+            ingredientesData[row.ingrediente].totalCantidad += parseFloat(row.cantidad_comprada);
+        });
+
+        // Procesar ventas
+        ventasDiarias.rows.forEach(row => {
+            const fechaStr = row.fecha.toISOString().split('T')[0];
+            diasSet.add(fechaStr);
+
+            if (!recetasData[row.receta]) {
+                recetasData[row.receta] = { id: row.receta_id, dias: {}, totalVendidas: 0, totalIngresos: 0, totalCoste: 0, totalBeneficio: 0 };
+            }
+
+            recetasData[row.receta].dias[fechaStr] = {
+                vendidas: parseInt(row.cantidad_vendida),
+                precioVenta: parseFloat(row.precio_venta_unitario),
+                coste: parseFloat(row.coste_ingredientes),
+                ingresos: parseFloat(row.total_ingresos),
+                beneficio: parseFloat(row.beneficio_bruto)
+            };
+            recetasData[row.receta].totalVendidas += parseInt(row.cantidad_vendida);
+            recetasData[row.receta].totalIngresos += parseFloat(row.total_ingresos);
+            recetasData[row.receta].totalCoste += parseFloat(row.coste_ingredientes);
+            recetasData[row.receta].totalBeneficio += parseFloat(row.beneficio_bruto);
+        });
+
+        // Ordenar días
+        const dias = Array.from(diasSet).sort();
+
+        // Calcular totales generales
+        const totalesCompras = Object.values(ingredientesData).reduce((sum, i) => sum + i.total, 0);
+        const totalesVentas = Object.values(recetasData).reduce((sum, r) => sum + r.totalIngresos, 0);
+        const totalesCostes = Object.values(recetasData).reduce((sum, r) => sum + r.totalCoste, 0);
+        const totalesBeneficio = Object.values(recetasData).reduce((sum, r) => sum + r.totalBeneficio, 0);
+
+        res.json({
+            mes: mesActual,
+            ano: anoActual,
+            dias,
+            compras: {
+                ingredientes: ingredientesData,
+                total: totalesCompras
+            },
+            ventas: {
+                recetas: recetasData,
+                totalIngresos: totalesVentas,
+                totalCostes: totalesCostes,
+                beneficioBruto: totalesBeneficio
+            },
+            resumen: {
+                margenBruto: totalesVentas > 0 ? ((totalesBeneficio / totalesVentas) * 100).toFixed(1) : 0,
+                foodCost: totalesVentas > 0 ? ((totalesCostes / totalesVentas) * 100).toFixed(1) : 0
+            }
+        });
+    } catch (err) {
+        log('error', 'Error resumen mensual', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // ========== 404 ==========
 app.use((req, res) => {
-    res.status(404).json({ 
+    res.status(404).json({
         error: 'Ruta no encontrada',
         path: req.originalUrl,
         method: req.method
@@ -1301,12 +1659,12 @@ app.use((req, res) => {
 
 // ========== ERROR HANDLER GLOBAL ==========
 app.use((err, req, res, next) => {
-    log('error', 'Error no manejado', { 
-        error: err.message, 
+    log('error', 'Error no manejado', {
+        error: err.message,
         stack: err.stack,
-        url: req.originalUrl 
+        url: req.originalUrl
     });
-    res.status(500).json({ 
+    res.status(500).json({
         error: 'Error interno del servidor',
         message: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -1319,4 +1677,3 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`📍 La Caleta 102 Dashboard API v2.2`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
 });
-
