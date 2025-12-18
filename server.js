@@ -5,6 +5,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 // ========== CONFIGURACIÓN ==========
 const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
@@ -24,6 +26,30 @@ const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
 const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
 
 const app = express();
+
+// ========== SEGURIDAD: HELMET ==========
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false // Permitir frontend externo
+}));
+
+// ========== SEGURIDAD: RATE LIMITING ==========
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 100, // máximo 100 requests por IP
+    message: { error: 'Demasiadas peticiones. Intenta de nuevo en 15 minutos.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+app.use('/api/', apiLimiter);
+
+// Rate limit más estricto para login (prevenir fuerza bruta)
+const loginLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hora
+    max: 10, // máximo 10 intentos de login por hora
+    message: { error: 'Demasiados intentos de login. Intenta en 1 hora.' }
+});
+
 
 // ========== MIDDLEWARE CORS MEJORADO ==========
 // Middleware manual para asegurar que CORS funciona en TODOS los casos
@@ -382,7 +408,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ========== AUTENTICACIÓN ==========
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
