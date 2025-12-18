@@ -8,7 +8,11 @@ const fs = require('fs');
 const path = require('path');
 
 // ========== CONFIGURACIÓN ==========
-const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('❌ FATAL ERROR: JWT_SECRET no configurado');
+    process.exit(1);
+}
 const PORT = process.env.PORT || 3000;
 
 // CORS: Orígenes permitidos (Combinar entorno + defaults)
