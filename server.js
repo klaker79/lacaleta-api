@@ -1046,6 +1046,16 @@ app.post('/api/suppliers', authMiddleware, async (req, res) => {
             'INSERT INTO proveedores (nombre, contacto, telefono, email, direccion, notas, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
             [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], req.restauranteId]
         );
+
+        // Actualizar proveedor_id de los ingredientes asignados
+        const proveedorId = result.rows[0].id;
+        if (ingredientes && ingredientes.length > 0) {
+            await pool.query(
+                'UPDATE ingredientes SET proveedor_id = $1 WHERE id = ANY($2::int[]) AND restaurante_id = $3',
+                [proveedorId, ingredientes, req.restauranteId]
+            );
+        }
+
         res.status(201).json(result.rows[0]);
     } catch (err) {
         log('error', 'Error creando proveedor', { error: err.message });
@@ -1057,10 +1067,27 @@ app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
+
+        // Actualizar proveedor
         const result = await pool.query(
             'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
-            [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id, req.restauranteId]
+            [nombre, contacto || '', telefono || '', email || '', email || '', notas || '', ingredientes || [], id, req.restauranteId]
         );
+
+        // Actualizar proveedor_id de los ingredientes asignados
+        if (ingredientes && ingredientes.length > 0) {
+            // Primero quitar este proveedor de ingredientes que ya no están asignados
+            await pool.query(
+                'UPDATE ingredientes SET proveedor_id = NULL WHERE proveedor_id = $1 AND restaurante_id = $2',
+                [id, req.restauranteId]
+            );
+            // Luego asignar este proveedor a los nuevos ingredientes
+            await pool.query(
+                'UPDATE ingredientes SET proveedor_id = $1 WHERE id = ANY($2::int[]) AND restaurante_id = $3',
+                [id, ingredientes, req.restauranteId]
+            );
+        }
+
         res.status(201).json(result.rows[0]);
     } catch (err) {
         log('error', 'Error actualizando proveedor', { error: err.message });
