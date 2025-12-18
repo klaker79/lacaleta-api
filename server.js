@@ -9,7 +9,12 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 // ========== CONFIGURACIÓN ==========
-const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-key-2024';
+// JWT_SECRET debe configurarse en variables de entorno de Railway
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.warn('⚠️ ADVERTENCIA: JWT_SECRET no configurado. Usando secret de desarrollo.');
+}
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-change-in-production';
 const PORT = process.env.PORT || 3000;
 
 // CORS: Orígenes permitidos (Combinar entorno + defaults)
@@ -99,12 +104,13 @@ const log = (level, message, data = {}) => {
 };
 
 // ========== BASE DE DATOS ==========
+// En producción, TODAS las variables deben venir del entorno (Railway las configura automáticamente)
 const pool = new Pool({
-    host: process.env.DB_HOST || 'anais-postgres-2s8h7q',
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME || 'db',
-    user: process.env.DB_USER || 'admin',
-    password: process.env.DB_PASSWORD || '18061979Anais.',
+    host: process.env.DB_HOST || process.env.PGHOST,
+    port: process.env.DB_PORT || process.env.PGPORT || 5432,
+    database: process.env.DB_NAME || process.env.PGDATABASE,
+    user: process.env.DB_USER || process.env.PGUSER,
+    password: process.env.DB_PASSWORD || process.env.PGPASSWORD,
 });
 
 // Test conexión e inicializar DB
@@ -335,7 +341,7 @@ const authMiddleware = (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, EFFECTIVE_JWT_SECRET);
         req.user = decoded;
         req.restauranteId = decoded.restauranteId;
         next();
@@ -434,7 +440,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
         const token = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
-            JWT_SECRET,
+            EFFECTIVE_JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -488,7 +494,7 @@ app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) =
                 rol: 'api',
                 tipo: 'api_token'
             },
-            JWT_SECRET,
+            EFFECTIVE_JWT_SECRET,
             { expiresIn: `${dias}d` }
         );
 
@@ -547,7 +553,7 @@ app.post('/api/auth/register', async (req, res) => {
 
         const token = jwt.sign(
             { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
-            JWT_SECRET,
+            EFFECTIVE_JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -1929,3 +1935,4 @@ log('info', 'Sistema de monitoreo y alertas activado', {
 });
 console.log('📊 Sistema de monitoreo activado');
 console.log(`📧 Alertas configuradas para: ${ALERT_EMAIL}`);
+
