@@ -1153,7 +1153,6 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                 try {
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
                     const cantidad = parseFloat(item.cantidad) || 0;
-                    const total = precioReal * cantidad;
                     const ingredienteId = parseInt(item.ingredienteId || item.id);
 
                     if (!ingredienteId || isNaN(ingredienteId)) {
@@ -1161,19 +1160,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                         continue;
                     }
 
-                    // 1. Registrar precios de compra diarios
-                    await client.query(`
-                        INSERT INTO precios_compra_diarios 
-                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
-                        DO UPDATE SET 
-                            precio_unitario = EXCLUDED.precio_unitario,
-                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                    `, [ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
-
-                    // 2. ACTUALIZAR STOCK del ingrediente (sumar la cantidad recibida)
+                    // ACTUALIZAR STOCK del ingrediente (sumar la cantidad recibida)
                     await client.query(`
                         UPDATE ingredientes 
                         SET stock_actual = COALESCE(stock_actual, 0) + $1,
