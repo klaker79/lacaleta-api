@@ -38,12 +38,17 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" }, // Permitir cargar recursos desde otros orígenes
 }));
 
-// Configuración de CORS
+// Configuración de CORS - SIEMPRE permite GitHub Pages
+const GITHUB_PAGES_ORIGIN = 'https://klaker79.github.io';
 app.use(cors({
     origin: function (origin, callback) {
         // Permitir requests sin origin (como apps móviles, curl, n8n)
         if (!origin) return callback(null, true);
 
+        // SIEMPRE permitir GitHub Pages
+        if (origin === GITHUB_PAGES_ORIGIN) return callback(null, true);
+
+        // Permitir orígenes configurados o en desarrollo
         if (ALLOWED_ORIGINS.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
             callback(null, true);
         } else {
