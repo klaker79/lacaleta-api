@@ -36,7 +36,7 @@ app.use(helmet({
 // ========== SEGURIDAD: RATE LIMITING ==========
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // máximo 100 requests por IP
+    max: 1000, // máximo 1000 requests por IP (aumentado para desarrollo)
     message: { error: 'Demasiadas peticiones. Intenta de nuevo en 15 minutos.' },
     standardHeaders: true,
     legacyHeaders: false
@@ -46,7 +46,7 @@ app.use('/api/', apiLimiter);
 // Rate limit más estricto para login (prevenir fuerza bruta)
 const loginLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hora
-    max: 10, // máximo 10 intentos de login por hora
+    max: 50, // máximo 50 intentos de login por hora (aumentado)
     message: { error: 'Demasiados intentos de login. Intenta en 1 hora.' }
 });
 
@@ -1136,6 +1136,8 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
         const { id } = req.params;
         const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
 
+        log('info', 'Actualizando pedido', { id, estado, ingredientes: ingredientes?.length });
+
         await client.query('BEGIN');
 
         const result = await client.query(
@@ -1148,30 +1150,42 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
             for (const item of ingredientes) {
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
-                const cantidad = parseFloat(item.cantidad) || 0;
-                const total = precioReal * cantidad;
-                const ingredienteId = item.ingredienteId || item.id;
+                try {
+                    const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
+                    const cantidad = parseFloat(item.cantidad) || 0;
+                    const total = precioReal * cantidad;
+                    const ingredienteId = parseInt(item.ingredienteId || item.id);
 
-                // 1. Registrar precios de compra diarios
-                await client.query(`
-                    INSERT INTO precios_compra_diarios 
-                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
-                    DO UPDATE SET 
-                        precio_unitario = EXCLUDED.precio_unitario,
-                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
+                    if (!ingredienteId || isNaN(ingredienteId)) {
+                        log('warn', 'Ingrediente sin ID válido', { item });
+                        continue;
+                    }
 
-                // 2. ACTUALIZAR STOCK del ingrediente (sumar la cantidad recibida)
-                await client.query(`
-                    UPDATE ingredientes 
-                    SET stock_actual = COALESCE(stock_actual, 0) + $1,
-                        precio = CASE WHEN $2 > 0 THEN $2 ELSE precio END
-                    WHERE id = $3 AND restaurante_id = $4
-                `, [cantidad, precioReal, ingredienteId, req.restauranteId]);
+                    // 1. Registrar precios de compra diarios
+                    await client.query(`
+                        INSERT INTO precios_compra_diarios 
+                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                        DO UPDATE SET 
+                            precio_unitario = EXCLUDED.precio_unitario,
+                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+                    `, [ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
+
+                    // 2. ACTUALIZAR STOCK del ingrediente (sumar la cantidad recibida)
+                    await client.query(`
+                        UPDATE ingredientes 
+                        SET stock_actual = COALESCE(stock_actual, 0) + $1,
+                            precio = CASE WHEN $2 > 0 THEN $2 ELSE precio END
+                        WHERE id = $3 AND restaurante_id = $4
+                    `, [cantidad, precioReal, ingredienteId, req.restauranteId]);
+
+                    log('info', 'Stock actualizado', { ingredienteId, cantidad, precioReal });
+                } catch (itemError) {
+                    log('error', 'Error procesando ingrediente', { error: itemError.message, item });
+                    // Continuar con otros ingredientes
+                }
             }
 
             log('info', 'Pedido recibido: stock actualizado', { pedidoId: id, items: ingredientes.length });
@@ -1181,8 +1195,8 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
         res.json(result.rows[0] || {});
     } catch (err) {
         await client.query('ROLLBACK');
-        log('error', 'Error actualizando pedido', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error actualizando pedido', { error: err.message, stack: err.stack });
+        res.status(500).json({ error: 'Error interno: ' + err.message });
     } finally {
         client.release();
     }
