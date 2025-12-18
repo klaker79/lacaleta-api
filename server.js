@@ -1143,7 +1143,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
             [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id, req.restauranteId]
         );
 
-        // Si el pedido se marca como recibido, registrar los precios de compra diarios
+        // Si el pedido se marca como recibido, registrar los precios de compra diarios y ACTUALIZAR STOCK
         if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
@@ -1151,8 +1151,9 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                 const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
                 const cantidad = parseFloat(item.cantidad) || 0;
                 const total = precioReal * cantidad;
+                const ingredienteId = item.ingredienteId || item.id;
 
-                // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
+                // 1. Registrar precios de compra diarios
                 await client.query(`
                     INSERT INTO precios_compra_diarios 
                     (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
@@ -1162,10 +1163,18 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                         precio_unitario = EXCLUDED.precio_unitario,
                         cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
                         total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [item.ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
+                `, [ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
+
+                // 2. ACTUALIZAR STOCK del ingrediente (sumar la cantidad recibida)
+                await client.query(`
+                    UPDATE ingredientes 
+                    SET stock_actual = COALESCE(stock_actual, 0) + $1,
+                        precio = CASE WHEN $2 > 0 THEN $2 ELSE precio END
+                    WHERE id = $3 AND restaurante_id = $4
+                `, [cantidad, precioReal, ingredienteId, req.restauranteId]);
             }
 
-            log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
+            log('info', 'Pedido recibido: stock actualizado', { pedidoId: id, items: ingredientes.length });
         }
 
         await client.query('COMMIT');
@@ -1230,7 +1239,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         for (const ing of ingredientesReceta) {
             const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
             if (stockResult.rows.length > 0) {
-                const stockActual = parseFloat(stockResult.rows[0].stock_actual);
+                const stockActual = parseFloat(stockResult.rows[0].stock_actual) || 0;
                 const stockNecesario = ing.cantidad * cantidad;
                 if (stockActual < stockNecesario) {
                     await client.query('ROLLBACK');
