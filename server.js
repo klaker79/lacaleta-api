@@ -75,11 +75,11 @@ const log = (level, message, data = {}) => {
 
 // ========== BASE DE DATOS ==========
 const pool = new Pool({
-    host: process.env.DB_HOST || 'anais-postgres-2s8h7q',
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME || 'db',
-    user: process.env.DB_USER || 'admin',
-    password: process.env.DB_PASSWORD || '18061979Anais.',
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
 });
 
 // Test conexión e inicializar DB
