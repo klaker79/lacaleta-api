@@ -1074,14 +1074,14 @@ app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
             [nombre, contacto || '', telefono || '', email || '', email || '', notas || '', ingredientes || [], id, req.restauranteId]
         );
 
-        // Actualizar proveedor_id de los ingredientes asignados
+        // Actualizar proveedor_id de los ingredientes
+        // Primero quitar este proveedor de TODOS los ingredientes que lo tenían
+        await pool.query(
+            'UPDATE ingredientes SET proveedor_id = NULL WHERE proveedor_id = $1 AND restaurante_id = $2',
+            [id, req.restauranteId]
+        );
+        // Luego asignar este proveedor a los nuevos ingredientes (si hay alguno)
         if (ingredientes && ingredientes.length > 0) {
-            // Primero quitar este proveedor de ingredientes que ya no están asignados
-            await pool.query(
-                'UPDATE ingredientes SET proveedor_id = NULL WHERE proveedor_id = $1 AND restaurante_id = $2',
-                [id, req.restauranteId]
-            );
-            // Luego asignar este proveedor a los nuevos ingredientes
             await pool.query(
                 'UPDATE ingredientes SET proveedor_id = $1 WHERE id = ANY($2::int[]) AND restaurante_id = $3',
                 [id, ingredientes, req.restauranteId]
