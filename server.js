@@ -123,16 +123,6 @@ const pool = new Pool({
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-
-      
-      CREATE TABLE IF NOT EXISTS gastos_fijos (
-        id SERIAL PRIMARY KEY,
-        concepto character varying(100) NOT NULL,
-        monto_mensual numeric(10,2) NOT NULL DEFAULT 0.00,
-        activo boolean DEFAULT true,
-        created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-      );
     `);
 
         // MIGRACIÓN: Añadir columna familia si no existe
@@ -1062,100 +1052,6 @@ app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
         res.json({ message: 'Eliminado' });
     } catch (err) {
         log('error', 'Error eliminando proveedor', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-
-// ========== GASTOS FIJOS ==========
-app.get('/api/gastos-fijos', authMiddleware, async (req, res) => {
-    try {
-        const result = await pool.query(
-            'SELECT * FROM gastos_fijos WHERE activo = true ORDER BY concepto ASC'
-        );
-        res.json(result.rows || []);
-    } catch (err) {
-        log('error', 'Error obteniendo gastos fijos', { error: err.message });
-        res.status(500).json({ error: 'Error interno', data: [] });
-    }
-});
-
-app.post('/api/gastos-fijos', authMiddleware, async (req, res) => {
-    try {
-        const { concepto, montoMensual, monto_mensual } = req.body;
-        const finalMonto = montoMensual ?? monto_mensual ?? 0;
-        
-        if (!concepto) {
-            return res.status(400).json({ error: 'Concepto es requerido' });
-        }
-
-        const result = await pool.query(
-            'INSERT INTO gastos_fijos (concepto, monto_mensual) VALUES ($1, $2) RETURNING *',
-            [concepto, parseFloat(finalMonto)]
-        );
-        res.status(201).json(result.rows[0]);
-    } catch (err) {
-        log('error', 'Error creando gasto fijo', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-app.put('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { concepto, montoMensual, monto_mensual } = req.body;
-        const finalMonto = montoMensual ?? monto_mensual ?? 0;
-
-        const result = await pool.query(
-            'UPDATE gastos_fijos SET concepto=$1, monto_mensual=$2, updated_at=CURRENT_TIMESTAMP WHERE id=$3 RETURNING *',
-            [concepto, parseFloat(finalMonto), id]
-        );
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Gasto fijo no encontrado' });
-        }
-        
-        res.json(result.rows[0]);
-    } catch (err) {
-        log('error', 'Error actualizando gasto fijo', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-app.delete('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const result = await pool.query(
-            'UPDATE gastos_fijos SET activo=false WHERE id=$1 RETURNING *',
-            [id]
-        );
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Gasto fijo no encontrado' });
-        }
-        
-        res.json({ message: 'Eliminado' });
-    } catch (err) {
-        log('error', 'Error eliminando gasto fijo', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-app.get('/api/gastos-fijos/total', authMiddleware, async (req, res) => {
-    try {
-        const result = await pool.query(
-            'SELECT COALESCE(SUM(monto_mensual), 0) as total_mensual FROM gastos_fijos WHERE activo = true'
-        );
-        
-        const totalMensual = parseFloat(result.rows[0].total_mensual);
-        const totalDiario = totalMensual / 30;
-        
-        res.json({
-            total_mensual: totalMensual,
-            total_diario: totalDiario
-        });
-    } catch (err) {
-        log('error', 'Error calculando total gastos fijos', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
