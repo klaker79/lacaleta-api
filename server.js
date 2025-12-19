@@ -109,7 +109,7 @@ const pool = new Pool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     // SSL requerido para producción en muchos servicios cloud
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    ssl: false
 });
 
 // Inicialización de DB
