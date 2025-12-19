@@ -453,6 +453,39 @@ app.get('/api/auth/verify', authMiddleware, (req, res) => {
     });
 });
 
+
+// ✅ PRODUCTION: Auto-refresh de tokens
+app.post('/api/auth/refresh', authMiddleware, async (req, res) => {
+    try {
+        const user = req.user;
+        
+        const newToken = jwt.sign(
+            { 
+                userId: user.userId,
+                restauranteId: user.restauranteId,
+                email: user.email,
+                rol: user.rol
+            },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+        
+        log('info', 'Token refreshed', { 
+            userId: user.userId, 
+            email: user.email 
+        });
+        
+        res.json({ 
+            token: newToken,
+            expiresIn: '24h',
+            issuedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        log('error', 'Error refreshing token', { error: error.message });
+        res.status(500).json({ error: 'Error renovando token' });
+    }
+});
+
 // Generar token de API de larga duración (para n8n, Zapier, etc.)
 app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) => {
     try {
