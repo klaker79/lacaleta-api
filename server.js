@@ -123,6 +123,16 @@ const pool = new Pool({
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      
+      CREATE TABLE IF NOT EXISTS gastos_fijos (
+        id SERIAL PRIMARY KEY,
+        concepto character varying(100) NOT NULL,
+        monto_mensual numeric(10,2) NOT NULL DEFAULT 0.00,
+        activo boolean DEFAULT true,
+        created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+        updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
         // MIGRACIÓN: Añadir columna familia si no existe
