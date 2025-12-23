@@ -1178,6 +1178,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         const total = precioUnitario * cantidad;
 
         const ingredientesReceta = receta.ingredientes || [];
+        /* VALIDACIÓN DESACTIVADA - Permitir stock negativo (restaurantes venden antes de recibir mercancía)
         for (const ing of ingredientesReceta) {
             const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
             if (stockResult.rows.length > 0) {
@@ -1191,6 +1192,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
                 }
             }
         }
+        */
 
         const ventaResult = await client.query(
             'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, restaurante_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
