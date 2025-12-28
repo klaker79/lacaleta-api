@@ -1783,8 +1783,42 @@ app.use((err, req, res, next) => {
 
 // ========== INICIAR SERVIDOR ==========
 app.listen(PORT, '0.0.0.0', () => {
-    log('info', 'Servidor iniciado', { port: PORT, version: '2.2.0', cors: ALLOWED_ORIGINS });
+    log('info', 'Servidor iniciado', { port: PORT, version: '2.3.0', cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
-    console.log(`📍 La Caleta 102 Dashboard API v2.2`);
+    console.log(`📍 La Caleta 102 Dashboard API v2.3`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
+    
+    // ========== UPTIME KUMA HEARTBEAT ==========
+    const UPTIME_KUMA_PUSH_URL = 'https://uptime.mindloop.cloud/api/push/nw9yvLKJzf';
+    
+    const sendHeartbeat = async () => {
+        try {
+            const start = Date.now();
+            // Verificar que la BD está funcionando
+            await pool.query('SELECT 1');
+            const ping = Date.now() - start;
+            
+            // Enviar heartbeat a Uptime Kuma
+            const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=${ping}`;
+            const https = require('https');
+            https.get(url, (res) => {
+                if (res.statusCode === 200) {
+                    log('debug', 'Heartbeat enviado a Uptime Kuma', { ping });
+                }
+            }).on('error', (err) => {
+                log('warn', 'Error enviando heartbeat', { error: err.message });
+            });
+        } catch (err) {
+            // Si la BD falla, enviar status down
+            const url = `${UPTIME_KUMA_PUSH_URL}?status=down&msg=DB_Error`;
+            const https = require('https');
+            https.get(url).on('error', () => {});
+            log('error', 'Heartbeat fallido - BD no disponible', { error: err.message });
+        }
+    };
+    
+    // Enviar heartbeat cada 60 segundos
+    sendHeartbeat(); // Primer envío inmediato
+    setInterval(sendHeartbeat, 60000);
+    console.log(`💓 Heartbeat configurado para Uptime Kuma (cada 60s)`);
 });
