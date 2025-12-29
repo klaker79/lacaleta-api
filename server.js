@@ -6,6 +6,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { Resend } = require('resend');
+
+// ========== RESEND (Email) ==========
+const resend = new Resend(process.env.RESEND_API_KEY || 're_8hWi8wSn_Px7T4JymbKP7s7mR4y3ioILc');
 
 // ========== CONFIGURACIÓN ==========
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -275,6 +280,18 @@ const pool = new Pool({
             `);
         } catch (e) { log('warn', 'Migración proveedores.codigo', { error: e.message }); }
 
+        // Añadir columnas para verificación de email
+        try {
+            await pool.query(`
+                ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+                ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS verification_token VARCHAR(64);
+                ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP;
+            `);
+            // Marcar usuarios existentes como verificados (para tu cuenta)
+            await pool.query(`UPDATE usuarios SET email_verified = TRUE WHERE email_verified IS NULL`);
+            log('info', 'Migración email_verified completada');
+        } catch (e) { log('warn', 'Migración usuarios.email_verified', { error: e.message }); }
+
         // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
         log('info', 'Limpiando tablas obsoletas...');
 
@@ -411,6 +428,11 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
 
+        // Verificar que el email esté verificado
+        if (user.email_verified === false) {
+            return res.status(403).json({ error: 'Tu cuenta no está verificada. Revisa tu email.', needsVerification: true });
+        }
+
         const token = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
             JWT_SECRET,
@@ -501,49 +523,106 @@ app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) =
 
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { restauranteNombre, email, password, nombreUsuario } = req.body;
+        const { nombre, email, password } = req.body;
 
-        if (!restauranteNombre || !email || !password) {
-            return res.status(400).json({ error: 'Todos los campos son requeridos' });
+        if (!nombre || !email || !password) {
+            return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
         }
 
-        const existingUser = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+        }
+
+        const existingUser = await pool.query('SELECT id, email_verified FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
-            return res.status(400).json({ error: 'El email ya está registrado' });
+            if (existingUser.rows[0].email_verified) {
+                return res.status(400).json({ error: 'El email ya está registrado' });
+            } else {
+                return res.status(400).json({ error: 'Ya tienes una cuenta pendiente de verificar. Revisa tu email.' });
+            }
         }
 
         const restauranteResult = await pool.query(
             'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
-            [restauranteNombre, email]
+            [nombre, email]
         );
         const restauranteId = restauranteResult.rows[0].id;
 
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
         const passwordHash = await bcrypt.hash(password, 10);
-        const userResult = await pool.query(
-            'INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [restauranteId, email, passwordHash, nombreUsuario || 'Admin', 'admin']
+        await pool.query(
+            `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified, verification_token, verification_expires) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [restauranteId, email, passwordHash, nombre, 'admin', false, verificationToken, verificationExpires]
         );
 
-        const token = jwt.sign(
-            { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-        );
+        const verifyUrl = `${process.env.FRONTEND_URL || 'https://klaker79.github.io/MindLoop-CostOS'}/verify.html?token=${verificationToken}`;
 
-        log('info', 'Registro exitoso', { restauranteId, email });
+        try {
+            await resend.emails.send({
+                from: 'MindLoop CostOS <noreply@resend.dev>',
+                to: email,
+                subject: '✅ Verifica tu cuenta - MindLoop CostOS',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                        <h1 style="color: #8B5CF6;">¡Bienvenido a MindLoop CostOS!</h1>
+                        <p>Hola <strong>${nombre}</strong>,</p>
+                        <p>Gracias por registrarte. Para activar tu cuenta, haz clic en el botón:</p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="${verifyUrl}" style="background: #8B5CF6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                                Verificar mi cuenta
+                            </a>
+                        </div>
+                        <p style="color: #666; font-size: 14px;">O copia este enlace: ${verifyUrl}</p>
+                        <p style="color: #999; font-size: 12px;">Este enlace expira en 24 horas.</p>
+                    </div>
+                `
+            });
+            log('info', 'Email de verificación enviado', { email });
+        } catch (emailError) {
+            log('error', 'Error enviando email', { error: emailError.message });
+        }
 
-        res.status(201).json({
-            token,
-            user: {
-                id: userResult.rows[0].id,
-                email,
-                nombre: nombreUsuario || 'Admin',
-                rol: 'admin',
-                restaurante: restauranteNombre
-            }
-        });
+        res.status(201).json({ message: 'Revisa tu email para verificar tu cuenta.', needsVerification: true });
     } catch (err) {
         log('error', 'Error registro', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+app.get('/api/auth/verify-email', async (req, res) => {
+    try {
+        const { token } = req.query;
+        if (!token) return res.status(400).json({ error: 'Token requerido' });
+
+        const result = await pool.query(
+            `SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id 
+             WHERE u.verification_token = $1 AND u.verification_expires > NOW()`, [token]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(400).json({ error: 'Token inválido o expirado' });
+        }
+
+        const user = result.rows[0];
+        await pool.query(`UPDATE usuarios SET email_verified = TRUE, verification_token = NULL WHERE id = $1`, [user.id]);
+
+        const jwtToken = jwt.sign(
+            { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
+            JWT_SECRET, { expiresIn: '24h' }
+        );
+
+        log('info', 'Email verificado', { email: user.email });
+
+        res.json({
+            message: '¡Cuenta verificada!',
+            token: jwtToken,
+            user: { id: user.id, email: user.email, nombre: user.nombre, rol: user.rol, restaurante: user.restaurante_nombre, restauranteId: user.restaurante_id }
+        });
+    } catch (err) {
+        log('error', 'Error verificando email', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
@@ -1787,17 +1866,17 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 API corriendo en puerto ${PORT}`);
     console.log(`📍 La Caleta 102 Dashboard API v2.3`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
-    
+
     // ========== UPTIME KUMA HEARTBEAT ==========
     const UPTIME_KUMA_PUSH_URL = 'https://uptime.mindloop.cloud/api/push/nw9yvLKJzf';
-    
+
     const sendHeartbeat = async () => {
         try {
             const start = Date.now();
             // Verificar que la BD está funcionando
             await pool.query('SELECT 1');
             const ping = Date.now() - start;
-            
+
             // Enviar heartbeat a Uptime Kuma
             const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=${ping}`;
             const https = require('https');
@@ -1812,11 +1891,11 @@ app.listen(PORT, '0.0.0.0', () => {
             // Si la BD falla, enviar status down
             const url = `${UPTIME_KUMA_PUSH_URL}?status=down&msg=DB_Error`;
             const https = require('https');
-            https.get(url).on('error', () => {});
+            https.get(url).on('error', () => { });
             log('error', 'Heartbeat fallido - BD no disponible', { error: err.message });
         }
     };
-    
+
     // Enviar heartbeat cada 60 segundos
     sendHeartbeat(); // Primer envío inmediato
     setInterval(sendHeartbeat, 60000);
