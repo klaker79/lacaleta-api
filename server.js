@@ -528,25 +528,28 @@ app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) =
     }
 });
 
+// Código de invitación válido
+const INVITATION_CODE = process.env.INVITATION_CODE || 'MINDLOOP2024';
+
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { nombre, email, password } = req.body;
+        const { nombre, email, password, codigoInvitacion } = req.body;
 
         if (!nombre || !email || !password) {
             return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
+        }
+
+        if (!codigoInvitacion || codigoInvitacion !== INVITATION_CODE) {
+            return res.status(403).json({ error: 'Código de invitación inválido' });
         }
 
         if (password.length < 6) {
             return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
         }
 
-        const existingUser = await pool.query('SELECT id, email_verified FROM usuarios WHERE email = $1', [email]);
+        const existingUser = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
-            if (existingUser.rows[0].email_verified) {
-                return res.status(400).json({ error: 'El email ya está registrado' });
-            } else {
-                return res.status(400).json({ error: 'Ya tienes una cuenta pendiente de verificar. Revisa tu email.' });
-            }
+            return res.status(400).json({ error: 'El email ya está registrado' });
         }
 
         const restauranteResult = await pool.query(
@@ -555,44 +558,32 @@ app.post('/api/auth/register', async (req, res) => {
         );
         const restauranteId = restauranteResult.rows[0].id;
 
-        const verificationToken = crypto.randomBytes(32).toString('hex');
-        const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
         const passwordHash = await bcrypt.hash(password, 10);
-        await pool.query(
-            `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified, verification_token, verification_expires) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [restauranteId, email, passwordHash, nombre, 'admin', false, verificationToken, verificationExpires]
+        const userResult = await pool.query(
+            `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified) 
+             VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id`,
+            [restauranteId, email, passwordHash, nombre, 'admin']
         );
 
-        const verifyUrl = `${process.env.FRONTEND_URL || 'https://klaker79.github.io/MindLoop-CostOS'}/verify.html?token=${verificationToken}`;
+        const token = jwt.sign(
+            { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
 
-        try {
-            await resend.emails.send({
-                from: 'MindLoop CostOS <noreply@resend.dev>',
-                to: email,
-                subject: '✅ Verifica tu cuenta - MindLoop CostOS',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                        <h1 style="color: #8B5CF6;">¡Bienvenido a MindLoop CostOS!</h1>
-                        <p>Hola <strong>${nombre}</strong>,</p>
-                        <p>Gracias por registrarte. Para activar tu cuenta, haz clic en el botón:</p>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${verifyUrl}" style="background: #8B5CF6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                                Verificar mi cuenta
-                            </a>
-                        </div>
-                        <p style="color: #666; font-size: 14px;">O copia este enlace: ${verifyUrl}</p>
-                        <p style="color: #999; font-size: 12px;">Este enlace expira en 24 horas.</p>
-                    </div>
-                `
-            });
-            log('info', 'Email de verificación enviado', { email });
-        } catch (emailError) {
-            log('error', 'Error enviando email', { error: emailError.message });
-        }
+        log('info', 'Registro exitoso con código de invitación', { email });
 
-        res.status(201).json({ message: 'Revisa tu email para verificar tu cuenta.', needsVerification: true });
+        res.status(201).json({
+            token,
+            user: {
+                id: userResult.rows[0].id,
+                email,
+                nombre,
+                rol: 'admin',
+                restaurante: nombre,
+                restauranteId
+            }
+        });
     } catch (err) {
         log('error', 'Error registro', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
