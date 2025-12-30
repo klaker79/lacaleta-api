@@ -435,10 +435,10 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
 
-        // Verificar que el email esté verificado
-        if (user.email_verified === false) {
-            return res.status(403).json({ error: 'Tu cuenta no está verificada. Revisa tu email.', needsVerification: true });
-        }
+        // Email verification check deshabilitado temporalmente
+        // if (user.email_verified === false) {
+        //     return res.status(403).json({ error: 'Tu cuenta no está verificada. Revisa tu email.', needsVerification: true });
+        // }
 
         const token = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
