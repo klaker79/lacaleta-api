@@ -53,8 +53,8 @@ app.use((req, res, next) => {
     } else if (ALLOWED_ORIGINS.includes(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
     } else {
-        // Para desarrollo, permitir cualquier origen pero logear
-        console.log('⚠️ Origin no en whitelist:', origin);
+        // Para desarrollo/integraciones, permitir pero logear advertencia
+        log('warn', 'Origin no en whitelist (permitido)', { origin, url: req.originalUrl });
         res.header('Access-Control-Allow-Origin', origin);
     }
 
