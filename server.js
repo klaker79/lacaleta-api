@@ -1917,8 +1917,19 @@ app.listen(PORT, '0.0.0.0', () => {
     const sendHeartbeat = async () => {
         try {
             const start = Date.now();
-            // Verificar que la BD está funcionando
-            await pool.query('SELECT 1');
+            // Verificar que la BD está funcionando (con retry)
+            let dbOk = false;
+            for (let i = 0; i < 3 && !dbOk; i++) {
+                try {
+                    await pool.query('SELECT 1');
+                    dbOk = true;
+                } catch (e) {
+                    if (i < 2) await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+
+            if (!dbOk) throw new Error('DB no responde después de 3 intentos');
+
             const ping = Date.now() - start;
 
             // Enviar heartbeat a Uptime Kuma
