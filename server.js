@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 
 // ========== RESEND (Email) ==========
@@ -73,6 +74,9 @@ app.use((req, res, next) => {
 
 // Parser JSON
 app.use(express.json({ limit: '10mb' }));
+
+// Parser de cookies para auth segura
+app.use(cookieParser());
 
 // Logging Persistente
 const LOG_FILE = path.join(__dirname, 'server.log');
@@ -336,9 +340,18 @@ const pool = new Pool({
 
 // ========== MIDDLEWARE DE AUTENTICACIÓN ==========
 const authMiddleware = (req, res, next) => {
-    const authHeader = req.headers.authorization;
+    // 1. Intentar leer token de httpOnly cookie (navegador)
+    // 2. Fallback a Authorization header (API/n8n/Postman)
+    let token = req.cookies?.auth_token;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!token) {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            token = authHeader.split(' ')[1];
+        }
+    }
+
+    if (!token) {
         log('warn', 'Auth fallido: Token no proporcionado', {
             url: req.originalUrl,
             origin: req.headers.origin || 'sin-origin'
@@ -346,11 +359,9 @@ const authMiddleware = (req, res, next) => {
         return res.status(401).json({
             error: 'Token no proporcionado',
             code: 'NO_TOKEN',
-            hint: 'Incluye header: Authorization: Bearer <tu_token>'
+            hint: 'Incluye header: Authorization: Bearer <tu_token> o inicia sesión'
         });
     }
-
-    const token = authHeader.split(' ')[1];
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
@@ -369,6 +380,8 @@ const authMiddleware = (req, res, next) => {
         if (error.name === 'TokenExpiredError') {
             errorMsg = 'Token expirado. Por favor, vuelve a iniciar sesión.';
             code = 'TOKEN_EXPIRED';
+            // Limpiar cookie expirada
+            res.clearCookie('auth_token');
         }
 
         return res.status(401).json({
@@ -463,8 +476,19 @@ app.post('/api/auth/login', async (req, res) => {
 
         log('info', 'Login exitoso', { userId: user.id, email });
 
+        // Establecer token en httpOnly cookie (seguro para navegadores)
+        const isProduction = process.env.NODE_ENV === 'production';
+        res.cookie('auth_token', token, {
+            httpOnly: true,           // No accesible desde JavaScript
+            secure: isProduction,     // Solo HTTPS en producción
+            sameSite: 'lax',          // Protección CSRF (lax permite navegación normal)
+            maxAge: 24 * 60 * 60 * 1000, // 24 horas
+            path: '/'
+        });
+
+        // También enviar token en respuesta para compatibilidad con API clients (n8n, Postman)
         res.json({
-            token,
+            token,  // Mantener para backwards compatibility con API tokens
             user: {
                 id: user.id,
                 email: user.email,
@@ -495,6 +519,13 @@ app.get('/api/auth/verify', authMiddleware, (req, res) => {
             expiresAt: new Date(req.user.exp * 1000).toISOString()
         }
     });
+});
+
+// Logout - Limpiar cookie de autenticación
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie('auth_token', { path: '/' });
+    log('info', 'Logout exitoso');
+    res.json({ success: true, message: 'Sesión cerrada correctamente' });
 });
 
 // Generar token de API de larga duración (para n8n, Zapier, etc.)
