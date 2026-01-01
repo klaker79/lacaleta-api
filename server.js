@@ -100,6 +100,18 @@ const pool = new Pool({
     database: process.env.DB_NAME,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
+    // Configuración robusta para evitar conexiones muertas
+    max: 20,                          // Máximo de conexiones en el pool
+    idleTimeoutMillis: 30000,         // Cerrar conexiones inactivas después de 30s
+    connectionTimeoutMillis: 10000,   // Timeout para nuevas conexiones: 10s
+    keepAlive: true,                  // Mantener conexiones vivas
+    keepAliveInitialDelayMillis: 10000 // Enviar keepalive cada 10s
+});
+
+// Manejar errores del pool (evita crash por conexiones muertas)
+pool.on('error', (err) => {
+    log('error', 'Error inesperado en pool de BD', { error: err.message });
+    // No hacer process.exit - el pool se recupera solo
 });
 
 // Test conexión e inicializar DB
