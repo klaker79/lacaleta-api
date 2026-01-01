@@ -1415,8 +1415,8 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         };
 
         // Obtener recetas y precios de ingredientes
-        // Incluir campo codigo_tpv para mapeo con códigos del TPV
-        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo_tpv FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
+        // Incluir campo codigo para mapeo con códigos del TPV
+        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
 
         // Mapa por nombre (para compatibilidad)
         const recetasMapNombre = new Map();
@@ -1426,8 +1426,8 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         recetasResult.rows.forEach(r => {
             recetasMapNombre.set(r.nombre.toLowerCase().trim(), r);
             // Mapear por código TPV si existe
-            if (r.codigo_tpv && r.codigo_tpv.trim() !== '' && r.codigo_tpv !== 'SIN_TPV') {
-                recetasMapCodigo.set(r.codigo_tpv.trim(), r);
+            if (r.codigo && r.codigo.trim() !== '' && r.codigo !== 'SIN_TPV') {
+                recetasMapCodigo.set(r.codigo.trim(), r);
             }
         });
 
