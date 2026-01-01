@@ -1955,61 +1955,24 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
 
     // ========== UPTIME KUMA HEARTBEAT ==========
+    // Heartbeat simple: si el servidor puede enviar esta request, está vivo
+    // Los problemas de BD se detectan via las API calls reales
     const UPTIME_KUMA_PUSH_URL = 'https://uptime.mindloop.cloud/api/push/nw9yvLKJzf';
-    let consecutiveFailures = 0;
-    const MAX_FAILURES_BEFORE_DOWN = 5; // Solo reportar DOWN después de 5 fallos consecutivos
 
-    const sendHeartbeat = async () => {
-        try {
-            const start = Date.now();
-            // Verificar que la BD está funcionando (con retry)
-            let dbOk = false;
-            for (let i = 0; i < 3 && !dbOk; i++) {
-                try {
-                    await pool.query('SELECT 1');
-                    dbOk = true;
-                } catch (e) {
-                    if (i < 2) await new Promise(r => setTimeout(r, 1000));
-                }
+    const sendHeartbeat = () => {
+        const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=1`;
+        const https = require('https');
+        https.get(url, (res) => {
+            if (res.statusCode === 200) {
+                log('debug', 'Heartbeat enviado a Uptime Kuma');
             }
-
-            if (!dbOk) throw new Error('DB no responde después de 3 intentos');
-
-            // Reset contador de fallos si la BD responde
-            consecutiveFailures = 0;
-            const ping = Date.now() - start;
-
-            // Enviar heartbeat a Uptime Kuma
-            const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=${ping}`;
-            const https = require('https');
-            https.get(url, (res) => {
-                if (res.statusCode === 200) {
-                    log('debug', 'Heartbeat enviado a Uptime Kuma', { ping });
-                }
-            }).on('error', (err) => {
-                log('warn', 'Error enviando heartbeat', { error: err.message });
-            });
-        } catch (err) {
-            consecutiveFailures++;
-            log('warn', `Heartbeat: BD no responde (fallo ${consecutiveFailures}/${MAX_FAILURES_BEFORE_DOWN})`, { error: err.message });
-
-            // Solo reportar DOWN si hay fallos consecutivos repetidos
-            if (consecutiveFailures >= MAX_FAILURES_BEFORE_DOWN) {
-                const url = `${UPTIME_KUMA_PUSH_URL}?status=down&msg=DB_Error_x${consecutiveFailures}`;
-                const https = require('https');
-                https.get(url).on('error', () => { });
-                log('error', 'Heartbeat: Reportando DOWN a Uptime Kuma', { consecutiveFailures });
-            } else {
-                // Enviar OK con mensaje de advertencia (no bajar el status)
-                const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=DB_Retry_${consecutiveFailures}&ping=9999`;
-                const https = require('https');
-                https.get(url).on('error', () => { });
-            }
-        }
+        }).on('error', (err) => {
+            log('warn', 'Error enviando heartbeat', { error: err.message });
+        });
     };
 
     // Enviar heartbeat cada 60 segundos
     sendHeartbeat(); // Primer envío inmediato
     setInterval(sendHeartbeat, 60000);
-    console.log(`💓 Heartbeat configurado para Uptime Kuma (cada 60s, DOWN después de ${MAX_FAILURES_BEFORE_DOWN} fallos)`);
+    console.log(`💓 Heartbeat configurado para Uptime Kuma (cada 60s)`);
 });
