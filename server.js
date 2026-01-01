@@ -1406,6 +1406,25 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             });
         }
 
+        // Obtener la fecha de las ventas (usar la primera venta o la fecha actual)
+        const fechaVenta = ventas[0]?.fecha ? ventas[0].fecha.split('T')[0] : new Date().toISOString().split('T')[0];
+
+        // Verificar si ya existen ventas para esta fecha
+        const existingResult = await client.query(
+            'SELECT COUNT(*) as count FROM ventas WHERE restaurante_id = $1 AND fecha::date = $2',
+            [req.restauranteId, fechaVenta]
+        );
+
+        if (parseInt(existingResult.rows[0].count) > 0) {
+            client.release();
+            return res.status(409).json({
+                error: 'Ya existen ventas para esta fecha',
+                fecha: fechaVenta,
+                mensaje: 'Para reemplazar los datos, primero elimine las ventas existentes de esta fecha',
+                ventasExistentes: parseInt(existingResult.rows[0].count)
+            });
+        }
+
         await client.query('BEGIN');
 
         const resultados = {
