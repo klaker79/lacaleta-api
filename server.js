@@ -1575,6 +1575,83 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== GASTOS FIJOS (Fixed Expenses) ==========
+// GET all gastos fijos
+app.get('/api/gastos-fijos', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM gastos_fijos WHERE activo = true ORDER BY id'
+        );
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error obteniendo gastos fijos', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// POST create gasto fijo
+app.post('/api/gastos-fijos', authMiddleware, async (req, res) => {
+    try {
+        const { concepto, monto_mensual } = req.body;
+
+        if (!concepto) {
+            return res.status(400).json({ error: 'El concepto es requerido' });
+        }
+
+        const result = await pool.query(
+            'INSERT INTO gastos_fijos (concepto, monto_mensual) VALUES ($1, $2) RETURNING *',
+            [concepto, monto_mensual || 0]
+        );
+
+        log('info', 'Gasto fijo creado', { id: result.rows[0].id, concepto });
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error creando gasto fijo', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// PUT update gasto fijo
+app.put('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { concepto, monto_mensual } = req.body;
+
+        const result = await pool.query(
+            'UPDATE gastos_fijos SET concepto = COALESCE($1, concepto), monto_mensual = COALESCE($2, monto_mensual), updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
+            [concepto, monto_mensual, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Gasto fijo no encontrado' });
+        }
+
+        log('info', 'Gasto fijo actualizado', { id, monto_mensual });
+        res.json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error actualizando gasto fijo', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// DELETE gasto fijo (soft delete)
+app.delete('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await pool.query(
+            'UPDATE gastos_fijos SET activo = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+            [id]
+        );
+
+        log('info', 'Gasto fijo eliminado', { id });
+        res.json({ message: 'Gasto fijo eliminado' });
+    } catch (err) {
+        log('error', 'Error eliminando gasto fijo', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // ========== BALANCE Y ESTADÍSTICAS ==========
 app.get('/api/balance/mes', authMiddleware, async (req, res) => {
     try {
