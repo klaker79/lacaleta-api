@@ -151,6 +151,21 @@ const pool = new Pool({
             log('warn', 'Error en migración de columna familia', { error: e.message });
         }
 
+        // MIGRACIÓN: Añadir columna activo si no existe (para toggle activar/desactivar)
+        try {
+            await pool.query(`
+            DO $$ 
+            BEGIN 
+              IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ingredientes' AND column_name = 'activo') THEN 
+                ALTER TABLE ingredientes ADD COLUMN activo BOOLEAN DEFAULT TRUE; 
+              END IF; 
+            END $$;
+        `);
+            log('info', 'Migración: columna activo verificada');
+        } catch (e) {
+            log('warn', 'Error en migración de columna activo', { error: e.message });
+        }
+
         await pool.query(`
       CREATE TABLE IF NOT EXISTS recetas (
         id SERIAL PRIMARY KEY,
@@ -695,7 +710,15 @@ app.delete('/api/team/:id', authMiddleware, requireAdmin, async (req, res) => {
 // ========== INGREDIENTES ==========
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM ingredientes WHERE restaurante_id = $1 ORDER BY id', [req.restauranteId]);
+        const { include_inactive } = req.query;
+        // Por defecto solo devuelve activos, a menos que se pida incluir inactivos
+        let query = 'SELECT * FROM ingredientes WHERE restaurante_id = $1';
+        if (include_inactive !== 'true') {
+            query += ' AND (activo IS NULL OR activo = TRUE)';
+        }
+        query += ' ORDER BY activo DESC NULLS FIRST, id';
+
+        const result = await pool.query(query, [req.restauranteId]);
         res.json(result.rows || []);
     } catch (err) {
         log('error', 'Error obteniendo ingredientes', { error: err.message });
@@ -748,6 +771,29 @@ app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
         res.json({ message: 'Eliminado' });
     } catch (err) {
         log('error', 'Error eliminando ingrediente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// Toggle activo/inactivo ingrediente (en lugar de eliminar)
+app.patch('/api/ingredients/:id/toggle-active', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { activo } = req.body;
+
+        const result = await pool.query(
+            'UPDATE ingredientes SET activo = $1 WHERE id = $2 AND restaurante_id = $3 RETURNING *',
+            [activo, id, req.restauranteId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado' });
+        }
+
+        log('info', `Ingrediente ${activo ? 'activado' : 'desactivado'}`, { id, nombre: result.rows[0].nombre });
+        res.json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error toggle activo ingrediente', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
