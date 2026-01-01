@@ -1415,10 +1415,20 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         };
 
         // Obtener recetas y precios de ingredientes
-        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
-        const recetasMap = new Map();
+        // Incluir campo codigo_tpv para mapeo con códigos del TPV
+        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo_tpv FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
+
+        // Mapa por nombre (para compatibilidad)
+        const recetasMapNombre = new Map();
+        // Mapa por código TPV (prioridad)
+        const recetasMapCodigo = new Map();
+
         recetasResult.rows.forEach(r => {
-            recetasMap.set(r.nombre.toLowerCase().trim(), r);
+            recetasMapNombre.set(r.nombre.toLowerCase().trim(), r);
+            // Mapear por código TPV si existe
+            if (r.codigo_tpv && r.codigo_tpv.trim() !== '' && r.codigo_tpv !== 'SIN_TPV') {
+                recetasMapCodigo.set(r.codigo_tpv.trim(), r);
+            }
         });
 
         const ingredientesResult = await client.query('SELECT id, precio FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]);
@@ -1432,13 +1442,24 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
 
         for (const venta of ventas) {
             const nombreReceta = (venta.receta || '').toLowerCase().trim();
+            const codigoTpv = (venta.codigo_tpv || venta.codigo || '').toString().trim();
             const cantidad = parseInt(venta.cantidad) || 1;
 
-            const receta = recetasMap.get(nombreReceta);
+            // Prioridad: buscar por código TPV, luego por nombre
+            let receta = null;
+            if (codigoTpv && recetasMapCodigo.has(codigoTpv)) {
+                receta = recetasMapCodigo.get(codigoTpv);
+            } else if (nombreReceta && recetasMapNombre.has(nombreReceta)) {
+                receta = recetasMapNombre.get(nombreReceta);
+            }
 
             if (!receta) {
                 resultados.fallidos++;
-                resultados.errores.push({ receta: venta.receta, error: 'Receta no encontrada' });
+                resultados.errores.push({
+                    receta: venta.receta,
+                    codigo: codigoTpv || 'sin código',
+                    error: 'Receta no encontrada'
+                });
                 continue;
             }
 
