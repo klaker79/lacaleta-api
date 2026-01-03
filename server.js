@@ -114,6 +114,22 @@ const log = (level, message, data = {}) => {
     });
 };
 
+// ========== VALIDACIÓN NUMÉRICA SEGURA ==========
+// Helper para validar y sanitizar inputs numéricos (previene NaN, Infinity, negativos)
+const validateNumber = (value, defaultVal = 0, min = 0, max = Infinity) => {
+    const num = parseFloat(value);
+    if (isNaN(num) || !isFinite(num)) return defaultVal;
+    if (num < min) return min;
+    if (num > max) return max;
+    return num;
+};
+
+// Helper para validar precio (debe ser >= 0)
+const validatePrecio = (value) => validateNumber(value, 0, 0, 999999);
+
+// Helper para validar cantidad/stock (debe ser >= 0)
+const validateCantidad = (value) => validateNumber(value, 0, 0, 999999);
+
 // ========== GLOBAL ERROR HANDLERS ==========
 // Catch unhandled promise rejections (async errors) - prevents server crash
 process.on('unhandledRejection', (reason, promise) => {
@@ -818,16 +834,19 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato } = req.body;
-        const finalStockActual = stockActual ?? stock_actual ?? 0;
-        const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
+
+        // Validación numérica segura (previene NaN, valores negativos)
+        const finalPrecio = validatePrecio(precio);
+        const finalStockActual = validateCantidad(stockActual ?? stock_actual);
+        const finalStockMinimo = validateCantidad(stockMinimo ?? stock_minimo);
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
         const finalFamilia = familia || 'alimento';
         const finalFormatoCompra = formato_compra || null;
-        const finalCantidadPorFormato = cantidad_por_formato ? parseFloat(cantidad_por_formato) : null;
+        const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;
 
         const result = await pool.query(
             'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-            [nombre, finalProveedorId, precio || 0, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
+            [nombre, finalProveedorId, finalPrecio, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -840,16 +859,19 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato } = req.body;
-        const finalStockActual = stockActual ?? stock_actual ?? 0;
-        const finalStockMinimo = stockMinimo ?? stock_minimo ?? 0;
+
+        // Validación numérica segura (previene NaN, valores negativos)
+        const finalPrecio = validatePrecio(precio);
+        const finalStockActual = validateCantidad(stockActual ?? stock_actual);
+        const finalStockMinimo = validateCantidad(stockMinimo ?? stock_minimo);
         const finalProveedorId = proveedorId ?? proveedor_id ?? null;
         const finalFamilia = familia || 'alimento';
         const finalFormatoCompra = formato_compra || null;
-        const finalCantidadPorFormato = cantidad_por_formato ? parseFloat(cantidad_por_formato) : null;
+        const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;
 
         const result = await pool.query(
             'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
-            [nombre, finalProveedorId, precio || 0, unidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
+            [nombre, finalProveedorId, finalPrecio, unidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
