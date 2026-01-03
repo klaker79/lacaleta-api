@@ -93,6 +93,31 @@ const log = (level, message, data = {}) => {
     });
 };
 
+// ========== GLOBAL ERROR HANDLERS ==========
+// Catch unhandled promise rejections (async errors) - prevents server crash
+process.on('unhandledRejection', (reason, promise) => {
+    log('error', 'Unhandled Promise Rejection', {
+        reason: reason?.message || String(reason),
+        stack: reason?.stack
+    });
+    // Don't exit - keep server running
+});
+
+// Catch uncaught exceptions (sync errors) - prevents server crash
+process.on('uncaughtException', (error) => {
+    log('error', 'Uncaught Exception', {
+        error: error.message,
+        stack: error.stack
+    });
+    // Don't exit - keep server running
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+    log('info', 'SIGTERM received, shutting down gracefully');
+    process.exit(0);
+});
+
 // ========== BASE DE DATOS ==========
 const pool = new Pool({
     host: process.env.DB_HOST,
