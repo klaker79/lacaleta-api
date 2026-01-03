@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
+const rateLimit = require('express-rate-limit');
 
 // ========== RESEND (Email) ==========
 const resend = new Resend(process.env.RESEND_API_KEY || 're_8hWi8wSn_Px7T4JymbKP7s7mR4y3ioILc');
@@ -77,6 +78,26 @@ app.use(express.json({ limit: '10mb' }));
 
 // Parser de cookies para auth segura
 app.use(cookieParser());
+
+// ========== RATE LIMITING ==========
+// Protección contra DDoS y brute-force
+const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 1000, // 1000 requests por ventana
+    message: { error: 'Demasiadas peticiones, intenta más tarde' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 10, // 10 intentos de login
+    message: { error: 'Demasiados intentos de login, espera 15 minutos' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+app.use(globalLimiter);
 
 // Logging Persistente
 const LOG_FILE = path.join(__dirname, 'server.log');
@@ -476,7 +497,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ========== AUTENTICACIÓN ==========
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -2097,20 +2118,28 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
 
     // ========== UPTIME KUMA HEARTBEAT ==========
-    // Heartbeat simple: si el servidor puede enviar esta request, está vivo
-    // Los problemas de BD se detectan via las API calls reales
+    // Heartbeat verifica BD antes de reportar healthy
     const UPTIME_KUMA_PUSH_URL = 'https://uptime.mindloop.cloud/api/push/nw9yvLKJzf';
 
-    const sendHeartbeat = () => {
-        const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=1`;
+    const sendHeartbeat = async () => {
         const https = require('https');
-        https.get(url, (res) => {
-            if (res.statusCode === 200) {
-                log('debug', 'Heartbeat enviado a Uptime Kuma');
-            }
-        }).on('error', (err) => {
-            log('warn', 'Error enviando heartbeat', { error: err.message });
-        });
+        try {
+            // Verificar que la BD responde antes de enviar heartbeat
+            await pool.query('SELECT 1');
+
+            const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=1`;
+            https.get(url, (res) => {
+                if (res.statusCode === 200) {
+                    log('debug', 'Heartbeat enviado a Uptime Kuma');
+                }
+            }).on('error', (err) => {
+                log('warn', 'Error enviando heartbeat', { error: err.message });
+            });
+        } catch (dbErr) {
+            // Si la BD no responde, NO enviamos heartbeat
+            // Uptime Kuma detectará la falta de heartbeat como problema
+            log('error', 'Heartbeat omitido - BD no responde', { error: dbErr.message });
+        }
     };
 
     // Enviar heartbeat cada 60 segundos
