@@ -1438,6 +1438,11 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         );
 
         for (const ing of ingredientesReceta) {
+            // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
+            await client.query(
+                'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
+                [ing.ingredienteId]
+            );
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
                 [ing.cantidad * cantidad, ing.ingredienteId]
@@ -1578,6 +1583,11 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             // Descontar stock
             if (Array.isArray(ingredientesReceta)) {
                 for (const ing of ingredientesReceta) {
+                    // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
+                    await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
+                        [ing.ingredienteId]
+                    );
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
                         [ing.cantidad * cantidad, ing.ingredienteId, req.restauranteId]
