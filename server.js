@@ -125,10 +125,10 @@ const pool = new Pool({
     database: process.env.DB_NAME,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    // Configuración robusta para evitar conexiones muertas
-    max: 20,                          // Máximo de conexiones en el pool
-    idleTimeoutMillis: 30000,         // Cerrar conexiones inactivas después de 30s
-    connectionTimeoutMillis: 10000,   // Timeout para nuevas conexiones: 10s
+    // Configuración reducida para evitar "too many clients"
+    max: 5,                           // Reducido de 20 a 5 para free tier
+    idleTimeoutMillis: 10000,         // Cerrar conexiones inactivas después de 10s
+    connectionTimeoutMillis: 5000,    // Timeout para nuevas conexiones: 5s
     keepAlive: true,                  // Mantener conexiones vivas
     keepAliveInitialDelayMillis: 10000 // Enviar keepalive cada 10s
 });
