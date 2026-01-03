@@ -652,6 +652,7 @@ app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) =
 const INVITATION_CODE = process.env.INVITATION_CODE || 'MINDLOOP2024';
 
 app.post('/api/auth/register', async (req, res) => {
+    const client = await pool.connect();
     try {
         const { nombre, email, password, codigoInvitacion } = req.body;
 
@@ -667,23 +668,28 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
         }
 
-        const existingUser = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
+        const existingUser = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(400).json({ error: 'El email ya está registrado' });
         }
 
-        const restauranteResult = await pool.query(
+        // Transacción para evitar restaurantes huérfanos si falla la creación del usuario
+        await client.query('BEGIN');
+
+        const restauranteResult = await client.query(
             'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
             [nombre, email]
         );
         const restauranteId = restauranteResult.rows[0].id;
 
         const passwordHash = await bcrypt.hash(password, 10);
-        const userResult = await pool.query(
+        const userResult = await client.query(
             `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified) 
              VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id`,
             [restauranteId, email, passwordHash, nombre, 'admin']
         );
+
+        await client.query('COMMIT');
 
         const token = jwt.sign(
             { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
@@ -705,8 +711,11 @@ app.post('/api/auth/register', async (req, res) => {
             }
         });
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error registro', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
