@@ -20,7 +20,7 @@ const request = http.get(options, (res) => {
         if (res.statusCode === 200) {
             try {
                 const json = JSON.parse(data);
-                if (json.status === 'ok') {
+                if (json.status === 'healthy') {  // API devuelve 'healthy'
                     process.exit(0);
                 }
             } catch (e) {

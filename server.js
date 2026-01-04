@@ -1154,7 +1154,7 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                     SUM(v.total) as total_ventas
              FROM ventas v
              JOIN recetas r ON v.receta_id = r.id
-             WHERE v.restaurante_id = $1
+             WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes`,
             [req.restauranteId]
         );
@@ -1836,7 +1836,7 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
         const ventasMes = await pool.query(
             `SELECT COALESCE(SUM(total), 0) as ingresos, COUNT(*) as num_ventas
        FROM ventas
-       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2 AND restaurante_id = $3`,
+       WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
             [mesActual, anoActual, req.restauranteId]
         );
 
@@ -1844,7 +1844,7 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
             `SELECT v.cantidad, r.ingredientes
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3`,
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL`,
             [mesActual, anoActual, req.restauranteId]
         );
 
@@ -1876,7 +1876,7 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
             `SELECT r.nombre, SUM(v.cantidad) as total_vendido
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
        GROUP BY r.nombre
        ORDER BY total_vendido DESC
        LIMIT 1`,
@@ -1887,7 +1887,7 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
             `SELECT r.nombre, SUM(v.total) as total_ingresos, SUM(v.cantidad) as cantidad
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
-       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3
+       WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
        GROUP BY r.nombre
        ORDER BY total_ingresos DESC`,
             [mesActual, anoActual, req.restauranteId]
@@ -1923,7 +1923,7 @@ app.get('/api/balance/comparativa', authMiddleware, async (req, res) => {
          SUM(total) as ingresos,
          COUNT(*) as num_ventas
        FROM ventas
-       WHERE restaurante_id = $1
+       WHERE restaurante_id = $1 AND deleted_at IS NULL
        GROUP BY TO_CHAR(fecha, 'YYYY-MM')
        ORDER BY mes DESC
        LIMIT 12`,
@@ -2111,7 +2111,7 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
                 SUM(v.total) as total_ingresos
             FROM ventas v
             JOIN recetas r ON v.receta_id = r.id
-            WHERE v.restaurante_id = $1
+            WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
               AND EXTRACT(MONTH FROM v.fecha) = $2
               AND EXTRACT(YEAR FROM v.fecha) = $3
             GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes
