@@ -1414,6 +1414,13 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         const { recetaId, cantidad } = req.body;
+
+        // Validar cantidad
+        const cantidadValidada = validateCantidad(cantidad);
+        if (cantidadValidada === 0) {
+            return res.status(400).json({ error: 'Cantidad debe ser un número positivo' });
+        }
+
         await client.query('BEGIN');
 
         const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2', [recetaId, req.restauranteId]);
@@ -1424,7 +1431,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
         const receta = recetaResult.rows[0];
         const precioUnitario = parseFloat(receta.precio_venta);
-        const total = precioUnitario * cantidad;
+        const total = precioUnitario * cantidadValidada;
 
         const ingredientesReceta = receta.ingredientes || [];
         /* VALIDACIÓN DESACTIVADA - Permitir stock negativo (restaurantes venden antes de recibir mercancía)
@@ -1445,7 +1452,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
         const ventaResult = await client.query(
             'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, restaurante_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [recetaId, cantidad, precioUnitario, total, req.restauranteId]
+            [recetaId, cantidadValidada, precioUnitario, total, req.restauranteId]
         );
 
         for (const ing of ingredientesReceta) {
@@ -1456,7 +1463,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
             );
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
-                [ing.cantidad * cantidad, ing.ingredienteId]
+                [ing.cantidad * cantidadValidada, ing.ingredienteId]
             );
         }
 
