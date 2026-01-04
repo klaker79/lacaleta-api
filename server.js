@@ -1705,9 +1705,11 @@ app.post('/api/gastos-fijos', authMiddleware, async (req, res) => {
             return res.status(400).json({ error: 'El concepto es requerido' });
         }
 
+        const montoValidado = validatePrecio(monto_mensual);
+
         const result = await pool.query(
             'INSERT INTO gastos_fijos (concepto, monto_mensual, restaurante_id) VALUES ($1, $2, $3) RETURNING *',
-            [concepto, monto_mensual || 0, req.restauranteId]
+            [concepto, montoValidado, req.restauranteId]
         );
 
         log('info', 'Gasto fijo creado', { id: result.rows[0].id, concepto });
@@ -1724,9 +1726,11 @@ app.put('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
         const { id } = req.params;
         const { concepto, monto_mensual } = req.body;
 
+        const montoValidado = monto_mensual !== undefined ? validatePrecio(monto_mensual) : undefined;
+
         const result = await pool.query(
             'UPDATE gastos_fijos SET concepto = COALESCE($1, concepto), monto_mensual = COALESCE($2, monto_mensual), updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND restaurante_id = $4 RETURNING *',
-            [concepto, monto_mensual, id, req.restauranteId]
+            [concepto, montoValidado, id, req.restauranteId]
         );
 
         if (result.rows.length === 0) {
