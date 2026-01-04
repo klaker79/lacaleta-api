@@ -1135,14 +1135,15 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
 // ========== ANÁLISIS AVANZADO ==========
 app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
     try {
+        // Query 1: Ventas agrupadas por receta
         const ventas = await pool.query(
-            `SELECT r.id, r.nombre, r.categoria, r.precio_venta, 
+            `SELECT r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes,
                     SUM(v.cantidad) as cantidad_vendida,
                     SUM(v.total) as total_ventas
              FROM ventas v
              JOIN recetas r ON v.receta_id = r.id
              WHERE v.restaurante_id = $1
-             GROUP BY r.id, r.nombre, r.categoria, r.precio_venta`,
+             GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes`,
             [req.restauranteId]
         );
 
@@ -1150,22 +1151,30 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
             return res.json([]);
         }
 
+        // Query 2: Todos los precios de ingredientes en UNA query
+        const ingredientesResult = await pool.query(
+            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        const preciosMap = new Map();
+        ingredientesResult.rows.forEach(ing => {
+            preciosMap.set(ing.id, parseFloat(ing.precio) || 0);
+        });
+
         const analisis = [];
         const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
         const promedioPopularidad = totalVentasRestaurante / ventas.rows.length;
         let sumaMargenes = 0;
 
+        // Calcular costes usando el Map (sin queries adicionales)
         for (const plato of ventas.rows) {
-            const recetaResult = await pool.query('SELECT ingredientes FROM recetas WHERE id = $1', [plato.id]);
-            const ingredientes = recetaResult.rows[0]?.ingredientes || [];
+            const ingredientes = plato.ingredientes || [];
             let costePlato = 0;
 
             if (ingredientes && Array.isArray(ingredientes)) {
                 for (const ing of ingredientes) {
-                    const ingDb = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
-                    if (ingDb.rows.length > 0) {
-                        costePlato += parseFloat(ingDb.rows[0].precio) * ing.cantidad;
-                    }
+                    const precioIng = preciosMap.get(ing.ingredienteId) || 0;
+                    costePlato += precioIng * (ing.cantidad || 0);
                 }
             }
 
@@ -1173,7 +1182,12 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
             sumaMargenes += margenContribucion * parseFloat(plato.cantidad_vendida);
 
             analisis.push({
-                ...plato,
+                id: plato.id,
+                nombre: plato.nombre,
+                categoria: plato.categoria,
+                precio_venta: plato.precio_venta,
+                cantidad_vendida: plato.cantidad_vendida,
+                total_ventas: plato.total_ventas,
                 coste: costePlato,
                 margen: margenContribucion,
                 popularidad: parseFloat(plato.cantidad_vendida)
