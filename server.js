@@ -1804,14 +1804,23 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
             [mesActual, anoActual, req.restauranteId]
         );
 
+        // Precargar todos los precios de ingredientes en UNA query
+        const ingredientesResult = await pool.query(
+            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        const preciosMap = new Map();
+        ingredientesResult.rows.forEach(i => {
+            preciosMap.set(i.id, parseFloat(i.precio) || 0);
+        });
+
+        // Calcular costos usando el Map (sin queries adicionales)
         let costos = 0;
         for (const venta of ventasDetalle.rows) {
             const ingredientes = venta.ingredientes || [];
             for (const ing of ingredientes) {
-                const ingResult = await pool.query('SELECT precio FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
-                if (ingResult.rows.length > 0) {
-                    costos += parseFloat(ingResult.rows[0].precio) * ing.cantidad * venta.cantidad;
-                }
+                const precio = preciosMap.get(ing.ingredienteId) || 0;
+                costos += precio * (ing.cantidad || 0) * venta.cantidad;
             }
         }
 
