@@ -983,13 +983,18 @@ app.put('/api/inventory/:id/stock-real', authMiddleware, async (req, res) => {
         const { id } = req.params;
         const { stock_real } = req.body;
 
+        const stockValidado = validateNumber(stock_real, 0, 0);
+        if (stockValidado === null || stockValidado < 0) {
+            return res.status(400).json({ error: 'Stock debe ser un número no negativo' });
+        }
+
         const result = await pool.query(
             `UPDATE ingredientes 
        SET stock_real = $1, 
            ultima_actualizacion_stock = CURRENT_TIMESTAMP 
        WHERE id = $2 AND restaurante_id = $3 
        RETURNING *`,
-            [stock_real, id, req.restauranteId]
+            [stockValidado, id, req.restauranteId]
         );
 
         if (result.rows.length === 0) {
