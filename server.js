@@ -394,6 +394,18 @@ pool.on('error', (err) => {
             log('info', 'Migración email_verified completada');
         } catch (e) { log('warn', 'Migración usuarios.email_verified', { error: e.message }); }
 
+        // ========== MIGRACIONES SOFT DELETE ==========
+        log('info', 'Ejecutando migraciones de soft delete...');
+        try {
+            await pool.query(`
+                ALTER TABLE ventas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+                ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+                ALTER TABLE recetas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+                ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+            `);
+            log('info', 'Migraciones soft delete completadas');
+        } catch (e) { log('warn', 'Migración soft delete', { error: e.message }); }
+
         // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
         log('info', 'Limpiando tablas obsoletas...');
 
@@ -1227,7 +1239,7 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 // ========== RECETAS ==========
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 ORDER BY id', [req.restauranteId]);
+        const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
         res.json(result.rows || []);
     } catch (err) {
         log('error', 'Error obteniendo recetas', { error: err.message });
@@ -1266,8 +1278,16 @@ app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
     try {
-        await pool.query('DELETE FROM recetas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
-        res.json({ message: 'Eliminado' });
+        // SOFT DELETE: marca como eliminado sin borrar datos
+        const result = await pool.query(
+            'UPDATE recetas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
+            [req.params.id, req.restauranteId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Receta no encontrada o ya eliminada' });
+        }
+        log('info', 'Receta soft deleted', { id: req.params.id });
+        res.json({ message: 'Eliminado', id: result.rows[0].id });
     } catch (err) {
         log('error', 'Error eliminando receta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
@@ -1277,7 +1297,7 @@ app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
 // ========== PROVEEDORES ==========
 app.get('/api/suppliers', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM proveedores WHERE restaurante_id=$1 ORDER BY id', [req.restauranteId]);
+        const result = await pool.query('SELECT * FROM proveedores WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
         res.json(result.rows || []);
     } catch (err) {
         log('error', 'Error obteniendo proveedores', { error: err.message });
@@ -1316,8 +1336,16 @@ app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
     try {
-        await pool.query('DELETE FROM proveedores WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
-        res.json({ message: 'Eliminado' });
+        // SOFT DELETE: marca como eliminado sin borrar datos
+        const result = await pool.query(
+            'UPDATE proveedores SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
+            [req.params.id, req.restauranteId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Proveedor no encontrado o ya eliminado' });
+        }
+        log('info', 'Proveedor soft deleted', { id: req.params.id });
+        res.json({ message: 'Eliminado', id: result.rows[0].id });
     } catch (err) {
         log('error', 'Error eliminando proveedor', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
@@ -1327,7 +1355,7 @@ app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
 // ========== PEDIDOS ==========
 app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 ORDER BY fecha DESC', [req.restauranteId]);
+        const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY fecha DESC', [req.restauranteId]);
         res.json(result.rows || []);
     } catch (err) {
         log('error', 'Error obteniendo pedidos', { error: err.message });
@@ -1400,8 +1428,16 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
     try {
-        await pool.query('DELETE FROM pedidos WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
-        res.json({ message: 'Eliminado' });
+        // SOFT DELETE: marca como eliminado sin borrar datos
+        const result = await pool.query(
+            'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
+            [req.params.id, req.restauranteId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Pedido no encontrado o ya eliminado' });
+        }
+        log('info', 'Pedido soft deleted', { id: req.params.id });
+        res.json({ message: 'Eliminado', id: result.rows[0].id });
     } catch (err) {
         log('error', 'Error eliminando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
@@ -1412,7 +1448,7 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha } = req.query;
-        let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1';
+        let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL';
         let params = [req.restauranteId];
 
         if (fecha) {
@@ -1499,8 +1535,16 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
 app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
     try {
-        await pool.query('DELETE FROM ventas WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
-        res.json({ message: 'Eliminado' });
+        // SOFT DELETE: marca como eliminado sin borrar datos
+        const result = await pool.query(
+            'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
+            [req.params.id, req.restauranteId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Venta no encontrada o ya eliminada' });
+        }
+        log('info', 'Venta soft deleted', { id: req.params.id });
+        res.json({ message: 'Eliminado', id: result.rows[0].id });
     } catch (err) {
         log('error', 'Error eliminando venta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
@@ -1549,7 +1593,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
 
         // Obtener recetas y precios de ingredientes
         // Incluir campo codigo para mapeo con códigos del TPV
-        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo FROM recetas WHERE restaurante_id = $1', [req.restauranteId]);
+        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
 
         // Mapa por nombre (para compatibilidad)
         const recetasMapNombre = new Map();
