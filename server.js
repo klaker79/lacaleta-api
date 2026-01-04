@@ -2192,3 +2192,4 @@ app.listen(PORT, '0.0.0.0', () => {
     setInterval(sendHeartbeat, 60000);
     console.log(`💓 Heartbeat configurado para Uptime Kuma (cada 60s)`);
 });
+// rebuild Sun Jan  4 01:51:53 CET 2026
