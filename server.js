@@ -45,6 +45,9 @@ const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
 
 const app = express();
 
+// Trust proxy for express-rate-limit behind Traefik
+app.set('trust proxy', 1);
+
 // ========== MIDDLEWARE CORS MEJORADO ==========
 // Middleware manual para asegurar que CORS funciona en TODOS los casos
 app.use((req, res, next) => {
