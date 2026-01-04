@@ -1557,7 +1557,13 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         for (const venta of ventas) {
             const nombreReceta = (venta.receta || '').toLowerCase().trim();
             const codigoTpv = (venta.codigo_tpv || venta.codigo || '').toString().trim();
-            const cantidad = parseInt(venta.cantidad) || 1;
+            const cantidad = validateCantidad(venta.cantidad);
+
+            if (cantidad === 0) {
+                resultados.fallidos++;
+                resultados.errores.push({ receta: venta.receta, error: 'Cantidad inválida' });
+                continue;
+            }
 
             // Prioridad: buscar por código TPV, luego por nombre
             let receta = null;
