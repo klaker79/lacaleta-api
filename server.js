@@ -1680,7 +1680,8 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
 app.get('/api/gastos-fijos', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT * FROM gastos_fijos WHERE activo = true ORDER BY id'
+            'SELECT * FROM gastos_fijos WHERE activo = true AND restaurante_id = $1 ORDER BY id',
+            [req.restauranteId]
         );
         res.json(result.rows);
     } catch (err) {
@@ -1699,8 +1700,8 @@ app.post('/api/gastos-fijos', authMiddleware, async (req, res) => {
         }
 
         const result = await pool.query(
-            'INSERT INTO gastos_fijos (concepto, monto_mensual) VALUES ($1, $2) RETURNING *',
-            [concepto, monto_mensual || 0]
+            'INSERT INTO gastos_fijos (concepto, monto_mensual, restaurante_id) VALUES ($1, $2, $3) RETURNING *',
+            [concepto, monto_mensual || 0, req.restauranteId]
         );
 
         log('info', 'Gasto fijo creado', { id: result.rows[0].id, concepto });
@@ -1718,8 +1719,8 @@ app.put('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
         const { concepto, monto_mensual } = req.body;
 
         const result = await pool.query(
-            'UPDATE gastos_fijos SET concepto = COALESCE($1, concepto), monto_mensual = COALESCE($2, monto_mensual), updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
-            [concepto, monto_mensual, id]
+            'UPDATE gastos_fijos SET concepto = COALESCE($1, concepto), monto_mensual = COALESCE($2, monto_mensual), updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND restaurante_id = $4 RETURNING *',
+            [concepto, monto_mensual, id, req.restauranteId]
         );
 
         if (result.rows.length === 0) {
@@ -1740,8 +1741,8 @@ app.delete('/api/gastos-fijos/:id', authMiddleware, async (req, res) => {
         const { id } = req.params;
 
         await pool.query(
-            'UPDATE gastos_fijos SET activo = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-            [id]
+            'UPDATE gastos_fijos SET activo = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND restaurante_id = $2',
+            [id, req.restauranteId]
         );
 
         log('info', 'Gasto fijo eliminado', { id });
