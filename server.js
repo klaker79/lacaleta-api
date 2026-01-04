@@ -25,6 +25,7 @@ const PORT = process.env.PORT || 3000;
 // CORS: Orígenes permitidos (Combinar entorno + defaults)
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
+    'https://app.mindloop.cloud',
     'http://localhost:5500',
     'http://127.0.0.1:5500',
     'http://localhost:3000',
