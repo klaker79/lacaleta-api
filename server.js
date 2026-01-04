@@ -49,27 +49,25 @@ const app = express();
 app.set('trust proxy', 1);
 
 // ========== MIDDLEWARE CORS MEJORADO ==========
-// Middleware manual para asegurar que CORS funciona en TODOS los casos
 app.use((req, res, next) => {
     const origin = req.headers.origin;
 
-    // Permitir requests sin origin (curl, Postman, n8n)
-    if (!origin) {
+    // Permitir requests sin origin (curl, Postman, healthchecks)
+    if (!origin || origin === '') {
         res.header('Access-Control-Allow-Origin', '*');
     } else if (ALLOWED_ORIGINS.includes(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
     } else {
-        // Para desarrollo/integraciones, permitir pero logear advertencia
-        log('warn', 'Origin no en whitelist (permitido)', { origin, url: req.originalUrl });
-        res.header('Access-Control-Allow-Origin', origin);
+        // RECHAZAR orígenes no autorizados
+        log('warn', 'CORS: Origen rechazado', { origin, url: req.originalUrl, ip: req.ip });
+        return res.status(403).json({ error: 'CORS: Origen no autorizado' });
     }
 
-    res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-API-Key');
-    res.header('Access-Control-Max-Age', '86400'); // Cache preflight por 24h
+    res.header('Access-Control-Max-Age', '86400');
 
-    // Responder inmediatamente a OPTIONS (preflight)
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
