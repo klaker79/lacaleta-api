@@ -269,6 +269,16 @@ pool.on('error', (err) => {
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      -- Tabla de relación muchos a muchos: ingredientes-proveedores
+      CREATE TABLE IF NOT EXISTS ingredientes_proveedores (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER NOT NULL REFERENCES ingredientes(id) ON DELETE CASCADE,
+        proveedor_id INTEGER NOT NULL REFERENCES proveedores(id) ON DELETE CASCADE,
+        precio DECIMAL(10, 2) NOT NULL,
+        es_proveedor_principal BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(ingrediente_id, proveedor_id)
+      );
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
         proveedor_id INTEGER NOT NULL,
