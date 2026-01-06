@@ -429,6 +429,16 @@ pool.on('error', (err) => {
             log('info', 'Migraciones soft delete completadas');
         } catch (e) { log('warn', 'Migración soft delete', { error: e.message }); }
 
+        // ========== MIGRACIÓN VARIANTES EN VENTAS ==========
+        log('info', 'Ejecutando migración de variantes en ventas...');
+        try {
+            await pool.query(`
+                ALTER TABLE ventas_diarias_resumen ADD COLUMN IF NOT EXISTS variante_id INTEGER REFERENCES recetas_variantes(id) ON DELETE SET NULL;
+                ALTER TABLE ventas_diarias_resumen ADD COLUMN IF NOT EXISTS factor_aplicado DECIMAL(5, 3) DEFAULT 1;
+            `);
+            log('info', 'Migración variantes en ventas completada');
+        } catch (e) { log('warn', 'Migración variante_id', { error: e.message }); }
+
         // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
         log('info', 'Limpiando tablas obsoletas...');
 
@@ -1962,6 +1972,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             const nombreReceta = (venta.receta || '').toLowerCase().trim();
             const codigoTpv = (venta.codigo_tpv || venta.codigo || '').toString().trim();
             const cantidad = validateCantidad(venta.cantidad);
+            const varianteId = venta.variante_id || null; // ⚡ NUEVO: Soporte para variantes
 
             if (cantidad === 0) {
                 resultados.fallidos++;
@@ -1987,18 +1998,30 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                 continue;
             }
 
+            // ⚡ NUEVO: Si hay variante, obtener su factor
+            let factorAplicado = 1;
+            if (varianteId) {
+                const varianteResult = await client.query(
+                    'SELECT factor FROM recetas_variantes WHERE id = $1 AND receta_id = $2',
+                    [varianteId, receta.id]
+                );
+                if (varianteResult.rows.length > 0) {
+                    factorAplicado = parseFloat(varianteResult.rows[0].factor) || 1;
+                }
+            }
+
             const precioVenta = parseFloat(receta.precio_venta);
             const total = parseFloat(venta.total) || (precioVenta * cantidad);
             const fecha = venta.fecha || new Date().toISOString();
             const fechaDate = fecha.split('T')[0]; // Solo la fecha sin hora
 
-            // Calcular coste de ingredientes para esta venta
+            // Calcular coste de ingredientes para esta venta (aplicando factor de variante)
             let costeIngredientes = 0;
             const ingredientesReceta = receta.ingredientes || [];
             if (Array.isArray(ingredientesReceta)) {
                 for (const ing of ingredientesReceta) {
                     const precioIng = ingredientesPrecios.get(ing.ingredienteId) || 0;
-                    costeIngredientes += precioIng * (ing.cantidad || 0) * cantidad;
+                    costeIngredientes += precioIng * (ing.cantidad || 0) * cantidad * factorAplicado;
                 }
             }
 
@@ -2008,7 +2031,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                 [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId]
             );
 
-            // Descontar stock
+            // Descontar stock (aplicando factor de variante)
             if (Array.isArray(ingredientesReceta)) {
                 for (const ing of ingredientesReceta) {
                     // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
@@ -2016,9 +2039,10 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                         'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
                         [ing.ingredienteId]
                     );
+                    // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
-                        [ing.cantidad * cantidad, ing.ingredienteId, req.restauranteId]
+                        [ing.cantidad * cantidad * factorAplicado, ing.ingredienteId, req.restauranteId]
                     );
                 }
             }
