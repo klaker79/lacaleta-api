@@ -518,6 +518,15 @@ app.get('/', (req, res) => {
     });
 });
 
+// DEBUG: Test supplier routes
+app.get('/api/debug/suppliers-test', (req, res) => {
+    res.json({ 
+        message: 'Supplier routes debug endpoint works',
+        timestamp: new Date().toISOString(),
+        routes: ['GET /api/ingredients/:id/suppliers', 'POST /api/ingredients/:id/suppliers']
+    });
+});
+
 // Health Check
 app.get('/api/health', async (req, res) => {
     try {
