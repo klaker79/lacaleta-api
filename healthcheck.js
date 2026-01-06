@@ -6,7 +6,7 @@
 const http = require('http');
 
 const options = {
-    host: 'localhost',
+    host: '127.0.0.1',  // Usar IPv4 explícitamente
     port: 3000,
     path: '/api/health',
     timeout: 8000,
