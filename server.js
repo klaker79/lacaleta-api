@@ -279,6 +279,19 @@ pool.on('error', (err) => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(ingrediente_id, proveedor_id)
       );
+      -- Tabla de variantes de receta (ej: vino por botella o por copa)
+      CREATE TABLE IF NOT EXISTS recetas_variantes (
+        id SERIAL PRIMARY KEY,
+        receta_id INTEGER NOT NULL REFERENCES recetas(id) ON DELETE CASCADE,
+        nombre VARCHAR(100) NOT NULL,
+        factor DECIMAL(5, 3) NOT NULL DEFAULT 1,
+        precio_venta DECIMAL(10, 2) NOT NULL,
+        codigo VARCHAR(20),
+        activo BOOLEAN DEFAULT TRUE,
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(receta_id, nombre)
+      );
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
         proveedor_id INTEGER NOT NULL,
@@ -520,7 +533,7 @@ app.get('/', (req, res) => {
 
 // DEBUG: Test supplier routes
 app.get('/api/debug/suppliers-test', (req, res) => {
-    res.json({ 
+    res.json({
         message: 'Supplier routes debug endpoint works',
         timestamp: new Date().toISOString(),
         routes: ['GET /api/ingredients/:id/suppliers', 'POST /api/ingredients/:id/suppliers']
@@ -1154,6 +1167,112 @@ app.delete('/api/ingredients/:id/suppliers/:supplierId', authMiddleware, async (
         res.json({ success: true });
     } catch (err) {
         log('error', 'Error eliminando proveedor de ingrediente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// ========== VARIANTES DE RECETA (Botella/Copa) ==========
+
+// GET /api/recipes/:id/variants - Obtener variantes de una receta
+app.get('/api/recipes/:id/variants', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            `SELECT * FROM recetas_variantes 
+             WHERE receta_id = $1 AND restaurante_id = $2 
+             ORDER BY precio_venta DESC`,
+            [id, req.restauranteId]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error obteniendo variantes', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// POST /api/recipes/:id/variants - Crear variante
+app.post('/api/recipes/:id/variants', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, factor, precio_venta, codigo } = req.body;
+
+        if (!nombre || precio_venta === undefined) {
+            return res.status(400).json({ error: 'nombre y precio_venta son requeridos' });
+        }
+
+        // Verificar que la receta existe
+        const checkReceta = await pool.query(
+            'SELECT id FROM recetas WHERE id = $1 AND restaurante_id = $2',
+            [id, req.restauranteId]
+        );
+        if (checkReceta.rows.length === 0) {
+            return res.status(404).json({ error: 'Receta no encontrada' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO recetas_variantes (receta_id, nombre, factor, precio_venta, codigo, restaurante_id)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (receta_id, nombre) DO UPDATE SET factor = $3, precio_venta = $4, codigo = $5
+             RETURNING *`,
+            [id, nombre, factor || 1, parseFloat(precio_venta), codigo || null, req.restauranteId]
+        );
+
+        log('info', 'Variante creada', { receta_id: id, nombre, precio_venta });
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error creando variante', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// PUT /api/recipes/:id/variants/:variantId - Actualizar variante
+app.put('/api/recipes/:id/variants/:variantId', authMiddleware, async (req, res) => {
+    try {
+        const { id, variantId } = req.params;
+        const { nombre, factor, precio_venta, codigo, activo } = req.body;
+
+        const result = await pool.query(
+            `UPDATE recetas_variantes 
+             SET nombre = COALESCE($1, nombre),
+                 factor = COALESCE($2, factor),
+                 precio_venta = COALESCE($3, precio_venta),
+                 codigo = COALESCE($4, codigo),
+                 activo = COALESCE($5, activo)
+             WHERE id = $6 AND receta_id = $7 AND restaurante_id = $8
+             RETURNING *`,
+            [nombre, factor, precio_venta, codigo, activo, variantId, id, req.restauranteId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Variante no encontrada' });
+        }
+
+        log('info', 'Variante actualizada', { variant_id: variantId });
+        res.json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error actualizando variante', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// DELETE /api/recipes/:id/variants/:variantId - Eliminar variante
+app.delete('/api/recipes/:id/variants/:variantId', authMiddleware, async (req, res) => {
+    try {
+        const { id, variantId } = req.params;
+
+        const result = await pool.query(
+            'DELETE FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3 RETURNING id',
+            [variantId, id, req.restauranteId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Variante no encontrada' });
+        }
+
+        log('info', 'Variante eliminada', { variant_id: variantId });
+        res.json({ success: true });
+    } catch (err) {
+        log('error', 'Error eliminando variante', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
 });
