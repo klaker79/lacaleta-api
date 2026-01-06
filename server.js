@@ -936,6 +936,209 @@ app.patch('/api/ingredients/:id/toggle-active', authMiddleware, async (req, res)
     }
 });
 
+// ========== INGREDIENTES - PROVEEDORES MÚLTIPLES ==========
+
+// GET /api/ingredients/:id/suppliers - Obtener proveedores de un ingrediente
+app.get('/api/ingredients/:id/suppliers', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Verificar que el ingrediente pertenece al restaurante
+        const checkIng = await pool.query(
+            'SELECT id, nombre FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+            [id, req.restauranteId]
+        );
+
+        if (checkIng.rows.length === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado' });
+        }
+
+        const result = await pool.query(`
+            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio, 
+                   ip.es_proveedor_principal, ip.created_at,
+                   p.nombre as proveedor_nombre, p.contacto, p.telefono, p.email
+            FROM ingredientes_proveedores ip
+            JOIN proveedores p ON ip.proveedor_id = p.id
+            WHERE ip.ingrediente_id = $1
+            ORDER BY ip.es_proveedor_principal DESC, p.nombre ASC
+        `, [id]);
+
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error obteniendo proveedores de ingrediente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// POST /api/ingredients/:id/suppliers - Asociar proveedor a ingrediente
+app.post('/api/ingredients/:id/suppliers', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { proveedor_id, precio, es_proveedor_principal } = req.body;
+
+        if (!proveedor_id || precio === undefined) {
+            return res.status(400).json({ error: 'proveedor_id y precio son requeridos' });
+        }
+
+        const precioNum = parseFloat(precio);
+        if (isNaN(precioNum) || precioNum < 0) {
+            return res.status(400).json({ error: 'Precio debe ser un número válido >= 0' });
+        }
+
+        // Verificar ingrediente
+        const checkIng = await pool.query(
+            'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+            [id, req.restauranteId]
+        );
+        if (checkIng.rows.length === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado' });
+        }
+
+        // Verificar proveedor
+        const checkProv = await pool.query(
+            'SELECT id FROM proveedores WHERE id = $1 AND restaurante_id = $2',
+            [proveedor_id, req.restauranteId]
+        );
+        if (checkProv.rows.length === 0) {
+            return res.status(404).json({ error: 'Proveedor no encontrado' });
+        }
+
+        // Si es principal, desmarcar otros
+        if (es_proveedor_principal) {
+            await pool.query(
+                'UPDATE ingredientes_proveedores SET es_proveedor_principal = FALSE WHERE ingrediente_id = $1',
+                [id]
+            );
+            // Actualizar también en tabla ingredientes para compatibilidad
+            await pool.query(
+                'UPDATE ingredientes SET proveedor_id = $1, precio = $2 WHERE id = $3',
+                [proveedor_id, precioNum, id]
+            );
+        }
+
+        // UPSERT - insertar o actualizar si ya existe
+        const result = await pool.query(`
+            INSERT INTO ingredientes_proveedores (ingrediente_id, proveedor_id, precio, es_proveedor_principal)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (ingrediente_id, proveedor_id) 
+            DO UPDATE SET precio = $3, es_proveedor_principal = $4
+            RETURNING *
+        `, [id, proveedor_id, precioNum, es_proveedor_principal || false]);
+
+        log('info', 'Proveedor asociado a ingrediente', { ingrediente_id: id, proveedor_id, precio: precioNum });
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error asociando proveedor a ingrediente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// PUT /api/ingredients/:id/suppliers/:supplierId - Actualizar precio o principal
+app.put('/api/ingredients/:id/suppliers/:supplierId', authMiddleware, async (req, res) => {
+    try {
+        const { id, supplierId } = req.params;
+        const { precio, es_proveedor_principal } = req.body;
+
+        // Verificar que la asociación existe
+        const check = await pool.query(`
+            SELECT ip.id FROM ingredientes_proveedores ip
+            JOIN ingredientes i ON ip.ingrediente_id = i.id
+            WHERE ip.ingrediente_id = $1 AND ip.proveedor_id = $2 AND i.restaurante_id = $3
+        `, [id, supplierId, req.restauranteId]);
+
+        if (check.rows.length === 0) {
+            return res.status(404).json({ error: 'Asociación no encontrada' });
+        }
+
+        // Si se marca como principal, desmarcar otros
+        if (es_proveedor_principal) {
+            await pool.query(
+                'UPDATE ingredientes_proveedores SET es_proveedor_principal = FALSE WHERE ingrediente_id = $1',
+                [id]
+            );
+            // Actualizar tabla ingredientes para compatibilidad
+            const precioActual = precio !== undefined ? parseFloat(precio) : null;
+            if (precioActual !== null) {
+                await pool.query(
+                    'UPDATE ingredientes SET proveedor_id = $1, precio = $2 WHERE id = $3',
+                    [supplierId, precioActual, id]
+                );
+            } else {
+                await pool.query(
+                    'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2',
+                    [supplierId, id]
+                );
+            }
+        }
+
+        // Construir query dinámico
+        const updates = [];
+        const values = [];
+        let paramCount = 1;
+
+        if (precio !== undefined) {
+            const precioNum = parseFloat(precio);
+            if (isNaN(precioNum) || precioNum < 0) {
+                return res.status(400).json({ error: 'Precio debe ser un número válido >= 0' });
+            }
+            updates.push(`precio = $${paramCount++}`);
+            values.push(precioNum);
+        }
+
+        if (es_proveedor_principal !== undefined) {
+            updates.push(`es_proveedor_principal = $${paramCount++}`);
+            values.push(es_proveedor_principal);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ error: 'Nada que actualizar' });
+        }
+
+        values.push(id, supplierId);
+        const result = await pool.query(`
+            UPDATE ingredientes_proveedores 
+            SET ${updates.join(', ')}
+            WHERE ingrediente_id = $${paramCount++} AND proveedor_id = $${paramCount}
+            RETURNING *
+        `, values);
+
+        log('info', 'Actualizado proveedor de ingrediente', { ingrediente_id: id, proveedor_id: supplierId });
+        res.json(result.rows[0]);
+    } catch (err) {
+        log('error', 'Error actualizando proveedor de ingrediente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// DELETE /api/ingredients/:id/suppliers/:supplierId - Eliminar asociación
+app.delete('/api/ingredients/:id/suppliers/:supplierId', authMiddleware, async (req, res) => {
+    try {
+        const { id, supplierId } = req.params;
+
+        // Verificar que existe y pertenece al restaurante
+        const check = await pool.query(`
+            SELECT ip.id FROM ingredientes_proveedores ip
+            JOIN ingredientes i ON ip.ingrediente_id = i.id
+            WHERE ip.ingrediente_id = $1 AND ip.proveedor_id = $2 AND i.restaurante_id = $3
+        `, [id, supplierId, req.restauranteId]);
+
+        if (check.rows.length === 0) {
+            return res.status(404).json({ error: 'Asociación no encontrada' });
+        }
+
+        await pool.query(
+            'DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1 AND proveedor_id = $2',
+            [id, supplierId]
+        );
+
+        log('info', 'Eliminada asociación proveedor-ingrediente', { ingrediente_id: id, proveedor_id: supplierId });
+        res.json({ success: true });
+    } catch (err) {
+        log('error', 'Error eliminando proveedor de ingrediente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // ========== INVENTARIO AVANZADO ==========
 app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
     try {
