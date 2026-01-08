@@ -1335,12 +1335,18 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
           (SELECT 
             SUM(
               (ingrediente->>'cantidad')::numeric *
-              COALESCE((ingrediente->>'precioReal')::numeric, (ingrediente->>'precioUnitario')::numeric)
+              COALESCE(
+                (ingrediente->>'precioReal')::numeric,
+                (ingrediente->>'precioUnitario')::numeric,
+                (ingrediente->>'precio_unitario')::numeric,
+                (ingrediente->>'precio')::numeric
+              )
             ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
            FROM pedidos p, 
            jsonb_array_elements(p.ingredientes) as ingrediente
            WHERE (ingrediente->>'ingredienteId')::integer = i.id 
            AND p.estado = 'recibido'
+           AND p.deleted_at IS NULL
            AND p.restaurante_id = $1
           ), i.precio
         ) as precio_medio,
@@ -1348,12 +1354,18 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
           (SELECT 
             SUM(
               (ingrediente->>'cantidad')::numeric *
-              COALESCE((ingrediente->>'precioReal')::numeric, (ingrediente->>'precioUnitario')::numeric)
+              COALESCE(
+                (ingrediente->>'precioReal')::numeric,
+                (ingrediente->>'precioUnitario')::numeric,
+                (ingrediente->>'precio_unitario')::numeric,
+                (ingrediente->>'precio')::numeric
+              )
             ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
            FROM pedidos p, 
            jsonb_array_elements(p.ingredientes) as ingrediente
            WHERE (ingrediente->>'ingredienteId')::integer = i.id 
            AND p.estado = 'recibido'
+           AND p.deleted_at IS NULL
            AND p.restaurante_id = $1
           ), i.precio
         )) as valor_stock
