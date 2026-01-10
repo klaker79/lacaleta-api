@@ -628,7 +628,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         const token = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
             JWT_SECRET,
-            { expiresIn: '24h' }
+            { expiresIn: '7d' } // 7 días de sesión
         );
 
         log('info', 'Login exitoso', { userId: user.id, email });
@@ -639,7 +639,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
             httpOnly: true,           // No accesible desde JavaScript
             secure: isProduction,     // Solo HTTPS en producción
             sameSite: 'lax',          // Protección CSRF (lax permite navegación normal)
-            maxAge: 24 * 60 * 60 * 1000, // 24 horas
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
             path: '/'
         });
 
@@ -777,7 +777,7 @@ app.post('/api/auth/register', async (req, res) => {
         const token = jwt.sign(
             { userId: userResult.rows[0].id, restauranteId, email, rol: 'admin' },
             JWT_SECRET,
-            { expiresIn: '24h' }
+            { expiresIn: '7d' } // 7 días de sesión
         );
 
         log('info', 'Registro exitoso con código de invitación', { email });
@@ -821,7 +821,7 @@ app.get('/api/auth/verify-email', async (req, res) => {
 
         const jwtToken = jwt.sign(
             { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
-            JWT_SECRET, { expiresIn: '24h' }
+            JWT_SECRET, { expiresIn: '7d' } // 7 días de sesión
         );
 
         log('info', 'Email verificado', { email: user.email });
