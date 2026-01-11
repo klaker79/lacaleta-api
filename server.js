@@ -1594,15 +1594,22 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                 total_ventas: plato.total_ventas,
                 coste: costePlato,
                 margen: margenContribucion,
+                foodCost: parseFloat(plato.precio_venta) > 0
+                    ? (costePlato / parseFloat(plato.precio_venta)) * 100
+                    : 0,
                 popularidad: parseFloat(plato.cantidad_vendida)
             });
         }
 
         const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
+        const promedioFoodCost = analisis.length > 0
+            ? analisis.reduce((sum, p) => sum + p.foodCost, 0) / analisis.length
+            : 0;
 
         const resultado = analisis.map(p => {
             const esPopular = p.popularidad >= (promedioPopularidad * 0.7);
             const esRentable = p.margen >= promedioMargen;
+            const foodCostAlto = p.foodCost > 33; // Umbral industria
 
             let clasificacion = 'perro';
             if (esPopular && esRentable) clasificacion = 'estrella';
@@ -1615,8 +1622,10 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                 metricas: {
                     esPopular,
                     esRentable,
+                    foodCostAlto,
                     promedioPopularidad,
-                    promedioMargen
+                    promedioMargen,
+                    promedioFoodCost
                 }
             };
         });
