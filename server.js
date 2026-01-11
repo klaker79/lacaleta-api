@@ -1327,6 +1327,8 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
         i.stock_minimo,
         i.proveedor_id,
         i.ultima_actualizacion_stock,
+        i.formato_compra,
+        i.cantidad_por_formato,
         CASE 
             WHEN i.stock_real IS NULL THEN NULL 
             ELSE (i.stock_real - i.stock_actual) 
