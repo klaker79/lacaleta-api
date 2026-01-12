@@ -2629,35 +2629,38 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
                 .trim();
         };
 
-        // Obtener todos los ingredientes para búsqueda flexible
+        // Obtener todos los ingredientes para búsqueda flexible (incluyendo cantidad_por_formato)
         const ingredientesResult = await client.query(
-            'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1',
+            'SELECT id, nombre, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
             [req.restauranteId]
         );
         const ingredientesMap = new Map();
         ingredientesResult.rows.forEach(i => {
-            ingredientesMap.set(normalizar(i.nombre), i.id);
+            ingredientesMap.set(normalizar(i.nombre), { id: i.id, cantidadPorFormato: parseFloat(i.cantidad_por_formato) || 0 });
         });
 
         for (const compra of compras) {
             const nombreNormalizado = normalizar(compra.ingrediente);
-            let ingredienteId = ingredientesMap.get(nombreNormalizado);
+            let ingredienteData = ingredientesMap.get(nombreNormalizado);
 
             // Si no encuentra exacto, buscar coincidencia parcial
-            if (!ingredienteId) {
-                for (const [nombreDB, id] of ingredientesMap) {
+            if (!ingredienteData) {
+                for (const [nombreDB, data] of ingredientesMap) {
                     if (nombreDB.includes(nombreNormalizado) || nombreNormalizado.includes(nombreDB)) {
-                        ingredienteId = id;
+                        ingredienteData = data;
                         break;
                     }
                 }
             }
 
-            if (!ingredienteId) {
+            if (!ingredienteData) {
                 resultados.fallidos++;
                 resultados.errores.push({ ingrediente: compra.ingrediente, error: 'Ingrediente no encontrado' });
                 continue;
             }
+
+            const ingredienteId = ingredienteData.id;
+            const cantidadPorFormato = ingredienteData.cantidadPorFormato;
 
             const precio = parseFloat(compra.precio) || 0;
             const cantidad = parseFloat(compra.cantidad) || 0;
@@ -2677,9 +2680,11 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId]);
 
             // Actualizar precio base del ingrediente Y SUMAR al stock
+            // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
+            const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
             await client.query(
-                'UPDATE ingredientes SET precio = $1, stock_actual = stock_actual + $2 WHERE id = $3',
-                [precio, cantidad, ingredienteId]
+                'UPDATE ingredientes SET precio = $1, stock_actual = stock_actual + $2, ultima_actualizacion_stock = NOW() WHERE id = $3',
+                [precio, stockASumar, ingredienteId]
             );
 
             resultados.procesados++;
