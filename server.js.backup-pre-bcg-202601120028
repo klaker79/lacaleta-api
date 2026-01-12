@@ -1594,22 +1594,15 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                 total_ventas: plato.total_ventas,
                 coste: costePlato,
                 margen: margenContribucion,
-                foodCost: parseFloat(plato.precio_venta) > 0
-                    ? (costePlato / parseFloat(plato.precio_venta)) * 100
-                    : 0,
                 popularidad: parseFloat(plato.cantidad_vendida)
             });
         }
 
         const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
-        const promedioFoodCost = analisis.length > 0
-            ? analisis.reduce((sum, p) => sum + p.foodCost, 0) / analisis.length
-            : 0;
 
         const resultado = analisis.map(p => {
             const esPopular = p.popularidad >= (promedioPopularidad * 0.7);
             const esRentable = p.margen >= promedioMargen;
-            const foodCostAlto = p.foodCost > 33; // Umbral industria
 
             let clasificacion = 'perro';
             if (esPopular && esRentable) clasificacion = 'estrella';
@@ -1622,10 +1615,8 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
                 metricas: {
                     esPopular,
                     esRentable,
-                    foodCostAlto,
                     promedioPopularidad,
-                    promedioMargen,
-                    promedioFoodCost
+                    promedioMargen
                 }
             };
         });
@@ -2320,21 +2311,6 @@ app.delete('/api/horarios/empleado/:empleadoId/fecha/:fecha', authMiddleware, as
     }
 });
 
-// DELETE todos los horarios (borrado masivo)
-app.delete('/api/horarios/all', authMiddleware, async (req, res) => {
-    try {
-        const result = await pool.query(
-            'DELETE FROM horarios WHERE restaurante_id = $1',
-            [req.restauranteId]
-        );
-        log('info', 'Todos los horarios eliminados', { count: result.rowCount });
-        res.json({ success: true, deleted: result.rowCount });
-    } catch (err) {
-        log('error', 'Error eliminando todos los horarios', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
 // POST copiar semana anterior
 app.post('/api/horarios/copiar-semana', authMiddleware, async (req, res) => {
     try {
@@ -2656,10 +2632,10 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
                     total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
             `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId]);
 
-            // Actualizar precio base del ingrediente Y SUMAR al stock
+            // Actualizar precio base del ingrediente
             await client.query(
-                'UPDATE ingredientes SET precio = $1, stock_actual = stock_actual + $2 WHERE id = $3',
-                [precio, cantidad, ingredienteId]
+                'UPDATE ingredientes SET precio = $1 WHERE id = $2',
+                [precio, ingredienteId]
             );
 
             resultados.procesados++;
