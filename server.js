@@ -2619,19 +2619,39 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
 
         const resultados = { procesados: 0, fallidos: 0, errores: [] };
 
-        // Obtener todos los ingredientes para búsqueda rápida
+        // Función para normalizar nombres (quitar acentos, mayúsculas, espacios extra)
+        const normalizar = (str) => {
+            return (str || '')
+                .toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar acentos
+                .replace(/[^a-z0-9\s]/g, '') // quitar caracteres especiales
+                .replace(/\s+/g, ' ') // espacios múltiples a uno
+                .trim();
+        };
+
+        // Obtener todos los ingredientes para búsqueda flexible
         const ingredientesResult = await client.query(
             'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1',
             [req.restauranteId]
         );
         const ingredientesMap = new Map();
         ingredientesResult.rows.forEach(i => {
-            ingredientesMap.set(i.nombre.toLowerCase().trim(), i.id);
+            ingredientesMap.set(normalizar(i.nombre), i.id);
         });
 
         for (const compra of compras) {
-            const nombreIng = (compra.ingrediente || '').toLowerCase().trim();
-            const ingredienteId = ingredientesMap.get(nombreIng);
+            const nombreNormalizado = normalizar(compra.ingrediente);
+            let ingredienteId = ingredientesMap.get(nombreNormalizado);
+
+            // Si no encuentra exacto, buscar coincidencia parcial
+            if (!ingredienteId) {
+                for (const [nombreDB, id] of ingredientesMap) {
+                    if (nombreDB.includes(nombreNormalizado) || nombreNormalizado.includes(nombreDB)) {
+                        ingredienteId = id;
+                        break;
+                    }
+                }
+            }
 
             if (!ingredienteId) {
                 resultados.fallidos++;
