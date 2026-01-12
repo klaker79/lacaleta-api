@@ -2320,6 +2320,21 @@ app.delete('/api/horarios/empleado/:empleadoId/fecha/:fecha', authMiddleware, as
     }
 });
 
+// DELETE todos los horarios (borrado masivo)
+app.delete('/api/horarios/all', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'DELETE FROM horarios WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        log('info', 'Todos los horarios eliminados', { count: result.rowCount });
+        res.json({ success: true, deleted: result.rowCount });
+    } catch (err) {
+        log('error', 'Error eliminando todos los horarios', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // POST copiar semana anterior
 app.post('/api/horarios/copiar-semana', authMiddleware, async (req, res) => {
     try {
