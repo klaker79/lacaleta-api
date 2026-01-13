@@ -1448,7 +1448,7 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
             WHEN i.stock_real IS NULL THEN NULL 
             ELSE (i.stock_real - i.stock_actual) 
         END as diferencia,
-        -- Precio unitario: precio / cantidad_por_formato (si existe formato)
+        -- Precio unitario: usar precio base directamente (ya es por unidad)
         COALESCE(
           (SELECT 
             SUM(
