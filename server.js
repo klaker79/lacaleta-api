@@ -2203,18 +2203,28 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             );
 
             // Descontar stock (aplicando factor de variante)
-            if (Array.isArray(ingredientesReceta)) {
+            if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
                 for (const ing of ingredientesReceta) {
-                    // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
-                    await client.query(
-                        'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
-                        [ing.ingredienteId]
-                    );
-                    // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
-                    await client.query(
-                        'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
-                        [ing.cantidad * cantidad * factorAplicado, ing.ingredienteId, req.restauranteId]
-                    );
+                    const cantidadADescontar = (ing.cantidad || 0) * cantidad * factorAplicado;
+                    if (cantidadADescontar > 0 && ing.ingredienteId) {
+                        // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
+                        await client.query(
+                            'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
+                            [ing.ingredienteId]
+                        );
+                        // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
+                        const updateResult = await client.query(
+                            'UPDATE ingredientes SET stock_actual = stock_actual - $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
+                            [cantidadADescontar, ing.ingredienteId, req.restauranteId]
+                        );
+                        if (updateResult.rows.length > 0) {
+                            log('info', 'Stock descontado', {
+                                ingrediente: updateResult.rows[0].nombre,
+                                cantidad: cantidadADescontar,
+                                nuevoStock: updateResult.rows[0].stock_actual
+                            });
+                        }
+                    }
                 }
             }
 
