@@ -1467,8 +1467,12 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
            AND p.deleted_at IS NULL
            AND p.restaurante_id = $1
           ), 
-          -- Si no hay pedidos, usar precio base directamente (ya es por unidad)
-          i.precio
+          -- Si no hay pedidos, usar precio base dividido por cantidad_por_formato
+          CASE 
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+            THEN i.precio / i.cantidad_por_formato
+            ELSE i.precio 
+          END
         ) as precio_medio,
         -- Valor stock = stock_actual × precio_unitario
         (i.stock_actual * COALESCE(
@@ -1489,8 +1493,12 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
            AND p.deleted_at IS NULL
            AND p.restaurante_id = $1
           ), 
-          -- Si no hay pedidos, usar precio base directamente (ya es por unidad)
-          i.precio
+          -- Si no hay pedidos, usar precio base dividido por cantidad_por_formato
+          CASE 
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+            THEN i.precio / i.cantidad_por_formato
+            ELSE i.precio 
+          END
         )) as valor_stock
       FROM ingredientes i
       WHERE i.restaurante_id = $1
