@@ -923,6 +923,121 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
     }
 });
 
+// ============================================
+// MATCH INGREDIENT BY NAME (with alias support)
+// POST /api/ingredients/match
+// Busca ingrediente por nombre exacto, luego por alias
+// ============================================
+app.post('/api/ingredients/match', authMiddleware, async (req, res) => {
+    try {
+        const { nombre } = req.body;
+
+        if (!nombre || typeof nombre !== 'string') {
+            return res.status(400).json({
+                found: false,
+                error: 'Se requiere el campo nombre'
+            });
+        }
+
+        const nombreLimpio = nombre.trim();
+
+        // 1. Buscar por nombre exacto (case insensitive)
+        let result = await pool.query(`
+            SELECT id, nombre, unidad, precio, cantidad_por_formato, formato_compra, stock_actual
+            FROM ingredientes 
+            WHERE restaurante_id = $1 
+              AND LOWER(nombre) = LOWER($2)
+              AND (activo IS NULL OR activo = TRUE)
+            LIMIT 1
+        `, [req.restauranteId, nombreLimpio]);
+
+        if (result.rows.length > 0) {
+            const ing = result.rows[0];
+            return res.json({
+                found: true,
+                match_type: 'exact',
+                ingrediente: {
+                    id: ing.id,
+                    nombre: ing.nombre,
+                    unidad: ing.unidad,
+                    precio: parseFloat(ing.precio) || 0,
+                    cantidad_por_formato: parseFloat(ing.cantidad_por_formato) || null,
+                    formato_compra: ing.formato_compra,
+                    stock_actual: parseFloat(ing.stock_actual) || 0
+                }
+            });
+        }
+
+        // 2. Buscar en tabla de alias
+        result = await pool.query(`
+            SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.formato_compra, i.stock_actual, a.alias
+            FROM ingredientes_alias a
+            JOIN ingredientes i ON a.ingrediente_id = i.id
+            WHERE a.restaurante_id = $1 
+              AND LOWER(a.alias) = LOWER($2)
+              AND (i.activo IS NULL OR i.activo = TRUE)
+            LIMIT 1
+        `, [req.restauranteId, nombreLimpio]);
+
+        if (result.rows.length > 0) {
+            const ing = result.rows[0];
+            return res.json({
+                found: true,
+                match_type: 'alias',
+                alias_used: ing.alias,
+                ingrediente: {
+                    id: ing.id,
+                    nombre: ing.nombre,
+                    unidad: ing.unidad,
+                    precio: parseFloat(ing.precio) || 0,
+                    cantidad_por_formato: parseFloat(ing.cantidad_por_formato) || null,
+                    formato_compra: ing.formato_compra,
+                    stock_actual: parseFloat(ing.stock_actual) || 0
+                }
+            });
+        }
+
+        // 3. Buscar por coincidencia parcial (LIKE)
+        result = await pool.query(`
+            SELECT id, nombre, unidad, precio, cantidad_por_formato, formato_compra, stock_actual
+            FROM ingredientes 
+            WHERE restaurante_id = $1 
+              AND LOWER(nombre) LIKE LOWER($2)
+              AND (activo IS NULL OR activo = TRUE)
+            ORDER BY LENGTH(nombre) ASC
+            LIMIT 1
+        `, [req.restauranteId, `%${nombreLimpio}%`]);
+
+        if (result.rows.length > 0) {
+            const ing = result.rows[0];
+            return res.json({
+                found: true,
+                match_type: 'partial',
+                ingrediente: {
+                    id: ing.id,
+                    nombre: ing.nombre,
+                    unidad: ing.unidad,
+                    precio: parseFloat(ing.precio) || 0,
+                    cantidad_por_formato: parseFloat(ing.cantidad_por_formato) || null,
+                    formato_compra: ing.formato_compra,
+                    stock_actual: parseFloat(ing.stock_actual) || 0
+                }
+            });
+        }
+
+        // No encontrado
+        return res.json({
+            found: false,
+            searched_name: nombreLimpio,
+            message: 'Ingrediente no encontrado. Considere añadirlo o crear un alias.'
+        });
+
+    } catch (err) {
+        log('error', 'Error en match ingrediente', { error: err.message });
+        res.status(500).json({ found: false, error: 'Error interno' });
+    }
+});
+
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato } = req.body;
