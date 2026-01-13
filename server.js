@@ -1333,6 +1333,7 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
             WHEN i.stock_real IS NULL THEN NULL 
             ELSE (i.stock_real - i.stock_actual) 
         END as diferencia,
+        -- Precio unitario: precio / cantidad_por_formato (si existe formato)
         COALESCE(
           (SELECT 
             SUM(
@@ -1350,8 +1351,15 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
            AND p.estado = 'recibido'
            AND p.deleted_at IS NULL
            AND p.restaurante_id = $1
-          ), i.precio
+          ), 
+          -- Si no hay pedidos, usar precio base dividido por cantidad_por_formato
+          CASE 
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+            THEN i.precio / i.cantidad_por_formato
+            ELSE i.precio 
+          END
         ) as precio_medio,
+        -- Valor stock = stock_actual × precio_unitario
         (i.stock_actual * COALESCE(
           (SELECT 
             SUM(
@@ -1369,7 +1377,13 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
            AND p.estado = 'recibido'
            AND p.deleted_at IS NULL
            AND p.restaurante_id = $1
-          ), i.precio
+          ), 
+          -- Si no hay pedidos, usar precio base dividido por cantidad_por_formato
+          CASE 
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+            THEN i.precio / i.cantidad_por_formato
+            ELSE i.precio 
+          END
         )) as valor_stock
       FROM ingredientes i
       WHERE i.restaurante_id = $1
