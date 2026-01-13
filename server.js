@@ -2768,6 +2768,19 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             ingredientesMap.set(normalizar(i.nombre), { id: i.id, cantidadPorFormato: parseFloat(i.cantidad_por_formato) || 0 });
         });
 
+        // Obtener todos los alias para búsqueda
+        const aliasResult = await client.query(
+            `SELECT a.alias, a.ingrediente_id, i.cantidad_por_formato 
+             FROM ingredientes_alias a 
+             JOIN ingredientes i ON a.ingrediente_id = i.id
+             WHERE a.restaurante_id = $1`,
+            [req.restauranteId]
+        );
+        const aliasMap = new Map();
+        aliasResult.rows.forEach(a => {
+            aliasMap.set(normalizar(a.alias), { id: a.ingrediente_id, cantidadPorFormato: parseFloat(a.cantidad_por_formato) || 0 });
+        });
+
         for (const compra of compras) {
             const nombreNormalizado = normalizar(compra.ingrediente);
             let ingredienteData = ingredientesMap.get(nombreNormalizado);
@@ -2776,6 +2789,21 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             if (!ingredienteData) {
                 for (const [nombreDB, data] of ingredientesMap) {
                     if (nombreDB.includes(nombreNormalizado) || nombreNormalizado.includes(nombreDB)) {
+                        ingredienteData = data;
+                        break;
+                    }
+                }
+            }
+
+            // Si aún no encuentra, buscar en tabla de alias
+            if (!ingredienteData) {
+                ingredienteData = aliasMap.get(nombreNormalizado);
+            }
+
+            // Si aún no encuentra, buscar alias con coincidencia parcial
+            if (!ingredienteData) {
+                for (const [aliasNombre, data] of aliasMap) {
+                    if (aliasNombre.includes(nombreNormalizado) || nombreNormalizado.includes(aliasNombre)) {
                         ingredienteData = data;
                         break;
                     }
