@@ -2138,10 +2138,15 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             }
         });
 
-        const ingredientesResult = await client.query('SELECT id, precio FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]);
+        // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
+        const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]);
         const ingredientesPrecios = new Map();
         ingredientesResult.rows.forEach(i => {
-            ingredientesPrecios.set(i.id, parseFloat(i.precio) || 0);
+            const precio = parseFloat(i.precio) || 0;
+            const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
+            // Precio unitario = precio del formato / cantidad en el formato
+            const precioUnitario = precio / cantidadPorFormato;
+            ingredientesPrecios.set(i.id, precioUnitario);
         });
 
         // Acumulador para resumen diario
