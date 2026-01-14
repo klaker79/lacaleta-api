@@ -2948,13 +2948,17 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
         `, [req.restauranteId, mesActual, anoActual]);
 
         // Obtener precios de todos los ingredientes para calcular costes
+        // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
         const ingredientesPrecios = await pool.query(
-            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1',
+            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
             [req.restauranteId]
         );
         const preciosMap = {};
         ingredientesPrecios.rows.forEach(ing => {
-            preciosMap[ing.id] = parseFloat(ing.precio) || 0;
+            const precio = parseFloat(ing.precio) || 0;
+            const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
+            // Precio unitario = precio del formato / cantidad en el formato
+            preciosMap[ing.id] = precio / cantidadPorFormato;
         });
 
         // Función para calcular coste de una receta
