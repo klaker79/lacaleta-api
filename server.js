@@ -2081,6 +2081,125 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== ENDPOINT: PARSEAR PDF DE TPV CON IA ==========
+// Recibe un PDF del TPV y extrae los datos de ventas usando Claude API
+app.post('/api/parse-pdf', authMiddleware, async (req, res) => {
+    try {
+        const { pdfBase64, filename } = req.body;
+
+        if (!pdfBase64) {
+            return res.status(400).json({ error: 'Se requiere pdfBase64' });
+        }
+
+        // API Key de Anthropic (configurar en variables de entorno)
+        const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+        if (!ANTHROPIC_API_KEY) {
+            return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada en el servidor' });
+        }
+
+        log('info', 'Procesando PDF con Claude API', { filename, tamaño: pdfBase64.length });
+
+        // Llamar a Claude API con el PDF
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 32000,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'document',
+                            source: {
+                                type: 'base64',
+                                media_type: 'application/pdf',
+                                data: pdfBase64
+                            }
+                        },
+                        {
+                            type: 'text',
+                            text: `Extrae las líneas de venta de este informe de TPV.
+
+PRIMERO, extrae la FECHA del documento (busca "Fecha:" o "Desde:" en el encabezado).
+
+Retorna ÚNICAMENTE JSON válido sin explicaciones:
+{
+  "fecha": "2026-01-12",
+  "ventas": [
+    {"codigo": "00117", "descripcion": "CAÑA", "unidades": 67, "importe": 201.00, "familia": "BEBIDAS"}
+  ]
+}
+
+REGLAS:
+- La fecha debe estar en formato YYYY-MM-DD
+- Solo líneas con código numérico de 5-6 dígitos
+- Ignora líneas de TOTAL
+- El importe usa punto decimal`
+                        }
+                    ]
+                }]
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            log('error', 'Error de Claude API', errorData);
+            return res.status(500).json({ error: 'Error procesando PDF con IA', details: errorData });
+        }
+
+        const claudeResponse = await response.json();
+        let textContent = claudeResponse.content?.[0]?.text || '';
+
+        // Limpiar respuesta de Claude (quitar markdown code blocks)
+        textContent = textContent.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        // Extraer JSON
+        const startIdx = textContent.indexOf('{');
+        const endIdx = textContent.lastIndexOf('}');
+        if (startIdx === -1 || endIdx === -1) {
+            return res.status(500).json({ error: 'No se pudo extraer JSON de la respuesta de IA' });
+        }
+
+        const jsonStr = textContent.substring(startIdx, endIdx + 1);
+        let data;
+        try {
+            data = JSON.parse(jsonStr);
+        } catch (parseError) {
+            log('error', 'Error parseando JSON de Claude', { error: parseError.message, rawText: textContent.substring(0, 500) });
+            return res.status(500).json({ error: 'Error parseando respuesta de IA', details: parseError.message });
+        }
+
+        // Formatear para el frontend
+        const fechaDocumento = data.fecha || new Date().toISOString().split('T')[0];
+        const ventasFormateadas = (data.ventas || []).map(v => ({
+            receta: v.descripcion,
+            codigo_tpv: v.codigo,
+            cantidad: parseInt(v.unidades) || 1,
+            total: parseFloat(v.importe) || 0,
+            fecha: fechaDocumento + 'T12:00:00.000Z'
+        }));
+
+        log('info', 'PDF procesado exitosamente', { fecha: fechaDocumento, ventas: ventasFormateadas.length });
+
+        res.json({
+            success: true,
+            fecha: fechaDocumento,
+            ventas: ventasFormateadas,
+            totalVentas: ventasFormateadas.length,
+            totalImporte: ventasFormateadas.reduce((sum, v) => sum + v.total, 0)
+        });
+
+    } catch (error) {
+        log('error', 'Error procesando PDF', { error: error.message, stack: error.stack });
+        res.status(500).json({ error: 'Error procesando PDF', details: error.message });
+    }
+});
+
 // Endpoint para carga masiva de ventas (n8n compatible)
 app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
     const client = await pool.connect();
