@@ -1122,6 +1122,27 @@ app.patch('/api/ingredients/:id/toggle-active', authMiddleware, async (req, res)
 
 // ========== INGREDIENTES - PROVEEDORES MÚLTIPLES ==========
 
+// GET /api/ingredients-suppliers - Obtener TODOS los ingredientes_proveedores del restaurante
+app.get('/api/ingredients-suppliers', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio, 
+                   ip.es_proveedor_principal, ip.created_at,
+                   p.nombre as proveedor_nombre
+            FROM ingredientes_proveedores ip
+            JOIN proveedores p ON ip.proveedor_id = p.id
+            JOIN ingredientes i ON ip.ingrediente_id = i.id
+            WHERE i.restaurante_id = $1
+            ORDER BY ip.ingrediente_id, ip.es_proveedor_principal DESC
+        `, [req.restauranteId]);
+
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error obteniendo ingredientes-proveedores', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // GET /api/ingredients/:id/suppliers - Obtener proveedores de un ingrediente
 app.get('/api/ingredients/:id/suppliers', authMiddleware, async (req, res) => {
     try {
