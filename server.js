@@ -2970,12 +2970,12 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
                     total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
             `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId]);
 
-            // Actualizar precio base del ingrediente Y SUMAR al stock
+            // Solo actualizar stock, NO el precio (el precio solo se cambia manualmente)
             // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
             const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
             await client.query(
-                'UPDATE ingredientes SET precio = $1, stock_actual = stock_actual + $2, ultima_actualizacion_stock = NOW() WHERE id = $3',
-                [precio, stockASumar, ingredienteId]
+                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2',
+                [stockASumar, ingredienteId]
             );
 
             resultados.procesados++;
