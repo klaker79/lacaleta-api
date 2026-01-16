@@ -1827,8 +1827,36 @@ app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
 // ========== PROVEEDORES ==========
 app.get('/api/suppliers', authMiddleware, async (req, res) => {
     try {
+        // Obtener proveedores base
         const result = await pool.query('SELECT * FROM proveedores WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
-        res.json(result.rows || []);
+        const proveedores = result.rows || [];
+
+        // Obtener ingredientes de la tabla de relación (ingredientes secundarios)
+        const relaciones = await pool.query(
+            'SELECT proveedor_id, ingrediente_id FROM ingredientes_proveedores WHERE proveedor_id = ANY($1)',
+            [proveedores.map(p => p.id)]
+        );
+
+        // Crear mapa de ingredientes por proveedor
+        const ingPorProveedor = {};
+        relaciones.rows.forEach(rel => {
+            if (!ingPorProveedor[rel.proveedor_id]) {
+                ingPorProveedor[rel.proveedor_id] = new Set();
+            }
+            ingPorProveedor[rel.proveedor_id].add(rel.ingrediente_id);
+        });
+
+        // Combinar ingredientes de columna y de tabla de relación
+        proveedores.forEach(prov => {
+            const ingColumna = Array.isArray(prov.ingredientes) ? prov.ingredientes : [];
+            const ingRelacion = ingPorProveedor[prov.id] ? Array.from(ingPorProveedor[prov.id]) : [];
+
+            // Combinar sin duplicados
+            const todosIng = new Set([...ingColumna, ...ingRelacion]);
+            prov.ingredientes = Array.from(todosIng);
+        });
+
+        res.json(proveedores);
     } catch (err) {
         log('error', 'Error obteniendo proveedores', { error: err.message });
         res.status(500).json({ error: 'Error interno', data: [] });
