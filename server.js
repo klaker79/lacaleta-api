@@ -1088,12 +1088,21 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
-        await pool.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        await client.query('BEGIN');
+        // Primero borrar asociaciones con proveedores (foreign key)
+        await client.query('DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1', [req.params.id]);
+        // Luego borrar el ingrediente
+        await client.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+        await client.query('COMMIT');
         res.json({ message: 'Eliminado' });
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error eliminando ingrediente', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
