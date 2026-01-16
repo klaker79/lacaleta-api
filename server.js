@@ -1091,8 +1091,10 @@ app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // Primero borrar asociaciones con proveedores (foreign key)
+        // Borrar asociaciones con proveedores (foreign key)
         await client.query('DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1', [req.params.id]);
+        // Borrar alias (foreign key)
+        await client.query('DELETE FROM ingredientes_alias WHERE ingrediente_id = $1', [req.params.id]);
         // Luego borrar el ingrediente
         await client.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
         await client.query('COMMIT');
