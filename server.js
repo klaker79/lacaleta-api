@@ -2058,7 +2058,8 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
 app.post('/api/sales', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { recetaId, cantidad } = req.body;
+        // ⚡ NUEVO: Capturar variante y precio personalizado
+        const { recetaId, cantidad, varianteId, precioVariante } = req.body;
 
         // Validar cantidad
         const cantidadValidada = validateCantidad(cantidad);
@@ -2075,7 +2076,27 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         }
 
         const receta = recetaResult.rows[0];
-        const precioUnitario = parseFloat(receta.precio_venta);
+
+        // ⚡ NUEVO: Si hay variante, obtener su precio y factor
+        let precioUnitario = parseFloat(receta.precio_venta);
+        let factorVariante = 1;
+
+        if (varianteId) {
+            const varianteResult = await client.query(
+                'SELECT precio_venta, factor FROM recetas_variantes WHERE id = $1 AND receta_id = $2',
+                [varianteId, recetaId]
+            );
+            if (varianteResult.rows.length > 0) {
+                const variante = varianteResult.rows[0];
+                precioUnitario = parseFloat(variante.precio_venta);
+                factorVariante = parseFloat(variante.factor) || 1;
+                log('info', 'Venta con variante', { varianteId, precio: precioUnitario, factor: factorVariante });
+            }
+        } else if (precioVariante && precioVariante > 0) {
+            // Fallback: usar precio enviado desde frontend
+            precioUnitario = precioVariante;
+        }
+
         const total = precioUnitario * cantidadValidada;
 
         const ingredientesReceta = receta.ingredientes || [];
@@ -2100,15 +2121,18 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
             [recetaId, cantidadValidada, precioUnitario, total, req.restauranteId]
         );
 
+        // ⚡ NUEVO: Aplicar factor de variante al descuento de stock
         for (const ing of ingredientesReceta) {
             // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
             await client.query(
                 'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
                 [ing.ingredienteId]
             );
+            // Cantidad a descontar = cantidad_receta × cantidad_vendida × factor_variante
+            const cantidadADescontar = (ing.cantidad || 0) * cantidadValidada * factorVariante;
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
-                [ing.cantidad * cantidadValidada, ing.ingredienteId]
+                [cantidadADescontar, ing.ingredienteId]
             );
         }
 
