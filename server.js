@@ -1496,58 +1496,19 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
             WHEN i.stock_real IS NULL THEN NULL 
             ELSE (i.stock_real - i.stock_actual) 
         END as diferencia,
-        -- Precio unitario: usar precio base directamente (ya es por unidad)
-        COALESCE(
-          (SELECT 
-            SUM(
-              (ingrediente->>'cantidad')::numeric *
-              COALESCE(
-                (ingrediente->>'precioReal')::numeric,
-                (ingrediente->>'precioUnitario')::numeric,
-                (ingrediente->>'precio_unitario')::numeric,
-                (ingrediente->>'precio')::numeric
-              )
-            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
-           FROM pedidos p, 
-           jsonb_array_elements(p.ingredientes) as ingrediente
-           WHERE (ingrediente->>'ingredienteId')::integer = i.id 
-           AND p.estado = 'recibido'
-           AND p.deleted_at IS NULL
-           AND p.restaurante_id = $1
-          ), 
-          -- Si no hay pedidos, usar precio base dividido por cantidad_por_formato
-          CASE 
-            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
-            THEN i.precio / i.cantidad_por_formato
-            ELSE i.precio 
-          END
-        ) as precio_medio,
+        -- Precio unitario: SIEMPRE dividir precio por cantidad_por_formato
+        -- (La subquery de pedidos se elimina porque los pedidos históricos tienen precios por formato sin dividir)
+        CASE 
+          WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+          THEN i.precio / i.cantidad_por_formato
+          ELSE i.precio 
+        END as precio_medio,
         -- Valor stock = stock_actual × precio_unitario
-        (i.stock_actual * COALESCE(
-          (SELECT 
-            SUM(
-              (ingrediente->>'cantidad')::numeric *
-              COALESCE(
-                (ingrediente->>'precioReal')::numeric,
-                (ingrediente->>'precioUnitario')::numeric,
-                (ingrediente->>'precio_unitario')::numeric,
-                (ingrediente->>'precio')::numeric
-              )
-            ) / NULLIF(SUM((ingrediente->>'cantidad')::numeric), 0)
-           FROM pedidos p, 
-           jsonb_array_elements(p.ingredientes) as ingrediente
-           WHERE (ingrediente->>'ingredienteId')::integer = i.id 
-           AND p.estado = 'recibido'
-           AND p.deleted_at IS NULL
-           AND p.restaurante_id = $1
-          ), 
-          -- Si no hay pedidos, usar precio base dividido por cantidad_por_formato
-          CASE 
-            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
-            THEN i.precio / i.cantidad_por_formato
-            ELSE i.precio 
-          END
-        )) as valor_stock
+        (i.stock_actual * CASE 
+          WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+          THEN i.precio / i.cantidad_por_formato
+          ELSE i.precio 
+        END) as valor_stock
       FROM ingredientes i
       WHERE i.restaurante_id = $1
       ORDER BY i.id
