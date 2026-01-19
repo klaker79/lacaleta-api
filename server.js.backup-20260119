@@ -321,7 +321,7 @@ pool.on('error', (err) => {
       );
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
-        proveedor_id INTEGER,
+        proveedor_id INTEGER NOT NULL,
         fecha DATE NOT NULL,
         ingredientes JSONB NOT NULL,
         total DECIMAL(10, 2) NOT NULL,
