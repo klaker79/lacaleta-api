@@ -3238,15 +3238,6 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
     }
 });
 
-// ========== 404 ==========
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Ruta no encontrada',
-        path: req.originalUrl,
-        method: req.method
-    });
-});
-
 // ========== 🧠 INTELIGENCIA - ENDPOINT FRESCURA ==========
 // Días de vida útil por familia (estándares industria marisquería)
 const VIDA_UTIL_DIAS = {
@@ -3313,6 +3304,17 @@ app.get('/api/intelligence/freshness', authMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Error interno', alertas: [] });
     }
 });
+
+// ========== 404 ==========
+app.use((req, res) => {
+    res.status(404).json({
+        error: 'Ruta no encontrada',
+        path: req.originalUrl,
+        method: req.method
+    });
+});
+
+
 
 // ========== ERROR HANDLER GLOBAL ==========
 app.use((err, req, res, next) => {
