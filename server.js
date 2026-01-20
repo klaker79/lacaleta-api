@@ -359,6 +359,20 @@ pool.on('error', (err) => {
         diferencia DECIMAL(10, 2) NOT NULL,
         restaurante_id INTEGER NOT NULL
       );
+      -- Tabla para registro de mermas/pérdidas
+      CREATE TABLE IF NOT EXISTS mermas (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        ingrediente_nombre VARCHAR(255),
+        cantidad DECIMAL(10, 3) NOT NULL,
+        unidad VARCHAR(20),
+        valor_perdida DECIMAL(10, 2) NOT NULL,
+        motivo VARCHAR(50) NOT NULL,
+        nota TEXT,
+        responsable_id INTEGER,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        restaurante_id INTEGER NOT NULL
+      );
       -- Tabla para tokens de API (n8n, integraciones)
       CREATE TABLE IF NOT EXISTS api_tokens (
         id SERIAL PRIMARY KEY,
@@ -3501,6 +3515,98 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
     } catch (err) {
         log('error', 'Error en intelligence/price-check', { error: err.message });
         res.status(500).json({ error: 'Error interno', recetas_problema: [] });
+    }
+});
+
+// ========== 🗑️ MERMAS - REGISTRO ==========
+app.post('/api/mermas', authMiddleware, async (req, res) => {
+    try {
+        const { mermas } = req.body;
+        if (!mermas || !Array.isArray(mermas)) {
+            return res.status(400).json({ error: 'Se requiere array de mermas' });
+        }
+
+        for (const m of mermas) {
+            await pool.query(`
+                INSERT INTO mermas 
+                (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `, [
+                m.ingredienteId,
+                m.ingredienteNombre,
+                m.cantidad,
+                m.unidad || 'ud',
+                m.valorPerdida || 0,
+                m.motivo || 'otro',
+                m.nota || '',
+                m.responsableId || null,
+                req.restauranteId
+            ]);
+        }
+
+        log('info', `Registradas ${mermas.length} mermas`, { restauranteId: req.restauranteId });
+        res.json({ success: true, count: mermas.length });
+    } catch (err) {
+        log('error', 'Error registrando mermas', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// ========== 🧠 INTELIGENCIA - MERMAS ==========
+app.get('/api/intelligence/waste-stats', authMiddleware, async (req, res) => {
+    try {
+        // Total mermas este mes
+        const mesActual = await pool.query(`
+            SELECT 
+                COALESCE(SUM(valor_perdida), 0) as total_perdida,
+                COUNT(*) as total_registros
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+        `, [req.restauranteId]);
+
+        // Top 5 productos más tirados
+        const topProductos = await pool.query(`
+            SELECT 
+                ingrediente_nombre as nombre,
+                SUM(cantidad) as cantidad_total,
+                SUM(valor_perdida) as perdida_total,
+                COUNT(*) as veces
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+            GROUP BY ingrediente_nombre
+            ORDER BY perdida_total DESC
+            LIMIT 5
+        `, [req.restauranteId]);
+
+        // Comparación con mes anterior
+        const mesAnterior = await pool.query(`
+            SELECT COALESCE(SUM(valor_perdida), 0) as total_perdida
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+              AND fecha < DATE_TRUNC('month', CURRENT_DATE)
+        `, [req.restauranteId]);
+
+        const totalActual = parseFloat(mesActual.rows[0]?.total_perdida || 0);
+        const totalAnterior = parseFloat(mesAnterior.rows[0]?.total_perdida || 0);
+        const variacion = totalAnterior > 0 ? ((totalActual - totalAnterior) / totalAnterior) * 100 : 0;
+
+        res.json({
+            mes_actual: {
+                total_perdida: totalActual,
+                registros: parseInt(mesActual.rows[0]?.total_registros || 0)
+            },
+            top_productos: topProductos.rows,
+            comparacion: {
+                mes_anterior: totalAnterior,
+                variacion: Math.round(variacion)
+            }
+        });
+    } catch (err) {
+        log('error', 'Error en intelligence/waste-stats', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
     }
 });
 
