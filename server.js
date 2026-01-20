@@ -3610,6 +3610,35 @@ app.get('/api/intelligence/waste-stats', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== 🗑️ MERMAS - RESUMEN MENSUAL ==========
+app.get('/api/mermas/resumen', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                COALESCE(SUM(valor_perdida), 0) as total_perdida,
+                COUNT(DISTINCT ingrediente_id) as total_productos,
+                COUNT(*) as total_registros
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+        `, [req.restauranteId]);
+
+        const data = result.rows[0] || {};
+        res.json({
+            totalPerdida: parseFloat(data.total_perdida || 0),
+            totalProductos: parseInt(data.total_productos || 0),
+            totalRegistros: parseInt(data.total_registros || 0)
+        });
+    } catch (err) {
+        log('error', 'Error en mermas/resumen', { error: err.message });
+        res.status(500).json({
+            totalPerdida: 0,
+            totalProductos: 0,
+            totalRegistros: 0
+        });
+    }
+});
+
 // ========== 404 ==========
 app.use((req, res) => {
     res.status(404).json({
