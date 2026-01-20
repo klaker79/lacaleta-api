@@ -3639,6 +3639,35 @@ app.get('/api/mermas/resumen', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== 🗑️ MERMAS - RESET MENSUAL ==========
+app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
+    try {
+        const { motivo } = req.body || {};
+
+        // Archivar mermas actuales antes de borrarlas (opcional: crear tabla de archivo)
+        const deleted = await pool.query(`
+            DELETE FROM mermas 
+            WHERE restaurante_id = $1 
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+            RETURNING *
+        `, [req.restauranteId]);
+
+        log('info', `Reset mermas: ${deleted.rowCount} registros eliminados`, {
+            restauranteId: req.restauranteId,
+            motivo: motivo || 'manual'
+        });
+
+        res.json({
+            success: true,
+            eliminados: deleted.rowCount,
+            motivo: motivo || 'manual'
+        });
+    } catch (err) {
+        log('error', 'Error en mermas/reset', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // ========== 404 ==========
 app.use((req, res) => {
     res.status(404).json({
