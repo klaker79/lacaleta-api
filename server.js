@@ -3282,7 +3282,11 @@ app.get('/api/intelligence/freshness', authMiddleware, async (req, res) => {
             ORDER BY c.dias_desde_compra DESC
         `, [req.restauranteId]);
 
+        // Solo productos frescos (carne, pescado, marisco)
+        const FAMILIAS_FRESCAS = ['carne', 'pescado', 'marisco'];
+
         const alertas = result.rows
+            .filter(row => FAMILIAS_FRESCAS.includes((row.familia || '').toLowerCase()))
             .map(row => {
                 const familia = (row.familia || 'default').toLowerCase();
                 const vidaUtil = VIDA_UTIL_DIAS[familia] || VIDA_UTIL_DIAS['default'];
