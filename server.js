@@ -3240,9 +3240,11 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
 
 // ========== 🧠 INTELIGENCIA - ENDPOINT FRESCURA ==========
 // Días de vida útil por familia (estándares industria marisquería)
+// NOTA: Marisco y pescado tienen valor alto porque llegan congelados
+// La caducidad real empieza al cocer/descongelar, no al recibir
 const VIDA_UTIL_DIAS = {
-    'pescado': 2,
-    'marisco': 2,
+    'pescado': 7,    // Congelado: vida larga al llegar
+    'marisco': 7,    // Congelado: vida larga al llegar  
     'carne': 4,
     'verdura': 5,
     'lacteo': 5,
@@ -3367,13 +3369,27 @@ app.get('/api/intelligence/purchase-plan', authMiddleware, async (req, res) => {
 });
 
 // ========== 🧠 INTELIGENCIA - SOBRESTOCK ==========
+// Festivos Galicia 2026 - tratar como sábados
+const FESTIVOS_GALICIA = [
+    '2026-01-01', '2026-01-06', '2026-04-09', '2026-04-10',
+    '2026-05-01', '2026-05-17', '2026-07-25', '2026-08-15',
+    '2026-10-12', '2026-11-01', '2026-12-06', '2026-12-08', '2026-12-25'
+];
+
 app.get('/api/intelligence/overstock', authMiddleware, async (req, res) => {
     try {
+        // Calcular día efectivo (festivos = sábado)
+        const hoy = new Date().toISOString().split('T')[0];
+        const esFestivo = FESTIVOS_GALICIA.includes(hoy);
+        const diaActual = esFestivo ? 6 : new Date().getDay();
+
         const result = await pool.query(`
-            WITH consumo_diario AS (
+            WITH consumo_por_dia AS (
                 SELECT 
                     ri.ingrediente_id,
-                    SUM(ri.cantidad * v.cantidad) / NULLIF(COUNT(DISTINCT v.fecha), 0) as consumo_promedio_diario
+                    EXTRACT(DOW FROM v.fecha) as dia_semana,
+                    SUM(ri.cantidad * v.cantidad) as consumo_total,
+                    COUNT(DISTINCT v.fecha) as dias_contados
                 FROM ventas v
                 JOIN recetas r ON r.id = v.receta_id
                 CROSS JOIN LATERAL jsonb_array_elements(r.ingredientes) AS ri_json
@@ -3383,30 +3399,28 @@ app.get('/api/intelligence/overstock', authMiddleware, async (req, res) => {
                         (ri_json->>'cantidad')::numeric as cantidad
                 ) ri
                 WHERE v.restaurante_id = $1
-                  AND v.fecha >= CURRENT_DATE - INTERVAL '30 days'
-                GROUP BY ri.ingrediente_id
+                  AND v.fecha >= CURRENT_DATE - INTERVAL '8 weeks'
+                GROUP BY ri.ingrediente_id, EXTRACT(DOW FROM v.fecha)
+            ),
+            consumo_dia_actual AS (
+                SELECT 
+                    ingrediente_id,
+                    consumo_total / NULLIF(dias_contados, 0) as consumo_dia
+                FROM consumo_por_dia
+                WHERE dia_semana = $2
             )
             SELECT 
-                i.id,
-                i.nombre,
-                i.familia,
-                i.stock_actual,
-                i.unidad,
-                COALESCE(c.consumo_promedio_diario, 0) as consumo_diario,
-                CASE 
-                    WHEN COALESCE(c.consumo_promedio_diario, 0) > 0 
-                    THEN i.stock_actual / c.consumo_promedio_diario 
-                    ELSE 999 
-                END as dias_stock
+                i.id, i.nombre, i.familia, i.stock_actual, i.unidad,
+                COALESCE(c.consumo_dia, 0) as consumo_diario,
+                CASE WHEN COALESCE(c.consumo_dia, 0) > 0 
+                    THEN i.stock_actual / c.consumo_dia ELSE 999 END as dias_stock
             FROM ingredientes i
-            LEFT JOIN consumo_diario c ON c.ingrediente_id = i.id
-            WHERE i.restaurante_id = $1
-              AND i.stock_actual > 0
-              AND COALESCE(c.consumo_promedio_diario, 0) > 0
+            LEFT JOIN consumo_dia_actual c ON c.ingrediente_id = i.id
+            WHERE i.restaurante_id = $1 AND i.stock_actual > 0
+              AND COALESCE(c.consumo_dia, 0) > 0
             ORDER BY dias_stock DESC
-        `, [req.restauranteId]);
+        `, [req.restauranteId, diaActual]);
 
-        // Solo mostrar productos frescos (carne, pescado, marisco)
         const FAMILIAS_FRESCAS = ['carne', 'pescado', 'marisco'];
         const UMBRAL_DIAS = { 'marisco': 3, 'pescado': 3, 'carne': 5, 'default': 7 };
 
