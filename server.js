@@ -3331,7 +3331,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, '0.0.0.0', () => {
     log('info', 'Servidor iniciado', { port: PORT, version: '2.3.0', cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
-    console.log(`📍 La Caleta 102 Dashboard API v2.3`);
+    console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
 
     // ========== UPTIME KUMA HEARTBEAT ==========
