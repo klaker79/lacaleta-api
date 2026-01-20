@@ -3278,8 +3278,7 @@ app.get('/api/intelligence/freshness', authMiddleware, async (req, res) => {
                 c.fecha_recepcion
             FROM compras_recientes c
             JOIN ingredientes i ON i.id = c.ingrediente_id::int
-            WHERE i.deleted_at IS NULL
-              AND i.stock_actual > 0
+            WHERE i.stock_actual > 0
             ORDER BY c.dias_desde_compra DESC
         `, [req.restauranteId]);
 
