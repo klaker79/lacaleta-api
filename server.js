@@ -3402,12 +3402,16 @@ app.get('/api/intelligence/overstock', authMiddleware, async (req, res) => {
             ORDER BY dias_stock DESC
         `, [req.restauranteId]);
 
-        const UMBRAL_DIAS = { 'marisco': 3, 'pescado': 3, 'default': 14 };
+        // Solo mostrar productos frescos (carne, pescado, marisco)
+        const FAMILIAS_FRESCAS = ['carne', 'pescado', 'marisco'];
+        const UMBRAL_DIAS = { 'marisco': 3, 'pescado': 3, 'carne': 5, 'default': 7 };
 
-        const sobrestock = result.rows.filter(r => {
-            const umbral = UMBRAL_DIAS[r.familia?.toLowerCase()] || UMBRAL_DIAS['default'];
-            return parseFloat(r.dias_stock) > umbral;
-        });
+        const sobrestock = result.rows
+            .filter(r => FAMILIAS_FRESCAS.includes(r.familia?.toLowerCase()))
+            .filter(r => {
+                const umbral = UMBRAL_DIAS[r.familia?.toLowerCase()] || UMBRAL_DIAS['default'];
+                return parseFloat(r.dias_stock) > umbral;
+            });
 
         res.json(sobrestock);
     } catch (err) {
