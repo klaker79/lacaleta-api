@@ -3434,7 +3434,7 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
         `, [req.restauranteId]);
 
         const ingredientes = await pool.query(`
-            SELECT id, nombre, precio_compra, cantidad_por_formato
+            SELECT id, nombre, precio, cantidad_por_formato
             FROM ingredientes 
             WHERE restaurante_id = $1
         `, [req.restauranteId]);
@@ -3442,8 +3442,8 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
         const ingMap = {};
         ingredientes.rows.forEach(i => {
             const precioUnitario = i.cantidad_por_formato > 0
-                ? parseFloat(i.precio_compra) / i.cantidad_por_formato
-                : parseFloat(i.precio_compra);
+                ? parseFloat(i.precio) / i.cantidad_por_formato
+                : parseFloat(i.precio);
             ingMap[i.id] = precioUnitario;
         });
 
