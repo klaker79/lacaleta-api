@@ -3304,6 +3304,184 @@ app.get('/api/intelligence/freshness', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== 🧠 INTELIGENCIA - PLAN COMPRAS ==========
+app.get('/api/intelligence/purchase-plan', authMiddleware, async (req, res) => {
+    try {
+        const targetDay = parseInt(req.query.day) || 6; // Sábado por defecto
+        const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+        const result = await pool.query(`
+            WITH consumo_por_dia AS (
+                SELECT 
+                    EXTRACT(DOW FROM v.fecha) as dia_semana,
+                    ri.ingrediente_id,
+                    SUM(ri.cantidad * v.cantidad) as consumo_total,
+                    COUNT(DISTINCT v.fecha) as dias_distintos
+                FROM ventas v
+                JOIN recetas r ON r.id = v.receta_id
+                CROSS JOIN LATERAL jsonb_array_elements(r.ingredientes) AS ri_json
+                CROSS JOIN LATERAL (
+                    SELECT 
+                        (ri_json->>'ingredienteId')::int as ingrediente_id,
+                        (ri_json->>'cantidad')::numeric as cantidad
+                ) ri
+                WHERE v.restaurante_id = $1
+                  AND v.fecha >= CURRENT_DATE - INTERVAL '8 weeks'
+                GROUP BY EXTRACT(DOW FROM v.fecha), ri.ingrediente_id
+            )
+            SELECT 
+                i.id,
+                i.nombre,
+                i.familia,
+                i.stock_actual,
+                i.unidad,
+                COALESCE(c.consumo_total / NULLIF(c.dias_distintos, 0), 0) as consumo_promedio,
+                COALESCE(c.consumo_total / NULLIF(c.dias_distintos, 0), 0) * 1.2 as par_level,
+                i.stock_actual - (COALESCE(c.consumo_total / NULLIF(c.dias_distintos, 0), 0) * 1.2) as diferencia
+            FROM ingredientes i
+            LEFT JOIN consumo_por_dia c ON c.ingrediente_id = i.id AND c.dia_semana = $2
+            WHERE i.restaurante_id = $1
+              AND c.consumo_total > 0
+            ORDER BY diferencia ASC
+        `, [req.restauranteId, targetDay]);
+
+        const sugerencias = result.rows
+            .filter(r => parseFloat(r.diferencia) < 0)
+            .map(r => ({
+                ...r,
+                sugerencia_pedido: Math.abs(parseFloat(r.diferencia))
+            }));
+
+        res.json({
+            dia_objetivo: DIAS[targetDay],
+            sugerencias
+        });
+    } catch (err) {
+        log('error', 'Error en intelligence/purchase-plan', { error: err.message });
+        res.status(500).json({ error: 'Error interno', sugerencias: [] });
+    }
+});
+
+// ========== 🧠 INTELIGENCIA - SOBRESTOCK ==========
+app.get('/api/intelligence/overstock', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            WITH consumo_diario AS (
+                SELECT 
+                    ri.ingrediente_id,
+                    SUM(ri.cantidad * v.cantidad) / NULLIF(COUNT(DISTINCT v.fecha), 0) as consumo_promedio_diario
+                FROM ventas v
+                JOIN recetas r ON r.id = v.receta_id
+                CROSS JOIN LATERAL jsonb_array_elements(r.ingredientes) AS ri_json
+                CROSS JOIN LATERAL (
+                    SELECT 
+                        (ri_json->>'ingredienteId')::int as ingrediente_id,
+                        (ri_json->>'cantidad')::numeric as cantidad
+                ) ri
+                WHERE v.restaurante_id = $1
+                  AND v.fecha >= CURRENT_DATE - INTERVAL '30 days'
+                GROUP BY ri.ingrediente_id
+            )
+            SELECT 
+                i.id,
+                i.nombre,
+                i.familia,
+                i.stock_actual,
+                i.unidad,
+                COALESCE(c.consumo_promedio_diario, 0) as consumo_diario,
+                CASE 
+                    WHEN COALESCE(c.consumo_promedio_diario, 0) > 0 
+                    THEN i.stock_actual / c.consumo_promedio_diario 
+                    ELSE 999 
+                END as dias_stock
+            FROM ingredientes i
+            LEFT JOIN consumo_diario c ON c.ingrediente_id = i.id
+            WHERE i.restaurante_id = $1
+              AND i.stock_actual > 0
+              AND COALESCE(c.consumo_promedio_diario, 0) > 0
+            ORDER BY dias_stock DESC
+        `, [req.restauranteId]);
+
+        const UMBRAL_DIAS = { 'marisco': 3, 'pescado': 3, 'default': 14 };
+
+        const sobrestock = result.rows.filter(r => {
+            const umbral = UMBRAL_DIAS[r.familia?.toLowerCase()] || UMBRAL_DIAS['default'];
+            return parseFloat(r.dias_stock) > umbral;
+        });
+
+        res.json(sobrestock);
+    } catch (err) {
+        log('error', 'Error en intelligence/overstock', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// ========== 🧠 INTELIGENCIA - REVISION PRECIOS ==========
+app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
+    try {
+        const TARGET_FOOD_COST = 35;
+        const ALERT_THRESHOLD = 40;
+
+        const result = await pool.query(`
+            SELECT 
+                r.id,
+                r.nombre,
+                r.precio_venta,
+                r.ingredientes
+            FROM recetas r
+            WHERE r.restaurante_id = $1
+              AND r.precio_venta > 0
+        `, [req.restauranteId]);
+
+        const ingredientes = await pool.query(`
+            SELECT id, nombre, precio_compra, cantidad_por_formato
+            FROM ingredientes 
+            WHERE restaurante_id = $1
+        `, [req.restauranteId]);
+
+        const ingMap = {};
+        ingredientes.rows.forEach(i => {
+            const precioUnitario = i.cantidad_por_formato > 0
+                ? parseFloat(i.precio_compra) / i.cantidad_por_formato
+                : parseFloat(i.precio_compra);
+            ingMap[i.id] = precioUnitario;
+        });
+
+        const recetasProblema = result.rows
+            .map(r => {
+                let coste = 0;
+                if (r.ingredientes && Array.isArray(r.ingredientes)) {
+                    r.ingredientes.forEach(ing => {
+                        const precioIng = ingMap[ing.ingredienteId] || 0;
+                        coste += precioIng * (ing.cantidad || 0);
+                    });
+                }
+                const precioVenta = parseFloat(r.precio_venta) || 0;
+                const foodCost = precioVenta > 0 ? (coste / precioVenta) * 100 : 0;
+                const precioSugerido = coste / (TARGET_FOOD_COST / 100);
+
+                return {
+                    id: r.id,
+                    nombre: r.nombre,
+                    coste,
+                    precio_actual: precioVenta,
+                    food_cost: Math.round(foodCost),
+                    precio_sugerido: precioSugerido
+                };
+            })
+            .filter(r => r.food_cost > ALERT_THRESHOLD);
+
+        res.json({
+            objetivo: TARGET_FOOD_COST,
+            umbral_alerta: ALERT_THRESHOLD,
+            recetas_problema: recetasProblema
+        });
+    } catch (err) {
+        log('error', 'Error en intelligence/price-check', { error: err.message });
+        res.status(500).json({ error: 'Error interno', recetas_problema: [] });
+    }
+});
+
 // ========== 404 ==========
 app.use((req, res) => {
     res.status(404).json({
