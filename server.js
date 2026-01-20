@@ -3247,6 +3247,73 @@ app.use((req, res) => {
     });
 });
 
+// ========== 🧠 INTELIGENCIA - ENDPOINT FRESCURA ==========
+// Días de vida útil por familia (estándares industria marisquería)
+const VIDA_UTIL_DIAS = {
+    'pescado': 2,
+    'marisco': 2,
+    'carne': 4,
+    'verdura': 5,
+    'lacteo': 5,
+    'bebida': 30,
+    'alimento': 4,
+    'default': 7
+};
+
+app.get('/api/intelligence/freshness', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            WITH compras_recientes AS (
+                SELECT 
+                    p.id as pedido_id,
+                    p.fecha_recepcion,
+                    CURRENT_DATE - p.fecha_recepcion::date as dias_desde_compra,
+                    ing->>'ingredienteId' as ingrediente_id,
+                    (ing->>'cantidad')::numeric as cantidad_comprada
+                FROM pedidos p
+                CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
+                WHERE p.restaurante_id = $1
+                  AND p.estado = 'recibido'
+                  AND p.fecha_recepcion IS NOT NULL
+                  AND p.fecha_recepcion >= CURRENT_DATE - INTERVAL '7 days'
+            )
+            SELECT 
+                i.id,
+                i.nombre,
+                i.familia,
+                i.stock_actual,
+                i.unidad,
+                c.dias_desde_compra,
+                c.fecha_recepcion
+            FROM compras_recientes c
+            JOIN ingredientes i ON i.id = c.ingrediente_id::int
+            WHERE i.deleted_at IS NULL
+              AND i.stock_actual > 0
+            ORDER BY c.dias_desde_compra DESC
+        `, [req.restauranteId]);
+
+        const alertas = result.rows
+            .map(row => {
+                const familia = (row.familia || 'default').toLowerCase();
+                const vidaUtil = VIDA_UTIL_DIAS[familia] || VIDA_UTIL_DIAS['default'];
+                const diasRestantes = vidaUtil - (row.dias_desde_compra || 0);
+
+                return {
+                    ...row,
+                    vida_util: vidaUtil,
+                    dias_restantes: diasRestantes,
+                    urgencia: diasRestantes <= 0 ? 'critico' : diasRestantes === 1 ? 'hoy' : diasRestantes <= 2 ? 'mañana' : 'ok'
+                };
+            })
+            .filter(a => a.dias_restantes <= 2);
+
+        res.json(alertas);
+    } catch (err) {
+        log('error', 'Error en intelligence/freshness', { error: err.message });
+        res.status(500).json({ error: 'Error interno', alertas: [] });
+    }
+});
+
 // ========== ERROR HANDLER GLOBAL ==========
 app.use((err, req, res, next) => {
     log('error', 'Error no manejado', {
