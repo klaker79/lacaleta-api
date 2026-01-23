@@ -1802,10 +1802,10 @@ app.get('/api/recipes', authMiddleware, async (req, res) => {
 
 app.post('/api/recipes', authMiddleware, async (req, res) => {
     try {
-        const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
+        const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
         const result = await pool.query(
-            'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), req.restauranteId]
+            'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, codigo, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), codigo || null, req.restauranteId]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -1817,10 +1817,10 @@ app.post('/api/recipes', authMiddleware, async (req, res) => {
 app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, categoria, precio_venta, porciones, ingredientes } = req.body;
+        const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
         const result = await pool.query(
-            'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5 WHERE id=$6 AND restaurante_id=$7 RETURNING *',
-            [nombre, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), id, req.restauranteId]
+            'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6 WHERE id=$7 AND restaurante_id=$8 RETURNING *',
+            [nombre, categoria, precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), codigo || null, id, req.restauranteId]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
