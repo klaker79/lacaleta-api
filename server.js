@@ -2049,8 +2049,8 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
 app.post('/api/sales', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        // ⚡ NUEVO: Capturar variante y precio personalizado
-        const { recetaId, cantidad, varianteId, precioVariante } = req.body;
+        // ⚡ NUEVO: Capturar variante, precio personalizado y fecha
+        const { recetaId, cantidad, varianteId, precioVariante, fecha } = req.body;
 
         // Validar cantidad
         const cantidadValidada = validateCantidad(cantidad);
@@ -2107,9 +2107,12 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         }
         */
 
+        // 📅 Usar fecha proporcionada o NOW() por defecto
+        const fechaVenta = fecha ? new Date(fecha) : new Date();
+
         const ventaResult = await client.query(
-            'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, restaurante_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [recetaId, cantidadValidada, precioUnitario, total, req.restauranteId]
+            'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [recetaId, cantidadValidada, precioUnitario, total, fechaVenta, req.restauranteId]
         );
 
         // ⚡ NUEVO: Aplicar factor de variante al descuento de stock
