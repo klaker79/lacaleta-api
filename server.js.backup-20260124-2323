@@ -1738,18 +1738,13 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
         }
 
         // Query 2: Todos los precios de ingredientes en UNA query
-        // 🔧 FIX: Incluir cantidad_por_formato para calcular precio UNITARIO
         const ingredientesResult = await pool.query(
-            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1',
             [req.restauranteId]
         );
         const preciosMap = new Map();
         ingredientesResult.rows.forEach(ing => {
-            // ✅ Precio unitario = precio del formato / cantidad en el formato
-            const precioFormato = parseFloat(ing.precio) || 0;
-            const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
-            const precioUnitario = precioFormato / cantidadPorFormato;
-            preciosMap.set(ing.id, precioUnitario);
+            preciosMap.set(ing.id, parseFloat(ing.precio) || 0);
         });
 
         const analisis = [];
