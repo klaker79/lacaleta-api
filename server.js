@@ -1079,20 +1079,50 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato } = req.body;
+        const body = req.body;
 
-        // Validación numérica segura (previene NaN, valores negativos)
-        const finalPrecio = validatePrecio(precio);
-        const finalStockActual = validateCantidad(stockActual ?? stock_actual);
-        const finalStockMinimo = validateCantidad(stockMinimo ?? stock_minimo);
-        const finalProveedorId = proveedorId ?? proveedor_id ?? null;
-        const finalFamilia = familia || 'alimento';
-        const finalFormatoCompra = formato_compra || null;
-        const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;
+        // 🔒 FIX CRÍTICO: Primero obtener valores ACTUALES del ingrediente
+        // Esto previene sobrescribir campos con valores por defecto cuando no vienen en el request
+        const existingResult = await pool.query(
+            'SELECT * FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+            [id, req.restauranteId]
+        );
+
+        if (existingResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado' });
+        }
+
+        const existing = existingResult.rows[0];
+
+        // 🔒 Merge: Solo actualizar campos que vengan EXPLÍCITAMENTE en el request
+        // Si un campo no viene o es undefined, mantener el valor existente
+        const finalNombre = body.nombre !== undefined ? body.nombre : existing.nombre;
+        const finalProveedorId = body.proveedorId !== undefined ? body.proveedorId :
+            (body.proveedor_id !== undefined ? body.proveedor_id : existing.proveedor_id);
+        const finalPrecio = body.precio !== undefined ? validatePrecio(body.precio) : parseFloat(existing.precio) || 0;
+        const finalUnidad = body.unidad !== undefined ? body.unidad : existing.unidad;
+        const finalStockActual = (body.stockActual !== undefined || body.stock_actual !== undefined)
+            ? validateCantidad(body.stockActual ?? body.stock_actual)
+            : parseFloat(existing.stock_actual) || 0;
+        const finalStockMinimo = (body.stockMinimo !== undefined || body.stock_minimo !== undefined)
+            ? validateCantidad(body.stockMinimo ?? body.stock_minimo)
+            : parseFloat(existing.stock_minimo) || 0;
+        const finalFamilia = body.familia !== undefined ? body.familia : (existing.familia || 'alimento');
+        const finalFormatoCompra = body.formato_compra !== undefined ? body.formato_compra : existing.formato_compra;
+        const finalCantidadPorFormato = body.cantidad_por_formato !== undefined
+            ? (body.cantidad_por_formato ? validateCantidad(body.cantidad_por_formato) : null)
+            : existing.cantidad_por_formato;
+
+        // Log para debug (remover en producción)
+        log('info', 'Actualizando ingrediente con preservación de datos', {
+            id,
+            cambios: Object.keys(body).filter(k => body[k] !== undefined),
+            cantidadPorFormato: { antes: existing.cantidad_por_formato, despues: finalCantidadPorFormato }
+        });
 
         const result = await pool.query(
             'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
-            [nombre, finalProveedorId, finalPrecio, unidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
+            [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
