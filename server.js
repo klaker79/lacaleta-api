@@ -1270,9 +1270,10 @@ app.post('/api/ingredients/:id/suppliers', authMiddleware, async (req, res) => {
                 [id]
             );
             // Actualizar también en tabla ingredientes para compatibilidad
+            // ⚠️ PROTECCIÓN: NO sobrescribir precio del ingrediente
             await pool.query(
-                'UPDATE ingredientes SET proveedor_id = $1, precio = $2 WHERE id = $3',
-                [proveedor_id, precioNum, id]
+                'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2',
+                [proveedor_id, id]
             );
         }
 
@@ -1317,18 +1318,11 @@ app.put('/api/ingredients/:id/suppliers/:supplierId', authMiddleware, async (req
                 [id]
             );
             // Actualizar tabla ingredientes para compatibilidad
-            const precioActual = precio !== undefined ? parseFloat(precio) : null;
-            if (precioActual !== null) {
-                await pool.query(
-                    'UPDATE ingredientes SET proveedor_id = $1, precio = $2 WHERE id = $3',
-                    [supplierId, precioActual, id]
-                );
-            } else {
-                await pool.query(
-                    'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2',
-                    [supplierId, id]
-                );
-            }
+            // ⚠️ PROTECCIÓN: NO sobrescribir precio del ingrediente
+            await pool.query(
+                'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2',
+                [supplierId, id]
+            );
         }
 
         // Construir query dinámico
