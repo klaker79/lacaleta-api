@@ -3787,30 +3787,6 @@ app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
     }
 });
 
-// ========== 404 ==========
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Ruta no encontrada',
-        path: req.originalUrl,
-        method: req.method
-    });
-});
-
-
-
-// ========== ERROR HANDLER GLOBAL ==========
-app.use((err, req, res, next) => {
-    log('error', 'Error no manejado', {
-        error: err.message,
-        stack: err.stack,
-        url: req.originalUrl
-    });
-    res.status(500).json({
-        error: 'Error interno del servidor',
-        message: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
-});
-
 // ========== HEALTH CHECK ENDPOINT (READ ONLY) ==========
 app.get('/api/system/health-check', authMiddleware, async (req, res) => {
     try {
@@ -3902,6 +3878,30 @@ app.get('/api/system/health-check', authMiddleware, async (req, res) => {
         log('error', 'Error en health-check', { error: err.message });
         res.status(500).json({ error: 'Error ejecutando health check', message: err.message });
     }
+});
+
+// ========== 404 ==========
+app.use((req, res) => {
+    res.status(404).json({
+        error: 'Ruta no encontrada',
+        path: req.originalUrl,
+        method: req.method
+    });
+});
+
+
+
+// ========== ERROR HANDLER GLOBAL ==========
+app.use((err, req, res, next) => {
+    log('error', 'Error no manejado', {
+        error: err.message,
+        stack: err.stack,
+        url: req.originalUrl
+    });
+    res.status(500).json({
+        error: 'Error interno del servidor',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
 });
 
 // ========== INICIAR SERVIDOR ==========
