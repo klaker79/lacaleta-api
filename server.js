@@ -3811,6 +3811,99 @@ app.use((err, req, res, next) => {
     });
 });
 
+// ========== HEALTH CHECK ENDPOINT (READ ONLY) ==========
+app.get('/api/system/health-check', verificarToken, async (req, res) => {
+    try {
+        const restauranteId = req.restauranteId;
+        const results = {};
+
+        // 1. Conexión DB
+        try {
+            await pool.query('SELECT 1');
+            results.database = { ok: true, message: 'Conexión OK' };
+        } catch (err) {
+            results.database = { ok: false, message: err.message };
+        }
+
+        // 2. Recetas sin ingredientes
+        const recetasSinIng = await pool.query(`
+            SELECT id, nombre FROM recetas 
+            WHERE restaurante_id = $1 AND deleted_at IS NULL
+            AND (ingredientes IS NULL OR ingredientes::text = '[]')
+        `, [restauranteId]);
+        results.recetasSinIngredientes = {
+            ok: recetasSinIng.rows.length === 0,
+            count: recetasSinIng.rows.length,
+            items: recetasSinIng.rows.slice(0, 10)
+        };
+
+        // 3. Stock negativo
+        const stockNegativo = await pool.query(`
+            SELECT id, nombre, stock_actual, unidad FROM ingredientes 
+            WHERE restaurante_id = $1 AND stock_actual < 0
+            ORDER BY stock_actual LIMIT 10
+        `, [restauranteId]);
+        results.stockNegativo = {
+            ok: stockNegativo.rows.length === 0,
+            count: stockNegativo.rows.length,
+            items: stockNegativo.rows
+        };
+
+        // 4. Vinos sin ingrediente
+        const vinosSinIng = await pool.query(`
+            SELECT id, nombre FROM recetas 
+            WHERE restaurante_id = $1 AND deleted_at IS NULL
+            AND nombre ILIKE '%vino%'
+            AND (ingredientes IS NULL OR ingredientes::text = '[]')
+        `, [restauranteId]);
+        results.vinosSinIngrediente = {
+            ok: vinosSinIng.rows.length === 0,
+            count: vinosSinIng.rows.length,
+            items: vinosSinIng.rows
+        };
+
+        // 5. Valor Stock
+        const valorStock = await pool.query(`
+            SELECT 
+                SUM(stock_actual * (precio / COALESCE(NULLIF(cantidad_por_formato, 0), 1))) as valor,
+                COUNT(*) as items
+            FROM ingredientes WHERE restaurante_id = $1 AND stock_actual > 0
+        `, [restauranteId]);
+        results.valorStock = {
+            valor: parseFloat(valorStock.rows[0].valor) || 0,
+            items: parseInt(valorStock.rows[0].items) || 0
+        };
+
+        // 6. Ventas hoy
+        const today = new Date().toISOString().split('T')[0];
+        const ventasHoy = await pool.query(`
+            SELECT COUNT(*) as num, COALESCE(SUM(total), 0) as total
+            FROM ventas WHERE restaurante_id = $1 AND fecha::date = $2 AND deleted_at IS NULL
+        `, [restauranteId, today]);
+        results.ventasHoy = {
+            fecha: today,
+            num_ventas: parseInt(ventasHoy.rows[0].num),
+            total: parseFloat(ventasHoy.rows[0].total)
+        };
+
+        // Resumen
+        const allOk = results.database.ok &&
+            results.recetasSinIngredientes.ok &&
+            results.stockNegativo.ok &&
+            results.vinosSinIngrediente.ok;
+
+        res.json({
+            status: allOk ? 'healthy' : 'issues_detected',
+            timestamp: new Date().toISOString(),
+            restauranteId,
+            checks: results
+        });
+    } catch (err) {
+        log('error', 'Error en health-check', { error: err.message });
+        res.status(500).json({ error: 'Error ejecutando health check', message: err.message });
+    }
+});
+
 // ========== INICIAR SERVIDOR ==========
 app.listen(PORT, '0.0.0.0', () => {
     log('info', 'Servidor iniciado', { port: PORT, version: '2.3.0', cors: ALLOWED_ORIGINS });
