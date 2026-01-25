@@ -2145,14 +2145,16 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         );
 
         // ⚡ NUEVO: Aplicar factor de variante al descuento de stock
+        // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
+        const porciones = parseInt(receta.porciones) || 1;
         for (const ing of ingredientesReceta) {
             // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
             await client.query(
                 'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
                 [ing.ingredienteId]
             );
-            // Cantidad a descontar = cantidad_receta × cantidad_vendida × factor_variante
-            const cantidadADescontar = (ing.cantidad || 0) * cantidadValidada * factorVariante;
+            // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
+            const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidadValidada * factorVariante;
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
                 [cantidadADescontar, ing.ingredienteId]
@@ -2474,9 +2476,12 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             );
 
             // Descontar stock (aplicando factor de variante)
+            // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
+            const porciones = parseInt(receta.porciones) || 1;
             if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
                 for (const ing of ingredientesReceta) {
-                    const cantidadADescontar = (ing.cantidad || 0) * cantidad * factorAplicado;
+                    // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor
+                    const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad * factorAplicado;
                     if (cantidadADescontar > 0 && ing.ingredienteId) {
                         // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
                         await client.query(
