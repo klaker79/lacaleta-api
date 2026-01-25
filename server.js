@@ -2173,22 +2173,72 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
-        // SOFT DELETE: marca como eliminado sin borrar datos
-        const result = await pool.query(
-            'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
+        await client.query('BEGIN');
+
+        // 1. Obtener la venta antes de borrarla
+        const ventaResult = await client.query(
+            'SELECT * FROM ventas WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL',
             [req.params.id, req.restauranteId]
         );
-        if (result.rows.length === 0) {
+
+        if (ventaResult.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Venta no encontrada o ya eliminada' });
         }
-        log('info', 'Venta soft deleted', { id: req.params.id });
-        res.json({ message: 'Eliminado', id: result.rows[0].id });
+
+        const venta = ventaResult.rows[0];
+
+        // 2. Obtener la receta para saber qué ingredientes restaurar
+        const recetaResult = await client.query(
+            'SELECT * FROM recetas WHERE id = $1',
+            [venta.receta_id]
+        );
+
+        if (recetaResult.rows.length > 0) {
+            const receta = recetaResult.rows[0];
+            const ingredientesReceta = receta.ingredientes || [];
+            const porciones = parseInt(receta.porciones) || 1;
+
+            // 3. Restaurar stock de cada ingrediente (inverso del descuento)
+            for (const ing of ingredientesReceta) {
+                if (ing.ingredienteId && ing.cantidad) {
+                    // Cantidad a restaurar = (cantidad_receta ÷ porciones) × cantidad_vendida
+                    const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad;
+
+                    await client.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                        [cantidadARestaurar, ing.ingredienteId, req.restauranteId]
+                    );
+
+                    log('info', 'Stock restaurado por eliminación de venta', {
+                        ingredienteId: ing.ingredienteId,
+                        cantidad: cantidadARestaurar,
+                        ventaId: venta.id
+                    });
+                }
+            }
+        }
+
+        // 4. SOFT DELETE: marca como eliminado
+        await client.query(
+            'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1',
+            [req.params.id]
+        );
+
+        await client.query('COMMIT');
+        log('info', 'Venta eliminada con stock restaurado', { id: req.params.id });
+        res.json({ message: 'Eliminado y stock restaurado', id: venta.id });
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error eliminando venta', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
+
 
 // ========== ENDPOINT: PARSEAR PDF DE TPV CON IA ==========
 // Recibe un PDF del TPV y extrae los datos de ventas usando Claude API
