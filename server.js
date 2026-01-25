@@ -3812,7 +3812,7 @@ app.use((err, req, res, next) => {
 });
 
 // ========== HEALTH CHECK ENDPOINT (READ ONLY) ==========
-app.get('/api/system/health-check', verificarToken, async (req, res) => {
+app.get('/api/system/health-check', authMiddleware, async (req, res) => {
     try {
         const restauranteId = req.restauranteId;
         const results = {};
