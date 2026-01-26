@@ -1,6 +1,6 @@
 {
   "name": "la-caleta-api",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "API para Dashboard La Caleta 102 - MindLoop CostOS",
   "main": "server.js",
   "scripts": {
