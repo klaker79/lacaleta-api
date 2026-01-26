@@ -3641,33 +3641,57 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
 app.post('/api/mermas', authMiddleware, async (req, res) => {
     try {
         const { mermas } = req.body;
+        log('info', 'Recibiendo mermas', {
+            count: mermas?.length,
+            restauranteId: req.restauranteId,
+            body: JSON.stringify(mermas).substring(0, 500)
+        });
+
         if (!mermas || !Array.isArray(mermas)) {
             return res.status(400).json({ error: 'Se requiere array de mermas' });
         }
 
+        let insertados = 0;
         for (const m of mermas) {
-            await pool.query(`
-                INSERT INTO mermas 
-                (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            `, [
-                m.ingredienteId,
-                m.ingredienteNombre,
-                m.cantidad,
-                m.unidad || 'ud',
-                m.valorPerdida || 0,
-                m.motivo || 'otro',
-                m.nota || '',
-                m.responsableId || null,
-                req.restauranteId
-            ]);
+            try {
+                // Validar que ingredienteId existe o usar NULL
+                const ingredienteId = m.ingredienteId ? parseInt(m.ingredienteId) : null;
+
+                await pool.query(`
+                    INSERT INTO mermas 
+                    (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                `, [
+                    ingredienteId,
+                    m.ingredienteNombre || 'Sin nombre',
+                    parseFloat(m.cantidad) || 0,
+                    m.unidad || 'ud',
+                    parseFloat(m.valorPerdida) || 0,
+                    m.motivo || 'Otros',
+                    m.nota || '',
+                    m.responsableId ? parseInt(m.responsableId) : null,
+                    req.restauranteId
+                ]);
+                insertados++;
+            } catch (insertErr) {
+                log('error', 'Error insertando merma individual', {
+                    merma: JSON.stringify(m),
+                    error: insertErr.message,
+                    stack: insertErr.stack
+                });
+                // Continuar con las demás mermas
+            }
         }
 
-        log('info', `Registradas ${mermas.length} mermas`, { restauranteId: req.restauranteId });
-        res.json({ success: true, count: mermas.length });
+        log('info', `Registradas ${insertados}/${mermas.length} mermas`, { restauranteId: req.restauranteId });
+        res.json({ success: true, count: insertados });
     } catch (err) {
-        log('error', 'Error registrando mermas', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
+        log('error', 'Error registrando mermas', {
+            error: err.message,
+            stack: err.stack,
+            body: JSON.stringify(req.body).substring(0, 1000)
+        });
+        res.status(500).json({ error: 'Error interno: ' + err.message });
     }
 });
 
