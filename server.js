@@ -3809,6 +3809,7 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
             }
         }
 
+        // DEBUG TEMPORAL: Quitar filtro de fecha para ver si hay mermas en BD
         const result = await pool.query(`
             SELECT 
                 m.id,
@@ -3824,16 +3825,12 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
             FROM mermas m
             LEFT JOIN ingredientes i ON m.ingrediente_id = i.id
             WHERE m.restaurante_id = $1
-              AND EXTRACT(MONTH FROM m.fecha) = $2
-              AND EXTRACT(YEAR FROM m.fecha) = $3
             ORDER BY m.fecha DESC, m.id DESC
-            LIMIT $4
-        `, [req.restauranteId, mesActual, anoActual, lim]);
+            LIMIT $2
+        `, [req.restauranteId, lim]);
 
-        log('info', `GET /api/mermas - Encontradas ${result.rows.length} mermas filtradas`, {
+        log('info', `GET /api/mermas - Encontradas ${result.rows.length} mermas (SIN FILTRO DE FECHA)`, {
             restauranteId: req.restauranteId,
-            mes: mesActual,
-            ano: anoActual,
             totalSinFiltro: countAll.rows[0].total,
             resultados: result.rows.length
         });
