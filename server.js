@@ -3788,6 +3788,27 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
 
         log('info', `Total mermas en BD para restaurante ${req.restauranteId}: ${countAll.rows[0].total}`);
 
+        // DEBUG: Obtener la última merma para ver qué fecha tiene
+        if (parseInt(countAll.rows[0].total) > 0) {
+            const ultimaMerma = await pool.query(`
+                SELECT id, fecha, EXTRACT(MONTH FROM fecha) as mes_db, EXTRACT(YEAR FROM fecha) as ano_db
+                FROM mermas 
+                WHERE restaurante_id = $1
+                ORDER BY id DESC LIMIT 1
+            `, [req.restauranteId]);
+
+            if (ultimaMerma.rows.length > 0) {
+                log('info', 'DEBUG - Última merma en BD', {
+                    id: ultimaMerma.rows[0].id,
+                    fecha: ultimaMerma.rows[0].fecha,
+                    mes_en_db: ultimaMerma.rows[0].mes_db,
+                    ano_en_db: ultimaMerma.rows[0].ano_db,
+                    mes_buscado: mesActual,
+                    ano_buscado: anoActual
+                });
+            }
+        }
+
         const result = await pool.query(`
             SELECT 
                 m.id,
