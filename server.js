@@ -3809,7 +3809,9 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
             }
         }
 
-        // DEBUG TEMPORAL: Quitar filtro de fecha para ver si hay mermas en BD
+        // DEBUG TEMPORAL: Quitar TODOS los filtros para confirmar que hay datos
+        log('info', `DEBUG - req.restauranteId value: ${req.restauranteId} (type: ${typeof req.restauranteId})`);
+
         const result = await pool.query(`
             SELECT 
                 m.id,
@@ -3821,18 +3823,19 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
                 m.motivo,
                 m.nota,
                 m.fecha,
+                m.restaurante_id,
                 i.nombre as ingrediente_actual
             FROM mermas m
             LEFT JOIN ingredientes i ON m.ingrediente_id = i.id
-            WHERE m.restaurante_id = $1
             ORDER BY m.fecha DESC, m.id DESC
-            LIMIT $2
-        `, [req.restauranteId, lim]);
+            LIMIT $1
+        `, [lim]);
 
-        log('info', `GET /api/mermas - Encontradas ${result.rows.length} mermas (SIN FILTRO DE FECHA)`, {
-            restauranteId: req.restauranteId,
+        log('info', `GET /api/mermas - Encontradas ${result.rows.length} mermas (SIN NINGUN FILTRO)`, {
+            reqRestauranteId: req.restauranteId,
             totalSinFiltro: countAll.rows[0].total,
-            resultados: result.rows.length
+            resultados: result.rows.length,
+            primerasMermas: result.rows.slice(0, 2).map(r => ({ id: r.id, restaurante_id: r.restaurante_id }))
         });
 
         res.json(result.rows || []);
