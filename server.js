@@ -3773,12 +3773,20 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
         const anoActual = parseInt(ano) || new Date().getFullYear();
         const lim = parseInt(limite) || 100;
 
-        log('info', 'Buscando mermas', {
+        log('info', 'GET /api/mermas - Buscando mermas', {
             restauranteId: req.restauranteId,
             mes: mesActual,
             ano: anoActual,
-            limite: lim
+            limite: lim,
+            queryParams: req.query
         });
+
+        // Primero, contar TODAS las mermas del restaurante sin filtro de fecha
+        const countAll = await pool.query(`
+            SELECT COUNT(*) as total FROM mermas WHERE restaurante_id = $1
+        `, [req.restauranteId]);
+
+        log('info', `Total mermas en BD para restaurante ${req.restauranteId}: ${countAll.rows[0].total}`);
 
         const result = await pool.query(`
             SELECT 
@@ -3801,15 +3809,17 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
             LIMIT $4
         `, [req.restauranteId, mesActual, anoActual, lim]);
 
-        log('info', `Encontradas ${result.rows.length} mermas`, {
+        log('info', `GET /api/mermas - Encontradas ${result.rows.length} mermas filtradas`, {
             restauranteId: req.restauranteId,
             mes: mesActual,
-            ano: anoActual
+            ano: anoActual,
+            totalSinFiltro: countAll.rows[0].total,
+            resultados: result.rows.length
         });
 
         res.json(result.rows || []);
     } catch (err) {
-        log('error', 'Error listando mermas', { error: err.message });
+        log('error', 'Error listando mermas', { error: err.message, stack: err.stack });
         res.status(500).json({ error: 'Error interno', data: [] });
     }
 });
