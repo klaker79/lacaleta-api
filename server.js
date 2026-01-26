@@ -1101,12 +1101,19 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
             (body.proveedor_id !== undefined ? body.proveedor_id : existing.proveedor_id);
         const finalPrecio = body.precio !== undefined ? validatePrecio(body.precio) : parseFloat(existing.precio) || 0;
         const finalUnidad = body.unidad !== undefined ? body.unidad : existing.unidad;
-        const finalStockActual = (body.stockActual !== undefined || body.stock_actual !== undefined)
-            ? validateCantidad(body.stockActual ?? body.stock_actual)
-            : parseFloat(existing.stock_actual) || 0;
-        const finalStockMinimo = (body.stockMinimo !== undefined || body.stock_minimo !== undefined)
-            ? validateCantidad(body.stockMinimo ?? body.stock_minimo)
-            : parseFloat(existing.stock_minimo) || 0;
+        // 🔒 FIX CRÍTICO: Priorizar stock_actual (snake_case del backend) sobre stockActual (camelCase legacy)
+        // Problema anterior: body.stockActual ?? body.stock_actual → si stockActual=0, usaba 0 aunque stock_actual=5
+        const finalStockActual = (body.stock_actual !== undefined)
+            ? validateCantidad(body.stock_actual)
+            : (body.stockActual !== undefined)
+                ? validateCantidad(body.stockActual)
+                : parseFloat(existing.stock_actual) || 0;
+
+        const finalStockMinimo = (body.stock_minimo !== undefined)
+            ? validateCantidad(body.stock_minimo)
+            : (body.stockMinimo !== undefined)
+                ? validateCantidad(body.stockMinimo)
+                : parseFloat(existing.stock_minimo) || 0;
         const finalFamilia = body.familia !== undefined ? body.familia : (existing.familia || 'alimento');
         const finalFormatoCompra = body.formato_compra !== undefined ? body.formato_compra : existing.formato_compra;
         const finalCantidadPorFormato = body.cantidad_por_formato !== undefined
