@@ -3768,6 +3768,13 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
         const anoActual = parseInt(ano) || new Date().getFullYear();
         const lim = parseInt(limite) || 100;
 
+        log('info', 'Buscando mermas', {
+            restauranteId: req.restauranteId,
+            mes: mesActual,
+            ano: anoActual,
+            limite: lim
+        });
+
         const result = await pool.query(`
             SELECT 
                 m.id,
@@ -3788,6 +3795,12 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
             ORDER BY m.fecha DESC, m.id DESC
             LIMIT $4
         `, [req.restauranteId, mesActual, anoActual, lim]);
+
+        log('info', `Encontradas ${result.rows.length} mermas`, {
+            restauranteId: req.restauranteId,
+            mes: mesActual,
+            ano: anoActual
+        });
 
         res.json(result.rows || []);
     } catch (err) {
