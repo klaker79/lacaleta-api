@@ -3664,10 +3664,14 @@ app.post('/api/mermas', authMiddleware, async (req, res) => {
                 // Validar que ingredienteId existe o usar NULL
                 const ingredienteId = m.ingredienteId ? parseInt(m.ingredienteId) : null;
 
+                // Calcular periodo_id como YYYYMM (ej: 202601 para enero 2026)
+                const now = new Date();
+                const periodoId = now.getFullYear() * 100 + (now.getMonth() + 1);
+
                 await pool.query(`
                     INSERT INTO mermas 
-                    (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id, periodo_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 `, [
                     ingredienteId,
                     m.ingredienteNombre || 'Sin nombre',
@@ -3677,7 +3681,8 @@ app.post('/api/mermas', authMiddleware, async (req, res) => {
                     m.motivo || 'Otros',
                     m.nota || '',
                     m.responsableId ? parseInt(m.responsableId) : null,
-                    req.restauranteId
+                    req.restauranteId,
+                    periodoId
                 ]);
                 insertados++;
             } catch (insertErr) {
