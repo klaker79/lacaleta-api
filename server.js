@@ -3954,6 +3954,58 @@ app.get('/api/mermas/resumen', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== 🗑️ MERMAS - BORRAR INDIVIDUAL ==========
+app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Obtener la merma antes de borrarla
+        const mermaResult = await client.query(
+            'SELECT * FROM mermas WHERE id = $1 AND restaurante_id = $2',
+            [req.params.id, req.restauranteId]
+        );
+
+        if (mermaResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Merma no encontrada' });
+        }
+
+        const merma = mermaResult.rows[0];
+
+        // 2. Restaurar stock del ingrediente (sumar la cantidad que se había restado)
+        if (merma.ingrediente_id && merma.cantidad > 0) {
+            await client.query(
+                `UPDATE ingredientes 
+                 SET stock_actual = stock_actual + $1, 
+                     ultima_actualizacion_stock = NOW() 
+                 WHERE id = $2 AND restaurante_id = $3`,
+                [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
+            );
+            log('info', 'Stock restaurado por eliminación de merma', {
+                ingredienteId: merma.ingrediente_id,
+                cantidad: merma.cantidad
+            });
+        }
+
+        // 3. Borrar la merma
+        await client.query(
+            'DELETE FROM mermas WHERE id = $1',
+            [req.params.id]
+        );
+
+        await client.query('COMMIT');
+        log('info', 'Merma eliminada', { id: req.params.id, ingrediente: merma.ingrediente_nombre });
+        res.json({ success: true, message: 'Merma eliminada y stock restaurado' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error eliminando merma', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
+    }
+});
+
 // ========== 🗑️ MERMAS - RESET MENSUAL ==========
 app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
     try {
