@@ -3760,6 +3760,17 @@ app.post('/api/mermas', authMiddleware, async (req, res) => {
                     req.restauranteId,
                     periodoId
                 ]);
+
+                // 🔒 FIX: Descontar stock del ingrediente
+                const cantidadMerma = parseFloat(m.cantidad) || 0;
+                if (ingredienteId && cantidadMerma > 0) {
+                    await pool.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual - $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                        [cantidadMerma, ingredienteId, req.restauranteId]
+                    );
+                    log('info', 'Stock descontado por merma', { ingredienteId, cantidad: cantidadMerma });
+                }
+
                 insertados++;
             } catch (insertErr) {
                 log('error', 'Error insertando merma individual', {
