@@ -2063,20 +2063,77 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
-        // SOFT DELETE: marca como eliminado sin borrar datos
-        const result = await pool.query(
-            'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
+        await client.query('BEGIN');
+
+        // 1. Obtener el pedido antes de borrarlo para saber qué borrar
+        const pedidoResult = await client.query(
+            'SELECT * FROM pedidos WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL',
             [req.params.id, req.restauranteId]
         );
-        if (result.rows.length === 0) {
+
+        if (pedidoResult.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Pedido no encontrado o ya eliminado' });
         }
-        log('info', 'Pedido soft deleted', { id: req.params.id });
-        res.json({ message: 'Eliminado', id: result.rows[0].id });
+
+        const pedido = pedidoResult.rows[0];
+
+        // 2. Si el pedido estaba recibido, borrar las compras diarias asociadas
+        if (pedido.estado === 'recibido' && pedido.ingredientes) {
+            const ingredientes = typeof pedido.ingredientes === 'string'
+                ? JSON.parse(pedido.ingredientes)
+                : pedido.ingredientes;
+
+            const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
+
+            for (const item of ingredientes) {
+                const ingId = item.ingredienteId || item.ingrediente_id;
+                const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+
+                // Borrar de precios_compra_diarios
+                await client.query(
+                    `DELETE FROM precios_compra_diarios 
+                     WHERE ingrediente_id = $1 
+                     AND fecha::date = $2::date 
+                     AND restaurante_id = $3`,
+                    [ingId, fechaRecepcion, req.restauranteId]
+                );
+
+                // Revertir el stock del ingrediente
+                if (cantidadRecibida > 0) {
+                    await client.query(
+                        `UPDATE ingredientes 
+                         SET stock_actual = stock_actual - $1, 
+                             ultima_actualizacion_stock = NOW() 
+                         WHERE id = $2 AND restaurante_id = $3`,
+                        [cantidadRecibida, ingId, req.restauranteId]
+                    );
+                }
+            }
+
+            log('info', 'Compras diarias y stock revertidos por borrado de pedido', {
+                pedidoId: req.params.id,
+                ingredientes: ingredientes.length
+            });
+        }
+
+        // 3. SOFT DELETE del pedido
+        await client.query(
+            'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1',
+            [req.params.id]
+        );
+
+        await client.query('COMMIT');
+        log('info', 'Pedido eliminado con cascading delete', { id: req.params.id, estado: pedido.estado });
+        res.json({ message: 'Eliminado', id: pedido.id });
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error eliminando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
