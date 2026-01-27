@@ -1774,7 +1774,7 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 
         const analisis = [];
         const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
-        const promedioPopularidad = totalVentasRestaurante / ventas.rows.length;
+        const promedioPopularidad = ventas.rows.length > 0 ? totalVentasRestaurante / ventas.rows.length : 0;
         let sumaMargenes = 0;
 
         // Calcular costes usando el Map (sin queries adicionales)
