@@ -12,7 +12,12 @@ const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
 
 // ========== RESEND (Email) ==========
-const resend = new Resend(process.env.RESEND_API_KEY || 're_8hWi8wSn_Px7T4JymbKP7s7mR4y3ioILc');
+// 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+if (!RESEND_API_KEY) {
+    console.warn('⚠️ RESEND_API_KEY no configurado - funcionalidad de email deshabilitada');
+}
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 // ========== CONFIGURACIÓN ==========
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -52,9 +57,19 @@ app.set('trust proxy', 1);
 app.use((req, res, next) => {
     const origin = req.headers.origin;
 
-    // Permitir requests sin origin (curl, Postman, healthchecks)
+    // 🔒 FIX SEGURIDAD: Solo permitir * para health checks, no para toda la API
     if (!origin || origin === '') {
-        res.header('Access-Control-Allow-Origin', '*');
+        // Rutas permitidas sin origin (health checks, métricas)
+        const publicPaths = ['/health', '/api/health', '/favicon.ico', '/api/metrics'];
+        const isPublicPath = publicPaths.some(p => req.path === p || req.path.startsWith(p));
+
+        if (isPublicPath) {
+            res.header('Access-Control-Allow-Origin', '*');
+        } else {
+            // Rechazar API requests sin origin (previene CSRF y uso no autorizado)
+            log('warn', 'CORS: Request sin origin bloqueado', { path: req.path, ip: req.ip, method: req.method });
+            return res.status(403).json({ error: 'CORS: Header Origin requerido' });
+        }
     } else if (ALLOWED_ORIGINS.includes(origin)) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
@@ -745,8 +760,12 @@ app.post('/api/auth/api-token', authMiddleware, requireAdmin, async (req, res) =
     }
 });
 
-// Código de invitación válido
-const INVITATION_CODE = process.env.INVITATION_CODE || 'MINDLOOP2024';
+// 🔒 FIX SEGURIDAD: Código de invitación SOLO desde variable de entorno
+const INVITATION_CODE = process.env.INVITATION_CODE;
+if (!INVITATION_CODE) {
+    console.error('❌ FATAL ERROR: INVITATION_CODE no configurado - registro deshabilitado');
+    // No hacemos process.exit() para no romper el servidor, pero el registro fallará
+}
 
 app.post('/api/auth/register', async (req, res) => {
     const client = await pool.connect();
