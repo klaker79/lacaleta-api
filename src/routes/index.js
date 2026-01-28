@@ -14,6 +14,7 @@ const router = express.Router();
 
 // ========== IMPORTAR RUTAS MODULARIZADAS ==========
 const authRoutes = require('./auth.routes');
+const ingredientRoutes = require('./ingredient.routes');
 
 // ========== RUTAS PÚBLICAS ==========
 
@@ -51,9 +52,9 @@ router.get('/', (req, res) => {
 
 // ========== MONTAR RUTAS ==========
 router.use('/auth', authRoutes);
+router.use('/ingredients', ingredientRoutes);
 
 // TODO: Añadir más rutas modularizadas
-// router.use('/ingredients', ingredientRoutes);
 // router.use('/recipes', recipeRoutes);
 // router.use('/orders', orderRoutes);
 // router.use('/sales', saleRoutes);
