@@ -3,8 +3,7 @@
  * routes/index.js - Agregador de Rutas
  * ============================================
  *
- * Centraliza todas las rutas de la API en un solo archivo.
- * El server.js solo necesita importar este archivo.
+ * Centraliza todas las rutas de la API.
  *
  * @author MindLoopIA
  * @version 1.0.0
@@ -12,6 +11,9 @@
 
 const express = require('express');
 const router = express.Router();
+
+// ========== IMPORTAR RUTAS MODULARIZADAS ==========
+const authRoutes = require('./auth.routes');
 
 // ========== RUTAS PÚBLICAS ==========
 
@@ -23,7 +25,8 @@ router.get('/health', async (req, res) => {
         res.json({
             status: 'healthy',
             timestamp: new Date().toISOString(),
-            version: '2.5.0'
+            version: '2.5.0',
+            architecture: 'modular'
         });
     } catch (e) {
         res.status(503).json({ status: 'unhealthy', error: e.message });
@@ -33,22 +36,26 @@ router.get('/health', async (req, res) => {
 // API Info
 router.get('/', (req, res) => {
     res.json({
-        message: '🍽️ MindLoop CostOS API',
+        message: '🍽️ MindLoop CostOS API (Modular)',
         version: '2.5.0',
         status: 'running',
+        modules: ['auth', 'ingredients', 'recipes', 'orders', 'sales'],
         docs: {
-            health: '/api/health',
-            login: 'POST /api/auth/login',
+            health: 'GET /api/health',
+            auth: 'POST /api/auth/login',
             ingredients: 'GET /api/ingredients',
             recipes: 'GET /api/recipes'
         }
     });
 });
 
-// ========== IMPORTAR RUTAS MODULARIZADAS ==========
-// Nota: Las rutas se irán añadiendo a medida que se extraigan del server.js
+// ========== MONTAR RUTAS ==========
+router.use('/auth', authRoutes);
 
-// Por ahora, este archivo sirve como punto central de agregación.
-// Las rutas existentes en server.js seguirán funcionando hasta que se migren.
+// TODO: Añadir más rutas modularizadas
+// router.use('/ingredients', ingredientRoutes);
+// router.use('/recipes', recipeRoutes);
+// router.use('/orders', orderRoutes);
+// router.use('/sales', saleRoutes);
 
 module.exports = router;
