@@ -22,6 +22,7 @@ const saleRoutes = require('./sale.routes');
 const inventoryRoutes = require('./inventory.routes');
 const staffRoutes = require('./staff.routes');
 const expenseRoutes = require('./expense.routes');
+const analyticsRoutes = require('./analytics.routes');
 
 // ========== RUTAS PÚBLICAS ==========
 
@@ -35,7 +36,7 @@ router.get('/health', async (req, res) => {
             timestamp: new Date().toISOString(),
             version: '2.5.0',
             architecture: 'modular',
-            modules: 9
+            modules: 10
         });
     } catch (e) {
         res.status(503).json({ status: 'unhealthy', error: e.message });
@@ -48,8 +49,8 @@ router.get('/', (req, res) => {
         message: '🍽️ MindLoop CostOS API (Modular)',
         version: '2.5.0',
         status: 'running',
-        modules: ['auth', 'ingredients', 'recipes', 'suppliers', 'orders', 'sales', 'inventory', 'staff', 'expenses'],
-        endpoints: 55,
+        modules: ['auth', 'ingredients', 'recipes', 'suppliers', 'orders', 'sales', 'inventory', 'staff', 'expenses', 'analytics'],
+        endpoints: 61,
         docs: {
             health: 'GET /api/health',
             auth: 'POST /api/auth/login',
@@ -60,7 +61,8 @@ router.get('/', (req, res) => {
             sales: 'GET /api/sales',
             inventory: 'GET /api/inventory/complete',
             staff: 'GET /api/staff/empleados',
-            expenses: 'GET /api/expenses'
+            expenses: 'GET /api/expenses',
+            analytics: 'GET /api/analytics/menu-engineering'
         }
     });
 });
@@ -75,8 +77,9 @@ router.use('/sales', saleRoutes);
 router.use('/inventory', inventoryRoutes);
 router.use('/staff', staffRoutes);
 router.use('/expenses', expenseRoutes);
+router.use('/analytics', analyticsRoutes);
 
-// TODO: analytics, balance, intelligence, team, alias...
+// TODO: intelligence, team, alias...
 
 module.exports = router;
 
