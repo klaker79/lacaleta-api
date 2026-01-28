@@ -85,7 +85,17 @@ router.use('/analytics', analyticsRoutes);
 router.use('/intelligence', intelligenceRoutes);
 router.use('/mermas', mermaRoutes);
 
-// TODO: parse-pdf, team...
+// ========== RUTAS LEGACY (Compatibilidad Frontend) ==========
+// Alias para mantener compatibilidad con frontend existente
+router.use('/gastos-fijos', expenseRoutes);           // /api/gastos-fijos → /api/expenses
+router.use('/empleados', staffRoutes);                 // /api/empleados (legacy alias)
+router.use('/horarios', staffRoutes);                  // /api/horarios (legacy alias)
+router.use('/proveedores', supplierRoutes);           // /api/proveedores → /api/suppliers
+router.use('/pedidos', orderRoutes);                   // /api/pedidos → /api/orders
+router.use('/analysis', analyticsRoutes);              // /api/analysis → /api/analytics
+router.use('/balance', analyticsRoutes);               // /api/balance → /api/analytics/balance
+router.use('/daily', analyticsRoutes);                 // /api/daily → /api/analytics/daily
 
 module.exports = router;
+
 
