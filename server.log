@@ -745,3 +745,6 @@
 {"timestamp":"2026-01-08T14:49:45.708Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
 {"timestamp":"2026-01-08T14:50:45.728Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
 {"timestamp":"2026-01-08T14:51:45.717Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-28T18:29:24.873Z","level":"error","message":"Error conectando a PostgreSQL","error":""}
+{"timestamp":"2026-01-28T18:29:24.881Z","level":"info","message":"✅ Conexión a PostgreSQL OK"}
+{"timestamp":"2026-01-28T18:29:24.886Z","level":"info","message":"🚀 Servidor modular corriendo en puerto 3001"}

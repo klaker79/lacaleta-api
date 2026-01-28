@@ -315,4 +315,118 @@ router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== MONTHLY SUMMARY ==========
+
+/**
+ * GET /api/analytics/monthly/summary (or /api/monthly/summary via legacy alias)
+ * Resumen mensual completo (formato tipo Excel)
+ */
+router.get('/monthly/summary', authMiddleware, async (req, res) => {
+    try {
+        const { mes, ano } = req.query;
+        const mesActual = parseInt(mes) || new Date().getMonth() + 1;
+        const anoActual = parseInt(ano) || new Date().getFullYear();
+
+        // Compras diarias
+        const comprasDiarias = await pool.query(`
+            SELECT p.fecha, i.id as ingrediente_id, i.nombre as ingrediente,
+                   p.precio_unitario, p.cantidad_comprada, p.total_compra
+            FROM precios_compra_diarios p
+            JOIN ingredientes i ON p.ingrediente_id = i.id
+            WHERE p.restaurante_id = $1 AND EXTRACT(MONTH FROM p.fecha) = $2 AND EXTRACT(YEAR FROM p.fecha) = $3
+            ORDER BY p.fecha, i.nombre
+        `, [req.restauranteId, mesActual, anoActual]);
+
+        // Ventas diarias
+        const ventasDiarias = await pool.query(`
+            SELECT DATE(v.fecha) as fecha, r.id as receta_id, r.nombre as receta, r.ingredientes as receta_ingredientes,
+                   SUM(v.cantidad) as cantidad_vendida, AVG(v.precio_unitario) as precio_venta_unitario, SUM(v.total) as total_ingresos
+            FROM ventas v JOIN recetas r ON v.receta_id = r.id
+            WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
+              AND EXTRACT(MONTH FROM v.fecha) = $2 AND EXTRACT(YEAR FROM v.fecha) = $3
+            GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes
+            ORDER BY DATE(v.fecha), r.nombre
+        `, [req.restauranteId, mesActual, anoActual]);
+
+        // Precios de ingredientes
+        const ingredientesPrecios = await pool.query(
+            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        const preciosMap = {};
+        ingredientesPrecios.rows.forEach(ing => {
+            const precio = parseFloat(ing.precio) || 0;
+            const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
+            preciosMap[ing.id] = precio / cantidadPorFormato;
+        });
+
+        // Calcular coste de receta
+        const calcularCosteReceta = (ingredientesReceta) => {
+            if (!ingredientesReceta || !Array.isArray(ingredientesReceta)) return 0;
+            return ingredientesReceta.reduce((sum, item) => {
+                return sum + ((preciosMap[item.ingredienteId] || 0) * (parseFloat(item.cantidad) || 0));
+            }, 0);
+        };
+
+        // Procesar datos
+        const ingredientesData = {};
+        const recetasData = {};
+        const diasSet = new Set();
+
+        comprasDiarias.rows.forEach(row => {
+            const fechaStr = row.fecha.toISOString().split('T')[0];
+            diasSet.add(fechaStr);
+            if (!ingredientesData[row.ingrediente]) {
+                ingredientesData[row.ingrediente] = { id: row.ingrediente_id, dias: {}, total: 0, totalCantidad: 0 };
+            }
+            ingredientesData[row.ingrediente].dias[fechaStr] = {
+                precio: parseFloat(row.precio_unitario), cantidad: parseFloat(row.cantidad_comprada), total: parseFloat(row.total_compra)
+            };
+            ingredientesData[row.ingrediente].total += parseFloat(row.total_compra);
+            ingredientesData[row.ingrediente].totalCantidad += parseFloat(row.cantidad_comprada);
+        });
+
+        ventasDiarias.rows.forEach(row => {
+            const fechaStr = row.fecha.toISOString().split('T')[0];
+            diasSet.add(fechaStr);
+            const cantidadVendida = parseInt(row.cantidad_vendida);
+            const totalIngresos = parseFloat(row.total_ingresos);
+            const costePorUnidad = calcularCosteReceta(row.receta_ingredientes);
+            const costeTotal = costePorUnidad * cantidadVendida;
+            const beneficio = totalIngresos - costeTotal;
+
+            if (!recetasData[row.receta]) {
+                recetasData[row.receta] = { id: row.receta_id, dias: {}, totalVendidas: 0, totalIngresos: 0, totalCoste: 0, totalBeneficio: 0 };
+            }
+            recetasData[row.receta].dias[fechaStr] = {
+                vendidas: cantidadVendida, precioVenta: parseFloat(row.precio_venta_unitario),
+                coste: costeTotal, ingresos: totalIngresos, beneficio: beneficio
+            };
+            recetasData[row.receta].totalVendidas += cantidadVendida;
+            recetasData[row.receta].totalIngresos += totalIngresos;
+            recetasData[row.receta].totalCoste += costeTotal;
+            recetasData[row.receta].totalBeneficio += beneficio;
+        });
+
+        const dias = Array.from(diasSet).sort();
+        const totalesCompras = Object.values(ingredientesData).reduce((sum, i) => sum + i.total, 0);
+        const totalesVentas = Object.values(recetasData).reduce((sum, r) => sum + r.totalIngresos, 0);
+        const totalesCostes = Object.values(recetasData).reduce((sum, r) => sum + r.totalCoste, 0);
+        const totalesBeneficio = Object.values(recetasData).reduce((sum, r) => sum + r.totalBeneficio, 0);
+
+        res.json({
+            mes: mesActual, ano: anoActual, dias,
+            compras: { ingredientes: ingredientesData, total: totalesCompras },
+            ventas: { recetas: recetasData, totalIngresos: totalesVentas, totalCostes: totalesCostes, beneficioBruto: totalesBeneficio },
+            resumen: {
+                margenBruto: totalesVentas > 0 ? ((totalesBeneficio / totalesVentas) * 100).toFixed(1) : 0,
+                foodCost: totalesVentas > 0 ? ((totalesCostes / totalesVentas) * 100).toFixed(1) : 0
+            }
+        });
+    } catch (err) {
+        log('error', 'Error resumen mensual', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 module.exports = router;

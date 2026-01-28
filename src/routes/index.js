@@ -95,6 +95,7 @@ router.use('/pedidos', orderRoutes);                   // /api/pedidos → /api/
 router.use('/analysis', analyticsRoutes);              // /api/analysis → /api/analytics
 router.use('/balance', analyticsRoutes);               // /api/balance → /api/analytics/balance
 router.use('/daily', analyticsRoutes);                 // /api/daily → /api/analytics/daily
+router.use('/monthly', analyticsRoutes);               // /api/monthly → /api/analytics/monthly
 
 // Redirect especial para recipes-variants
 const recipeVariantsRouter = require('./recipe.routes');

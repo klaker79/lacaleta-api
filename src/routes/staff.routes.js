@@ -19,7 +19,7 @@ const { authMiddleware } = require('../middleware/auth');
 // ========== EMPLEADOS ==========
 
 /**
- * GET /api/staff/empleados
+ * GET /api/staff/empleados (or /api/empleados via legacy alias)
  * Obtener todos los empleados activos
  */
 router.get('/empleados', authMiddleware, async (req, res) => {
@@ -33,6 +33,24 @@ router.get('/empleados', authMiddleware, async (req, res) => {
         log('error', 'Error obteniendo empleados', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
+});
+
+// Legacy alias: /api/empleados (sin subruta) - requerido por frontend
+router.get('/', authMiddleware, async (req, res, next) => {
+    // Solo responder si viene de /api/empleados, no de /api/staff
+    if (req.baseUrl === '/api/empleados') {
+        try {
+            const result = await pool.query(
+                'SELECT * FROM empleados WHERE activo = true AND restaurante_id = $1 ORDER BY nombre',
+                [req.restauranteId]
+            );
+            return res.json(result.rows);
+        } catch (err) {
+            log('error', 'Error obteniendo empleados (legacy)', { error: err.message });
+            return res.status(500).json({ error: 'Error interno' });
+        }
+    }
+    next();
 });
 
 /**
@@ -112,7 +130,7 @@ router.delete('/empleados/:id', authMiddleware, async (req, res) => {
 // ========== HORARIOS ==========
 
 /**
- * GET /api/staff/horarios
+ * GET /api/staff/horarios (or /api/horarios via legacy alias)
  * Obtener horarios por rango de fechas
  */
 router.get('/horarios', authMiddleware, async (req, res) => {
@@ -135,6 +153,16 @@ router.get('/horarios', authMiddleware, async (req, res) => {
         log('error', 'Error obteniendo horarios', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
     }
+});
+
+// Legacy alias: /api/horarios (sin subruta) - requerido por frontend  
+// Nota: El handler GET '/' arriba maneja empleados, este middleware adicional maneja horarios
+router.use('/', (req, res, next) => {
+    if (req.baseUrl === '/api/horarios' && req.method === 'GET' && req.path === '/') {
+        // Redirigir internamente a /horarios
+        req.url = '/horarios' + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '');
+    }
+    next();
 });
 
 /**
