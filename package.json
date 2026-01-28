@@ -1,11 +1,13 @@
 {
   "name": "la-caleta-api",
-  "version": "2.3.0",
+  "version": "2.5.0",
   "description": "API para Dashboard La Caleta 102 - MindLoop CostOS",
-  "main": "server.js",
+  "main": "server.modular.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.modular.js",
+    "start:legacy": "node server.js",
+    "dev": "node server.modular.js",
+    "dev:legacy": "node server.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

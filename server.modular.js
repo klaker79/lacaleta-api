@@ -1,121 +1,111 @@
 /**
  * ============================================
- * server.modular.js - Servidor Express Modular
+ * server.modular.js - Servidor API Modular
  * ============================================
  *
- * Arquitectura modular para MindLoop CostOS API.
- * Este archivo reemplazará al monolítico server.js de 4000+ líneas.
- *
- * GRADUAL MIGRATION:
- * 1. Primero: Ejecutar ambos en paralelo (modular en puerto diferente)
- * 2. Después: Migrar rutas una a una
- * 3. Final: Renombrar este a server.js
+ * Punto de entrada modular que carga rutas desde src/routes/
+ * Usa: npm start (o node server.modular.js)
  *
  * @author MindLoopIA
  * @version 2.5.0
- * @date 2026-01-28
  */
 
-// ========== IMPORTS ==========
+require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 
-// Config
-const config = require('./src/config');
+// ========== IMPORTAR MÓDULOS ==========
 const { pool, testConnection } = require('./src/config/database');
 const { log } = require('./src/utils/logger');
-
-// Routes
+const { corsMiddleware } = require('./src/middleware/cors');
 const routes = require('./src/routes');
+
+// ========== CONFIGURACIÓN ==========
+const PORT = process.env.PORT || 3000;
+
+// Validar configuración crítica
+if (!process.env.JWT_SECRET) {
+    console.error('❌ FATAL: JWT_SECRET no configurado');
+    process.exit(1);
+}
 
 const app = express();
 
-// ========== MIDDLEWARE ==========
-
-// Trust proxy (Traefik, nginx, etc.)
+// Trust proxy (para rate-limit detrás de proxy)
 app.set('trust proxy', 1);
 
+// ========== MIDDLEWARES GLOBALES ==========
+
 // CORS
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    const publicPaths = ['/', '/health', '/api/health'];
+app.use(corsMiddleware);
 
-    if (!origin) {
-        if (publicPaths.includes(req.path)) {
-            res.header('Access-Control-Allow-Origin', '*');
-        } else {
-            return res.status(403).json({ error: 'CORS: Header Origin requerido' });
-        }
-    } else if (config.cors.allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-        res.header('Access-Control-Allow-Credentials', 'true');
-    } else {
-        return res.status(403).json({ error: 'CORS: Origen no autorizado' });
-    }
-
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.header('Access-Control-Allow-Headers',
-        'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-API-Key');
-    res.header('Access-Control-Max-Age', '86400');
-
-    if (req.method === 'OPTIONS') return res.sendStatus(200);
-    next();
-});
-
-// JSON Parser
+// Parser JSON (hasta 10MB para PDFs)
 app.use(express.json({ limit: '10mb' }));
 
-// Cookie Parser
+// Cookies (auth)
 app.use(cookieParser());
 
-// Rate Limiting
+// Rate Limiting global
 const globalLimiter = rateLimit({
-    windowMs: config.rateLimit.global.windowMs,
-    max: config.rateLimit.global.max,
-    message: { error: 'Demasiadas peticiones, intenta más tarde' }
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 1000,
+    message: { error: 'Demasiadas peticiones' },
+    standardHeaders: true,
+    legacyHeaders: false
 });
-app.use(globalLimiter);
+app.use('/api/', globalLimiter);
 
-// ========== ROUTES ==========
+// ========== MONTAR RUTAS ==========
 app.use('/api', routes);
 
-// Root redirect
+// Health check raíz
 app.get('/', (req, res) => {
     res.json({
-        message: '🍽️ MindLoop CostOS API (Modular)',
-        version: '2.5.0',
-        docs: '/api'
+        status: 'online',
+        api: '/api',
+        health: '/api/health',
+        version: '2.5.0-modular'
     });
 });
 
 // ========== ERROR HANDLERS ==========
-process.on('unhandledRejection', (reason) => {
-    log('error', 'Unhandled Promise Rejection', { reason: String(reason) });
+
+// 404
+app.use((req, res) => {
+    res.status(404).json({ error: 'Endpoint no encontrado', path: req.path });
 });
 
-process.on('uncaughtException', (error) => {
-    log('error', 'Uncaught Exception', { error: error.message });
+// Error global
+app.use((err, req, res, next) => {
+    log('error', 'Error no capturado', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Error interno del servidor' });
 });
 
-process.on('SIGTERM', () => {
-    log('info', 'SIGTERM received, shutting down');
-    process.exit(0);
-});
+// ========== INICIAR SERVIDOR ==========
+async function startServer() {
+    try {
+        // Verificar conexión a DB
+        await testConnection();
+        log('info', '✅ Conexión a PostgreSQL OK');
 
-// ========== START SERVER ==========
-const PORT = config.server.port;
+        app.listen(PORT, () => {
+            log('info', `🚀 Servidor modular corriendo en puerto ${PORT}`);
+            console.log(`
+╔════════════════════════════════════════════╗
+║  🍽️  MindLoop CostOS API v2.5 (Modular)   ║
+╠════════════════════════════════════════════╣
+║  Puerto: ${PORT}                              ║
+║  Módulos: 12                               ║
+║  Endpoints: 71                             ║
+║  Arquitectura: routes/index.js             ║
+╚════════════════════════════════════════════╝
+            `);
+        });
+    } catch (err) {
+        console.error('❌ Error iniciando servidor:', err.message);
+        process.exit(1);
+    }
+}
 
-const start = async () => {
-    await testConnection();
-
-    app.listen(PORT, () => {
-        log('info', `🚀 MindLoop CostOS API (Modular) running on port ${PORT}`);
-        console.log(`\n✅ Server running at http://localhost:${PORT}`);
-        console.log(`📊 Health check: http://localhost:${PORT}/api/health\n`);
-    });
-};
-
-start();
-
-module.exports = app;
+startServer();
