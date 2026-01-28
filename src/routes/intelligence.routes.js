@@ -229,4 +229,65 @@ router.get('/price-check', authMiddleware, async (req, res) => {
     }
 });
 
+/**
+ * GET /api/intelligence/waste-stats
+ * Estadísticas de mermas del mes
+ */
+router.get('/waste-stats', authMiddleware, async (req, res) => {
+    try {
+        // Total mermas este mes
+        const mesActual = await pool.query(`
+            SELECT 
+                COALESCE(SUM(valor_perdida), 0) as total_perdida,
+                COUNT(*) as total_registros
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+        `, [req.restauranteId]);
+
+        // Top 5 productos más tirados
+        const topProductos = await pool.query(`
+            SELECT 
+                ingrediente_nombre as nombre,
+                SUM(cantidad) as cantidad_total,
+                SUM(valor_perdida) as perdida_total,
+                COUNT(*) as veces
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+            GROUP BY ingrediente_nombre
+            ORDER BY perdida_total DESC
+            LIMIT 5
+        `, [req.restauranteId]);
+
+        // Comparación con mes anterior
+        const mesAnterior = await pool.query(`
+            SELECT COALESCE(SUM(valor_perdida), 0) as total_perdida
+            FROM mermas
+            WHERE restaurante_id = $1
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+              AND fecha < DATE_TRUNC('month', CURRENT_DATE)
+        `, [req.restauranteId]);
+
+        const totalActual = parseFloat(mesActual.rows[0]?.total_perdida || 0);
+        const totalAnterior = parseFloat(mesAnterior.rows[0]?.total_perdida || 0);
+        const variacion = totalAnterior > 0 ? ((totalActual - totalAnterior) / totalAnterior) * 100 : 0;
+
+        res.json({
+            mes_actual: {
+                total_perdida: totalActual,
+                registros: parseInt(mesActual.rows[0]?.total_registros || 0)
+            },
+            top_productos: topProductos.rows,
+            comparacion: {
+                mes_anterior: totalAnterior,
+                variacion: Math.round(variacion)
+            }
+        });
+    } catch (err) {
+        log('error', 'Error en waste-stats', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 module.exports = router;
