@@ -101,6 +101,25 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 // ========== VARIANTES (Botella/Copa) ==========
 
 /**
+ * GET /api/recipes/all-variants
+ * Obtener TODAS las variantes del restaurante (para ventas)
+ */
+router.get('/all-variants', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM recetas_variantes 
+             WHERE restaurante_id = $1 
+             ORDER BY receta_id, precio_venta DESC`,
+            [req.restauranteId]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error obteniendo variantes', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+/**
  * GET /api/recipes/:id/variants
  * Obtener variantes de una receta
  */

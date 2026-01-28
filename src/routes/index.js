@@ -96,6 +96,21 @@ router.use('/analysis', analyticsRoutes);              // /api/analysis → /api
 router.use('/balance', analyticsRoutes);               // /api/balance → /api/analytics/balance
 router.use('/daily', analyticsRoutes);                 // /api/daily → /api/analytics/daily
 
+// Redirect especial para recipes-variants
+const recipeVariantsRouter = require('./recipe.routes');
+router.get('/recipes-variants', require('../middleware/auth').authMiddleware, async (req, res) => {
+    const { pool } = require('../config/database');
+    try {
+        const result = await pool.query(
+            'SELECT * FROM recetas_variantes WHERE restaurante_id = $1 ORDER BY receta_id, precio_venta DESC',
+            [req.restauranteId]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 module.exports = router;
 
 
