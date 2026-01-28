@@ -19,6 +19,9 @@ const recipeRoutes = require('./recipe.routes');
 const supplierRoutes = require('./supplier.routes');
 const orderRoutes = require('./order.routes');
 const saleRoutes = require('./sale.routes');
+const inventoryRoutes = require('./inventory.routes');
+const staffRoutes = require('./staff.routes');
+const expenseRoutes = require('./expense.routes');
 
 // ========== RUTAS PÚBLICAS ==========
 
@@ -32,7 +35,7 @@ router.get('/health', async (req, res) => {
             timestamp: new Date().toISOString(),
             version: '2.5.0',
             architecture: 'modular',
-            modules: 6
+            modules: 9
         });
     } catch (e) {
         res.status(503).json({ status: 'unhealthy', error: e.message });
@@ -45,8 +48,8 @@ router.get('/', (req, res) => {
         message: '🍽️ MindLoop CostOS API (Modular)',
         version: '2.5.0',
         status: 'running',
-        modules: ['auth', 'ingredients', 'recipes', 'suppliers', 'orders', 'sales'],
-        endpoints: 37,
+        modules: ['auth', 'ingredients', 'recipes', 'suppliers', 'orders', 'sales', 'inventory', 'staff', 'expenses'],
+        endpoints: 55,
         docs: {
             health: 'GET /api/health',
             auth: 'POST /api/auth/login',
@@ -54,7 +57,10 @@ router.get('/', (req, res) => {
             recipes: 'GET /api/recipes',
             suppliers: 'GET /api/suppliers',
             orders: 'GET /api/orders',
-            sales: 'GET /api/sales'
+            sales: 'GET /api/sales',
+            inventory: 'GET /api/inventory/complete',
+            staff: 'GET /api/staff/empleados',
+            expenses: 'GET /api/expenses'
         }
     });
 });
@@ -66,7 +72,11 @@ router.use('/recipes', recipeRoutes);
 router.use('/suppliers', supplierRoutes);
 router.use('/orders', orderRoutes);
 router.use('/sales', saleRoutes);
+router.use('/inventory', inventoryRoutes);
+router.use('/staff', staffRoutes);
+router.use('/expenses', expenseRoutes);
 
-// TODO: Añadir rutas de inventario, analytics, staff, expenses...
+// TODO: analytics, balance, intelligence, team, alias...
 
 module.exports = router;
+
