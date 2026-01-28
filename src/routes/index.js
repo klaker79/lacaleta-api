@@ -24,6 +24,7 @@ const staffRoutes = require('./staff.routes');
 const expenseRoutes = require('./expense.routes');
 const analyticsRoutes = require('./analytics.routes');
 const intelligenceRoutes = require('./intelligence.routes');
+const mermaRoutes = require('./merma.routes');
 
 // ========== RUTAS PÚBLICAS ==========
 
@@ -37,7 +38,7 @@ router.get('/health', async (req, res) => {
             timestamp: new Date().toISOString(),
             version: '2.5.0',
             architecture: 'modular',
-            modules: 11
+            modules: 12
         });
     } catch (e) {
         res.status(503).json({ status: 'unhealthy', error: e.message });
@@ -50,8 +51,8 @@ router.get('/', (req, res) => {
         message: '🍽️ MindLoop CostOS API (Modular)',
         version: '2.5.0',
         status: 'running',
-        modules: ['auth', 'ingredients', 'recipes', 'suppliers', 'orders', 'sales', 'inventory', 'staff', 'expenses', 'analytics', 'intelligence'],
-        endpoints: 65,
+        modules: ['auth', 'ingredients', 'recipes', 'suppliers', 'orders', 'sales', 'inventory', 'staff', 'expenses', 'analytics', 'intelligence', 'mermas'],
+        endpoints: 71,
         docs: {
             health: 'GET /api/health',
             auth: 'POST /api/auth/login',
@@ -64,7 +65,8 @@ router.get('/', (req, res) => {
             staff: 'GET /api/staff/empleados',
             expenses: 'GET /api/expenses',
             analytics: 'GET /api/analytics/menu-engineering',
-            intelligence: 'GET /api/intelligence/freshness'
+            intelligence: 'GET /api/intelligence/freshness',
+            mermas: 'GET /api/mermas'
         }
     });
 });
@@ -81,8 +83,9 @@ router.use('/staff', staffRoutes);
 router.use('/expenses', expenseRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/intelligence', intelligenceRoutes);
+router.use('/mermas', mermaRoutes);
 
-// TODO: mermas, parse-pdf, team...
+// TODO: parse-pdf, team...
 
 module.exports = router;
 
