@@ -86,6 +86,27 @@ class KPIController {
             next(error);
         }
     }
+
+    /**
+     * GET /api/v2/kpis/daily-range
+     * Obtiene KPIs de los últimos N días
+     */
+    static async getDailyRange(req, res, next) {
+        try {
+            const { restaurante_id } = req.user;
+            const { days = 7 } = req.query;
+
+            const kpiService = new KPIService();
+            const data = await kpiService.getDailyRange(
+                restaurante_id,
+                parseInt(days)
+            );
+
+            res.json({ success: true, data });
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 module.exports = KPIController;

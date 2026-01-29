@@ -9,5 +9,6 @@ router.get('/daily', KPIController.getDaily);
 router.get('/monthly', KPIController.getMonthly);
 router.get('/comparison', KPIController.getComparison);
 router.get('/top-recipes', KPIController.getTopRecipes);
+router.get('/daily-range', KPIController.getDailyRange);
 
 module.exports = router;

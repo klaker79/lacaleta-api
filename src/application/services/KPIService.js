@@ -165,6 +165,43 @@ class KPIService {
             ingresos: parseFloat(row.ingresos) || 0
         }));
     }
+
+    /**
+     * Obtiene KPIs de los últimos N días
+     */
+    async getDailyRange(restaurantId, days = 7) {
+        const query = `
+            SELECT
+                DATE(fecha) as date,
+                COALESCE(SUM(total), 0) as revenue,
+                COUNT(*) as sale_count
+            FROM ventas
+            WHERE restaurante_id = $1
+              AND DATE(fecha) >= CURRENT_DATE - INTERVAL '${days} days'
+              AND DATE(fecha) <= CURRENT_DATE
+            GROUP BY DATE(fecha)
+            ORDER BY date ASC
+        `;
+
+        const result = await this.pool.query(query, [restaurantId]);
+
+        return result.rows.map(row => {
+            const revenue = parseFloat(row.revenue) || 0;
+            // Estimar coste al 30%
+            const cost = revenue * 0.30;
+            const grossProfit = revenue - cost;
+
+            return {
+                date: row.date,
+                revenue,
+                cost,
+                grossProfit,
+                margin: revenue > 0 ? Math.round(((grossProfit / revenue) * 100) * 10) / 10 : 0,
+                foodCost: revenue > 0 ? Math.round(((cost / revenue) * 100) * 10) / 10 : 30,
+                saleCount: parseInt(row.sale_count) || 0
+            };
+        });
+    }
 }
 
 module.exports = KPIService;
