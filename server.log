@@ -748,3 +748,172 @@
 {"timestamp":"2026-01-28T18:29:24.873Z","level":"error","message":"Error conectando a PostgreSQL","error":""}
 {"timestamp":"2026-01-28T18:29:24.881Z","level":"info","message":"✅ Conexión a PostgreSQL OK"}
 {"timestamp":"2026-01-28T18:29:24.886Z","level":"info","message":"🚀 Servidor modular corriendo en puerto 3001"}
+{"timestamp":"2026-01-29T20:07:15.776Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-01-29T20:07:15.786Z","level":"error","message":"Error DB","error":""}
+{"timestamp":"2026-01-29T20:07:15.789Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:08:15.786Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:09:15.784Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:10:15.789Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:11:15.788Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:12:15.783Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:13:15.785Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:14:15.790Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:15:15.791Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:16:15.790Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:17:15.793Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:18:15.792Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:19:15.792Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:20:15.792Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:21:15.794Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:22:15.791Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:23:15.794Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:24:15.793Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:25:15.795Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:26:15.797Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:27:15.796Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:28:15.797Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:29:15.796Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:30:15.797Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:31:15.794Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:32:15.800Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:33:15.803Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:34:15.804Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:35:15.811Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:36:15.806Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:37:15.812Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:38:15.805Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:39:15.807Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:39:44.764Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-01-29T20:39:44.782Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-01-29T20:40:15.814Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:41:15.813Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:41:19.703Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-01-29T20:41:19.773Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-01-29T20:41:26.508Z","level":"error","message":"Error login","error":""}
+{"timestamp":"2026-01-29T20:41:26.710Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/recipes-variants"}
+{"timestamp":"2026-01-29T20:41:26.715Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:26.716Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:26.717Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:26.734Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/empleados"}
+{"timestamp":"2026-01-29T20:41:27.735Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/recipes-variants"}
+{"timestamp":"2026-01-29T20:41:28.233Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-01-29T20:41:29.242Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-01-29T20:41:29.651Z","level":"error","message":"Error login","error":""}
+{"timestamp":"2026-01-29T20:41:29.743Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-01-29T20:41:29.862Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:29.864Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:29.865Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:29.873Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/empleados"}
+{"timestamp":"2026-01-29T20:41:31.249Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-01-29T20:41:36.885Z","level":"error","message":"Error login","error":""}
+{"timestamp":"2026-01-29T20:41:37.105Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:37.106Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:37.111Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-01-29T20:41:37.115Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/empleados"}
+{"timestamp":"2026-01-29T20:41:44.392Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/balance/mes?mes=1&ano=2026"}
+{"timestamp":"2026-01-29T20:42:15.814Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:43:15.814Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:44:15.828Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:45:15.818Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:46:15.820Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:47:15.819Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:48:15.818Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:49:15.818Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:50:15.820Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:51:15.816Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:52:15.816Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:53:15.820Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:54:15.823Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:55:15.820Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:56:15.825Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:57:15.824Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:58:15.827Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T20:59:15.847Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:00:15.828Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:01:15.829Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:02:15.829Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:03:15.829Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:04:15.833Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:05:15.838Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:06:15.834Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:07:15.834Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:08:15.843Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:09:15.842Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:10:15.848Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:11:15.844Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:12:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:13:15.852Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:14:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:15:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:16:15.851Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:17:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:18:15.851Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:19:15.847Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:20:15.850Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:21:15.844Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:22:15.853Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:23:15.850Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:24:15.853Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:25:15.851Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:26:15.852Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:27:15.851Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:28:15.854Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:29:15.852Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:30:15.857Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:31:15.854Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:32:15.855Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:33:15.853Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:34:15.856Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:35:15.854Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:36:15.853Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:37:15.853Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:38:15.839Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:39:15.829Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:40:15.836Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:41:15.831Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:42:15.836Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:43:15.830Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:44:15.836Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:45:15.830Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:46:15.835Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:47:15.830Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:48:15.835Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:49:15.830Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:50:15.837Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:51:15.830Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:52:15.835Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:53:15.829Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:54:15.835Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:55:15.828Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:56:15.833Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:57:15.829Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:58:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T21:59:15.839Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:00:15.845Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:01:15.839Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:02:15.877Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:03:15.842Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:04:15.844Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:05:15.842Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:06:15.852Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:07:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:08:15.843Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:09:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:10:15.847Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:11:15.848Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:12:15.849Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:13:15.873Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:14:15.870Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:15:15.883Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:16:15.877Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:17:15.883Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:18:15.884Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:19:15.884Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:20:15.886Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:21:15.887Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:22:15.886Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:23:15.887Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:24:15.897Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:25:15.891Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:26:15.894Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-01-29T22:27:15.898Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}

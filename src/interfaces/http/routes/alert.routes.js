@@ -17,4 +17,7 @@ router.post('/:id/acknowledge', AlertController.acknowledge);
 // POST /api/v2/alerts/:id/resolve - Resolver
 router.post('/:id/resolve', AlertController.resolve);
 
+// GET /api/v2/alerts/history - Historial con filtros
+router.get('/history', AlertController.history);
+
 module.exports = router;

@@ -145,6 +145,40 @@ class AlertService {
     async resolveAlert(alertId, restaurantId) {
         return await this.alertRepo.resolve(alertId, restaurantId);
     }
+
+    /**
+     * Obtiene historial de alertas con filtros
+     */
+    async getAlertHistory(restaurantId, options = {}) {
+        const { status, type, limit = 50, offset = 0 } = options;
+
+        let query = `
+            SELECT * FROM alerts
+            WHERE restaurant_id = $1
+        `;
+        const params = [restaurantId];
+        let paramIndex = 2;
+
+        if (status) {
+            query += ` AND status = $${paramIndex}`;
+            params.push(status);
+            paramIndex++;
+        }
+
+        if (type) {
+            query += ` AND type = $${paramIndex}`;
+            params.push(type);
+            paramIndex++;
+        }
+
+        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        params.push(limit, offset);
+
+        const result = await this.pool.query(query, params);
+
+        const Alert = require('../domain/entities/Alert');
+        return result.rows.map(row => new Alert(row));
+    }
 }
 
 module.exports = AlertService;

@@ -97,6 +97,31 @@ class AlertController {
             next(error);
         }
     }
+
+    /**
+     * GET /api/v2/alerts/history
+     * Obtiene historial de alertas (incluye resueltas)
+     */
+    static async history(req, res, next) {
+        try {
+            const { restaurante_id } = req.user;
+            const { status, type, limit = 50, offset = 0 } = req.query;
+
+            const alertService = new AlertService();
+            const alerts = await alertService.getAlertHistory(
+                restaurante_id,
+                { status, type, limit: parseInt(limit), offset: parseInt(offset) }
+            );
+
+            res.json({
+                success: true,
+                data: alerts.map(a => a.toDTO()),
+                pagination: { limit: parseInt(limit), offset: parseInt(offset) }
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
 }
 
 module.exports = AlertController;
