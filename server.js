@@ -11,6 +11,12 @@ const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
 
+// ========== ARQUITECTURA LIMPIA V2 ==========
+const { setupEventHandlers } = require('./src/application/bootstrap');
+const recipeRoutesV2 = require('./src/interfaces/http/routes/recipe.routes.v2');
+const alertRoutes = require('./src/interfaces/http/routes/alert.routes');
+const kpiRoutes = require('./src/interfaces/http/routes/kpi.routes');
+
 // ========== RESEND (Email) ==========
 // 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -579,6 +585,12 @@ const requireAdmin = (req, res, next) => {
     }
     next();
 };
+
+// ========== RUTAS V2 (Arquitectura Limpia) ==========
+// Montar rutas de recetas v2 con autenticación
+app.use('/api/v2/recipes', authMiddleware, recipeRoutesV2);
+app.use('/api/v2/alerts', authMiddleware, alertRoutes);
+app.use('/api/v2/kpis', authMiddleware, kpiRoutes);
 
 // ========== ENDPOINTS PÚBLICOS ==========
 app.get('/', (req, res) => {
@@ -4153,11 +4165,18 @@ app.use((err, req, res, next) => {
 });
 
 // ========== INICIAR SERVIDOR ==========
+// Inicializar event handlers antes de escuchar
+setupEventHandlers();
+
+// Exportar app para tests E2E
+module.exports = app;
+
 app.listen(PORT, '0.0.0.0', () => {
     log('info', 'Servidor iniciado', { port: PORT, version: '2.3.0', cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
-    console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL`);
+    console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL (con arquitectura limpia v2)`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
+    console.log(`📦 Rutas v2 montadas: /api/v2/recipes`);
 
     // ========== UPTIME KUMA HEARTBEAT ==========
     // Heartbeat verifica BD antes de reportar healthy
