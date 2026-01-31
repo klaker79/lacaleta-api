@@ -2496,7 +2496,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
 
         // Obtener recetas y precios de ingredientes
         // Incluir campo codigo para mapeo con códigos del TPV
-        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo, porciones FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
+        const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
 
         // Mapa por nombre (para compatibilidad)
         const recetasMapNombre = new Map();
