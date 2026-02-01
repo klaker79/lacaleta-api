@@ -13,7 +13,7 @@ class RecipeController {
      */
     static async list(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const repo = new RecipeRepository(pool);
 
             const recipes = await repo.findActive(restaurante_id);
@@ -31,7 +31,7 @@ class RecipeController {
     static async getById(req, res, next) {
         try {
             const { id } = req.params;
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const repo = new RecipeRepository(pool);
 
             const recipe = await repo.findById(id, restaurante_id);
@@ -59,7 +59,7 @@ class RecipeController {
     static async calculateCost(req, res, next) {
         try {
             const { id } = req.params;
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
 
             const costService = new CostCalculationService({ pool });
             const result = await costService.calculateRecipeCost(id, restaurante_id);
@@ -88,7 +88,7 @@ class RecipeController {
      */
     static async recalculateAll(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const repo = new RecipeRepository(pool);
             const costService = new CostCalculationService({ pool });
 
@@ -124,7 +124,7 @@ class RecipeController {
      */
     static async getStats(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const costService = new CostCalculationService({ pool });
 
             const stats = await costService.getCostStatistics(restaurante_id);
@@ -143,7 +143,7 @@ class RecipeController {
      */
     static async create(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const repo = new RecipeRepository(pool);
 
             const recipe = await repo.create(req.body, restaurante_id);
@@ -173,7 +173,7 @@ class RecipeController {
     static async update(req, res, next) {
         try {
             const { id } = req.params;
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const repo = new RecipeRepository(pool);
 
             const recipe = await repo.update(id, req.body, restaurante_id);
@@ -210,7 +210,7 @@ class RecipeController {
     static async delete(req, res, next) {
         try {
             const { id } = req.params;
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const repo = new RecipeRepository(pool);
 
             const deleted = await repo.delete(id, restaurante_id);

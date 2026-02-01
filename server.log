@@ -1698,3 +1698,57 @@
 {"timestamp":"2026-02-01T17:47:22.393Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
 {"timestamp":"2026-02-01T17:48:22.379Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
 {"timestamp":"2026-02-01T17:49:22.400Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:50:22.393Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:50:33.739Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:50:41.687Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:50:42.698Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:50:43.198Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:50:44.205Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:50:44.710Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:50:46.221Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:50:48.852Z","level":"error","message":"Error no manejado","error":"column \"activo\" does not exist","stack":"error: column \"activo\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async RecipeRepository.findActive (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/RecipeRepository.js:34:24)\n    at async list (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/RecipeController.js:19:29)","url":"/api/recipes"}
+{"timestamp":"2026-02-01T17:50:51.311Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:51:22.399Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:52:22.459Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:53:22.389Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:54:22.395Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:55:22.382Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:55:41.684Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:55:42.704Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:55:43.206Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:55:44.213Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:55:44.714Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:55:46.221Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:55:48.711Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:56:22.395Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:57:22.383Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:58:22.400Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:59:22.395Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T18:00:22.415Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T18:00:41.675Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T18:00:42.685Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T18:00:43.183Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T18:00:44.191Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T18:00:44.693Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T18:00:46.200Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T18:00:48.342Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T18:00:57.408Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["nombre","proveedorId","precio","unidad","familia","stock_actual","stock_minimo","formato_compra","cantidad_por_formato"],"cantidadPorFormato":{"antes":"1.00","despues":1}}
+{"timestamp":"2026-02-01T18:00:57.453Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":1,"precio":12}
+{"timestamp":"2026-02-01T18:01:22.349Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T18:02:22.402Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T18:02:26.695Z","level":"error","message":"Error no manejado","error":"column \"activo\" does not exist","stack":"error: column \"activo\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async RecipeRepository.findActive (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/RecipeRepository.js:34:24)\n    at async list (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/RecipeController.js:19:29)","url":"/api/recipes"}
+{"timestamp":"2026-02-01T18:03:22.392Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T18:04:22.395Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T18:04:54.274Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T18:04:54.348Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T18:04:54.396Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T18:04:54.402Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T18:04:54.409Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T18:04:54.409Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T18:04:54.410Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T18:04:54.410Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T18:04:54.411Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T18:04:54.411Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T18:04:54.412Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T18:04:54.412Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T18:04:54.500Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
