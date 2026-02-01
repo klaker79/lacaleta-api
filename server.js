@@ -20,6 +20,8 @@ const SupplierController = require('./src/interfaces/http/controllers/SupplierCo
 const PurchaseController = require('./src/interfaces/http/controllers/PurchaseController');
 const RecipeController = require('./src/interfaces/http/controllers/RecipeController');
 const SaleController = require('./src/interfaces/http/controllers/SaleController');
+const StockMovementController = require('./src/interfaces/http/controllers/StockMovementController');
+const IngredientController = require('./src/interfaces/http/controllers/IngredientController');
 
 // ========== RESEND (Email) ==========
 // 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
