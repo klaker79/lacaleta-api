@@ -19,11 +19,8 @@ class PurchaseController {
 
             const purchases = await repo.findActive(restaurantId);
 
-            res.json({
-                success: true,
-                data: purchases.map(p => p.toDTO()),
-                count: purchases.length
-            });
+            // Retornar array directo para compatibilidad con frontend
+            res.json(purchases.map(p => p.toDTO()));
         } catch (error) {
             next(error);
         }

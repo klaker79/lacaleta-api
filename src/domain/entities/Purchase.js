@@ -136,19 +136,15 @@ class Purchase {
     toDTO() {
         return {
             id: this.id,
-            supplierId: this.supplierId,
-            date: this.date,
-            items: this.items,
+            proveedor_id: this.supplierId,
+            fecha: this.date,
+            ingredientes: this.items,
             total: this.total,
-            status: this.status,
-            createdAt: this.createdAt,
-            receivedAt: this.receivedAt,
-            totalReceived: this.totalReceived,
-            itemCount: this.getItemCount(),
-            isPending: this.isPending(),
-            isReceived: this.isReceived(),
-            hasDiscrepancy: this.hasDiscrepancy(),
-            discrepancy: this.getDiscrepancy()
+            estado: this.status,
+            fecha_creacion: this.createdAt,
+            fecha_recepcion: this.receivedAt,
+            total_recibido: this.totalReceived,
+            restaurante_id: this.restaurantId
         };
     }
 

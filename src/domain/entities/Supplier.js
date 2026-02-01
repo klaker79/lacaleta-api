@@ -68,17 +68,16 @@ class Supplier {
     toDTO() {
         return {
             id: this.id,
-            name: this.name,
-            contact: this.contact,
-            phone: this.phone,
+            nombre: this.name,
+            contacto: this.contact,
+            telefono: this.phone,
             email: this.email,
-            address: this.address,
-            notes: this.notes,
-            code: this.code,
+            direccion: this.address,
+            notas: this.notes,
+            codigo: this.code,
             cif: this.cif,
-            ingredientIds: this.ingredientIds,
-            isActive: this.isActive(),
-            hasCompleteContactInfo: this.hasCompleteContactInfo()
+            ingredientes: this.ingredientIds,
+            restaurante_id: this.restaurantId
         };
     }
 

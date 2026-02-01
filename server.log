@@ -928,3 +928,773 @@
 {"timestamp":"2026-01-29T22:36:15.900Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
 {"timestamp":"2026-01-29T22:37:15.896Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
 {"timestamp":"2026-01-29T22:38:15.897Z","level":"error","message":"Heartbeat omitido - BD no responde","error":""}
+{"timestamp":"2026-02-01T14:12:06.660Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:12:10.279Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T14:12:10.329Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T14:12:10.393Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T14:12:10.418Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T14:12:10.424Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T14:12:10.424Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T14:12:10.425Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T14:12:10.425Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T14:12:10.427Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T14:12:10.427Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T14:12:10.427Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T14:12:10.427Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T14:12:10.468Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:13:02.989Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/auth/verify"}
+{"timestamp":"2026-02-01T14:13:03.254Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/auth/verify"}
+{"timestamp":"2026-02-01T14:13:03.278Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/recipes"}
+{"timestamp":"2026-02-01T14:13:03.283Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/inventory/complete"}
+{"timestamp":"2026-02-01T14:13:03.294Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/ingredients"}
+{"timestamp":"2026-02-01T14:13:03.296Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/ingredients-suppliers"}
+{"timestamp":"2026-02-01T14:13:03.299Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/suppliers"}
+{"timestamp":"2026-02-01T14:13:03.300Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/orders"}
+{"timestamp":"2026-02-01T14:13:03.311Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/recipes-variants"}
+{"timestamp":"2026-02-01T14:13:03.312Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-02-01T14:13:03.314Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-02-01T14:13:03.315Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/sales"}
+{"timestamp":"2026-02-01T14:13:03.320Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/empleados"}
+{"timestamp":"2026-02-01T14:13:04.321Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/recipes-variants"}
+{"timestamp":"2026-02-01T14:13:04.820Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:13:05.827Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:13:05.978Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:13:06.329Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:13:06.987Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:13:07.485Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:13:07.837Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:13:08.493Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:13:08.996Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:13:10.468Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:13:10.502Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:14:10.447Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:14:36.195Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T14:14:37.244Z","level":"warn","message":"Auth fallido: Token inválido","error":"invalid signature","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T14:14:37.743Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:14:38.753Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:14:39.254Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:14:40.763Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:15:10.473Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:15:49.966Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:49.994Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.018Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.027Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.028Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/inventory/complete","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.034Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.040Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/orders","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.043Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients-suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.055Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.056Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.057Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.057Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:50.062Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/empleados","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:51.062Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:51.564Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:15:52.570Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:15:52.932Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:53.071Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:53.940Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:54.438Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:15:54.576Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:15:55.445Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:15:55.949Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:15:57.458Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:16:10.407Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:17:10.466Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:18:10.461Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:19:10.453Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:19:36.173Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:19:37.186Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:19:37.686Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:19:38.693Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:19:39.191Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:19:40.698Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:20:10.464Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:20:50.894Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:20:52.885Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:20:52.890Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:20:54.884Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:20:55.886Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:20:57.883Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:21:10.454Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:22:10.478Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:23:10.461Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:24:10.464Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:24:36.152Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:24:37.165Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:24:37.662Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:24:38.674Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:24:39.177Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:24:40.685Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:25:10.456Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:25:50.911Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:25:52.880Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:25:52.882Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:25:54.878Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:25:55.883Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:25:57.878Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:26:10.461Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:27:10.456Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:28:10.453Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:29:10.457Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:29:36.146Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:29:37.155Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:29:37.658Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:29:38.662Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:29:39.163Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:29:40.671Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:30:10.469Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:30:50.877Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:30:52.870Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:30:52.874Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:30:54.869Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:30:55.871Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:30:57.869Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:31:10.447Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:32:10.485Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:33:10.472Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:34:10.486Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:34:36.161Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:34:37.171Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:34:37.671Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:34:38.681Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:34:39.180Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:34:40.686Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:35:10.485Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:35:50.894Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:35:52.887Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:35:52.890Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:35:54.910Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:35:55.888Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:35:57.885Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:36:10.477Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:37:10.481Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:38:10.495Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:39:10.482Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:39:36.153Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:39:37.162Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:39:37.662Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:39:38.670Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:39:39.172Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:39:40.678Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:40:10.493Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:40:50.888Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:40:52.880Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:40:52.883Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:40:54.879Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:40:55.881Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:40:57.878Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:41:10.483Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:42:10.504Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:43:10.466Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:44:10.492Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:44:36.147Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:44:37.161Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:44:37.656Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:44:38.668Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:44:39.170Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:44:40.676Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:45:10.489Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:45:50.883Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:45:52.876Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:45:52.879Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:45:54.875Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:45:55.877Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:45:57.872Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:46:10.487Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:47:10.486Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:48:10.491Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:49:10.484Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:49:36.143Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:49:37.152Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:49:37.653Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:49:38.660Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:49:39.160Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:49:40.668Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:50:10.492Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:51:10.479Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:51:33.878Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:51:35.868Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:51:35.873Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:51:37.863Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:51:38.866Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:51:40.864Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:52:10.509Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:53:10.491Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:54:10.505Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:54:36.145Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:54:37.156Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:54:37.655Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:54:38.665Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:54:39.167Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:54:40.676Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:55:10.501Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:56:10.521Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:56:33.899Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:56:35.871Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:56:35.875Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:56:37.865Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:56:38.870Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:56:40.868Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:57:10.500Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:58:10.515Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:59:10.495Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T14:59:36.138Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:59:37.149Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:59:37.648Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:59:38.654Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T14:59:39.157Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T14:59:40.665Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:00:10.521Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:01:10.505Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:01:33.875Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:01:35.865Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:01:35.870Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:01:37.863Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:01:38.867Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:01:40.868Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:02:10.510Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:03:10.505Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:04:10.549Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:04:36.135Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:04:37.147Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:04:37.647Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:04:38.654Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:04:39.155Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:04:40.662Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:05:10.504Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:06:10.517Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:06:33.894Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:06:35.858Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:06:35.864Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:06:37.856Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:06:38.857Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:06:40.856Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:07:10.512Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:08:10.519Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:09:10.515Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:09:36.129Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:09:37.139Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:09:37.636Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:09:38.647Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:09:39.146Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:09:40.652Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:10:10.505Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:11:10.514Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:11:33.856Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:11:35.841Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:11:35.845Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:11:37.840Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:11:38.840Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:11:40.839Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:12:10.498Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:13:10.506Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:14:10.489Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:14:36.108Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:14:37.119Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:14:37.618Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:14:38.626Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:14:39.135Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:14:40.649Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:15:10.494Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:16:10.488Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:16:33.851Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:16:35.830Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:16:35.835Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:16:37.829Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:16:38.831Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:16:40.829Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:17:10.494Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:18:10.502Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:19:10.493Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:19:36.098Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:19:37.108Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:19:37.608Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:19:38.617Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:19:39.118Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:19:40.625Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:20:10.493Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:21:10.507Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:21:33.834Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:21:35.830Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:21:35.838Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:21:37.823Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:21:38.826Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:21:40.824Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:22:10.507Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:23:10.511Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:24:10.488Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:24:36.095Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:24:37.106Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:24:37.605Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:24:38.615Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:24:39.115Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:24:40.626Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:25:10.509Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:26:10.489Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:26:33.850Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:26:35.818Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:26:35.822Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:26:37.815Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:26:38.818Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:26:40.814Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:27:10.487Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:28:10.509Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:29:10.504Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:29:36.087Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:29:37.098Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:29:37.597Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:29:38.604Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:29:39.107Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:29:40.617Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:30:10.495Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:31:10.515Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:31:33.814Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:31:35.800Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:31:35.804Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:31:37.800Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:31:38.803Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:31:40.799Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:32:10.469Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:33:10.497Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:34:10.497Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:34:36.073Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:34:37.084Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:34:37.583Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:34:38.592Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:34:39.090Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:34:40.596Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:35:10.491Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:36:10.497Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:36:33.821Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:36:35.794Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:36:35.800Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:36:37.792Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:36:38.794Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:36:40.793Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:37:10.491Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:38:10.496Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:39:10.491Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:39:36.061Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:39:37.070Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:39:37.571Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:39:38.576Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:39:39.079Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:39:40.589Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:40:10.492Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:41:10.500Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:41:33.797Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:41:35.788Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:41:35.792Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:41:37.784Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:41:38.788Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:41:40.786Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:42:10.482Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:43:10.502Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:44:10.501Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:44:36.058Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:44:37.070Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:44:37.569Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:44:38.577Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:44:39.077Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:44:40.589Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:45:10.445Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:46:10.498Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:46:33.809Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:46:35.777Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:46:35.782Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:46:37.774Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:46:38.778Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:46:40.776Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:47:10.493Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:48:10.499Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:49:10.498Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:49:36.047Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:49:37.058Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:49:37.555Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:49:38.574Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:49:39.067Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:49:40.577Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:50:10.487Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:51:10.500Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:51:33.819Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:51:35.787Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:51:35.791Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:51:37.785Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:51:38.785Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:51:40.785Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:52:10.648Z","level":"warn","message":"Error enviando heartbeat","error":"connect ENETUNREACH 72.61.103.248:443"}
+{"timestamp":"2026-02-01T15:53:10.514Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:54:14.566Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:54:36.059Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:54:37.067Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:54:37.569Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:54:38.575Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:54:39.074Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:54:40.583Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:55:10.509Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:56:10.515Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:56:33.828Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:56:35.806Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:56:35.821Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:56:37.824Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:56:38.782Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:56:40.783Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:57:00.519Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T15:57:00.584Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T15:57:00.623Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T15:57:00.626Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T15:57:00.629Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T15:57:00.629Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T15:57:00.629Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T15:57:00.630Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T15:57:00.630Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T15:57:00.630Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T15:57:00.630Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T15:57:00.631Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T15:57:00.745Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:58:00.717Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:58:37.927Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T15:58:37.973Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T15:58:37.993Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T15:58:37.996Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T15:58:37.998Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T15:58:37.998Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T15:58:37.999Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T15:58:37.999Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T15:58:37.999Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T15:58:37.999Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T15:58:37.999Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T15:58:37.999Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T15:58:38.108Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:59:05.622Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-01T15:59:36.065Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:37.080Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:37.581Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:38.129Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T15:59:38.587Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:39.087Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:40.597Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:47.790Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.054Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.071Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.074Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.075Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.078Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/inventory/complete","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.079Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/orders","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.081Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients-suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.090Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.091Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.095Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.097Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:48.100Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/empleados","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:49.100Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:49.595Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:50.607Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:50.797Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:51.108Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:51.806Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:52.304Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:52.616Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:53.121Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-01T15:59:53.310Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:53.814Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:55.320Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T15:59:58.094Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.113Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.146Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.147Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.148Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.150Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/inventory/complete","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.151Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/orders","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.152Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients-suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.158Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.160Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.164Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.165Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:58.168Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/empleados","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:59.163Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T15:59:59.664Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:00:00.668Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:00:01.097Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:00:01.168Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:00:01.610Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-01T16:00:02.154Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:00:02.605Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:00:02.674Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:00:04.197Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-01T16:00:38.124Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:01:38.123Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:02:38.123Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:03:38.117Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:04:36.060Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:04:37.079Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:04:37.581Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:04:38.113Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:04:38.587Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:04:39.087Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:04:40.594Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:04:58.846Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:05:38.104Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:06:38.121Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:07:38.126Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:08:38.112Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:09:36.039Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:09:37.047Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:09:37.546Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:09:38.101Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:09:38.554Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:09:39.055Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:09:40.562Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:09:58.814Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:10:38.115Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:11:38.127Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:12:38.122Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:13:38.102Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:14:36.010Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:14:37.020Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:14:37.521Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:14:38.081Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:14:38.527Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:14:39.027Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:14:40.534Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:14:58.804Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:15:38.080Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:16:38.095Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:17:38.083Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:18:38.069Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:19:35.994Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:19:37.004Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:19:37.503Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:19:38.075Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:19:38.510Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:19:39.010Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:19:40.520Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:19:58.770Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:20:38.087Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:21:38.071Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:22:38.078Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:23:35.884Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.897Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/auth/verify","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.905Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.916Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.922Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.924Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/inventory/complete","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.925Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/orders","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.926Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/ingredients-suppliers","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.943Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.943Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.946Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.949Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/sales","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:35.952Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/empleados","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:36.953Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:37.452Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:23:38.076Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:23:38.459Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:23:38.885Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:38.961Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/recipes-variants","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:39.893Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:40.391Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:23:40.468Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:23:41.400Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:23:41.901Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:23:43.420Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:31:30.986Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T16:31:31.050Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T16:31:31.099Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T16:31:31.100Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T16:31:31.103Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T16:31:31.103Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T16:31:31.103Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T16:31:31.103Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T16:31:31.103Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T16:31:31.103Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T16:31:31.104Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T16:31:31.104Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T16:31:31.203Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:32:31.193Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:33:17.960Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:33:31.128Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:34:31.200Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:35:31.191Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:35:41.730Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:35:42.744Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:35:43.246Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:35:44.251Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:35:44.755Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:35:46.262Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:36:31.192Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:37:31.185Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:38:15.760Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:38:31.180Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:39:31.169Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:40:31.178Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:40:41.706Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:40:42.715Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:40:43.214Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:40:44.222Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:40:44.722Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:40:46.231Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:41:31.176Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:42:31.188Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:43:15.738Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:43:31.163Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:44:31.188Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:45:31.175Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:45:41.701Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:45:42.711Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:45:43.212Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:45:44.219Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:45:44.718Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:45:46.225Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:46:31.171Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:47:31.190Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:48:15.732Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:48:31.166Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:49:31.188Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:50:31.184Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:50:41.703Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:50:42.711Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:50:43.212Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:50:44.219Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:50:44.719Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:50:46.226Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:51:31.183Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:52:31.198Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:53:15.766Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:53:31.178Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:54:31.244Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:55:31.207Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:55:41.715Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:55:42.740Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:55:43.236Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:55:44.261Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:55:44.752Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T16:55:46.266Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T16:56:31.186Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:57:31.186Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:58:15.745Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T16:58:31.173Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T16:59:31.178Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:00:31.188Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:00:41.690Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:00:42.700Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:00:43.200Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:00:44.208Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:00:44.708Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:00:46.215Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:01:31.190Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:01:36.311Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T17:01:36.377Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T17:01:36.400Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T17:01:36.403Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T17:01:36.407Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T17:01:36.407Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T17:01:36.408Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T17:01:36.408Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T17:01:36.408Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T17:01:36.408Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T17:01:36.409Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T17:01:36.409Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T17:01:36.514Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:02:36.508Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:03:11.147Z","level":"error","message":"Error no manejado","error":"column \"activo\" does not exist","stack":"error: column \"activo\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async RecipeRepository.findActive (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/RecipeRepository.js:34:24)\n    at async list (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/RecipeController.js:19:29)","url":"/api/recipes"}
+{"timestamp":"2026-02-01T17:03:13.814Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:03:36.463Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:04:36.545Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:05:36.540Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:05:41.727Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:05:42.749Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:05:43.251Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:05:44.256Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:05:44.755Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:05:46.263Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:06:36.535Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:07:36.524Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:08:11.742Z","level":"error","message":"Error no manejado","error":"column \"severity\" does not exist","stack":"error: column \"severity\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:08:36.521Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:09:36.523Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:10:36.515Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:10:41.727Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:10:42.773Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:10:43.254Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:10:44.283Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:10:44.782Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:10:46.300Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:11:36.579Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:12:22.285Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T17:12:22.338Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T17:12:22.363Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T17:12:22.365Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T17:12:22.369Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T17:12:22.369Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T17:12:22.369Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T17:12:22.369Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T17:12:22.369Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T17:12:22.369Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T17:12:22.370Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T17:12:22.370Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T17:12:22.477Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:28:12.407Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:29:12.408Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:30:02.737Z","level":"error","message":"Error no manejado","error":"database \"lacaleta\" does not exist","stack":"error: database \"lacaleta\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:30:12.400Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:30:41.700Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:30:42.710Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:30:43.212Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:30:44.219Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:30:44.719Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:30:46.226Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:31:12.403Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:32:12.413Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:33:12.400Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:34:12.402Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:35:02.716Z","level":"error","message":"Error no manejado","error":"database \"lacaleta\" does not exist","stack":"error: database \"lacaleta\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:35:12.403Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:35:41.691Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:35:42.701Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:35:43.200Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:35:44.209Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:35:44.710Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:35:46.217Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:36:12.415Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:37:12.405Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:38:12.423Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:39:12.407Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:40:02.746Z","level":"error","message":"Error no manejado","error":"database \"lacaleta\" does not exist","stack":"error: database \"lacaleta\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:40:12.413Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:40:41.688Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:40:42.698Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:40:43.196Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:40:44.207Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:40:44.708Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:40:46.215Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:41:12.424Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:42:12.420Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:43:12.413Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:44:12.424Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:45:02.738Z","level":"error","message":"Error no manejado","error":"database \"lacaleta\" does not exist","stack":"error: database \"lacaleta\" does not exist\n    at /Users/ikerfernandezcaballero/projects/lacaleta-api-dev/node_modules/pg-pool/index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async AlertRepository.getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/infrastructure/repositories/AlertRepository.js:118:24)\n    at async AlertService.getAlertStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/application/services/AlertService.js:138:16)\n    at async getStats (/Users/ikerfernandezcaballero/projects/lacaleta-api-dev/src/interfaces/http/controllers/AlertController.js:36:27)","url":"/api/v2/alerts/stats"}
+{"timestamp":"2026-02-01T17:45:12.413Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:45:41.702Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:45:42.728Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:45:43.229Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:45:44.233Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:45:44.734Z","level":"warn","message":"Auth fallido: Token no proporcionado","url":"/api/v2/alerts/stats","origin":"http://localhost:3000"}
+{"timestamp":"2026-02-01T17:45:46.241Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-01T17:46:12.425Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:46:22.205Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.0","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-01T17:46:22.286Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-01T17:46:22.328Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-01T17:46:22.347Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-01T17:46:22.390Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-01T17:46:22.389Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-01T17:46:22.395Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-01T17:46:22.395Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-01T17:46:22.399Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-01T17:46:22.398Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-01T17:46:22.402Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-01T17:46:22.402Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-01T17:46:22.429Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:47:22.393Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:48:22.379Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-01T17:49:22.400Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}

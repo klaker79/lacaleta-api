@@ -70,17 +70,18 @@ class Recipe {
     toDTO() {
         return {
             id: this.id,
-            name: this.name,
-            description: this.description,
-            categoryId: this.categoryId,
-            portions: this.portions,
-            salePrice: this.salePrice,
-            calculatedCost: this.calculatedCost,
-            costPerPortion: this.costPerPortion,
-            marginPercentage: this.marginPercentage,
-            foodCostPercentage: this.foodCostPercentage,
-            components: this.components,
-            active: this.active
+            nombre: this.name,
+            descripcion: this.description,
+            categoria_id: this.categoryId,
+            raciones: this.portions,
+            precio_venta: this.salePrice,
+            coste_calculado: this.calculatedCost,
+            coste_por_racion: this.costPerPortion,
+            margen_porcentaje: this.marginPercentage,
+            food_cost: this.foodCostPercentage,
+            ingredientes: this.components,
+            activo: this.active,
+            restaurante_id: this.restaurantId
         };
     }
 }

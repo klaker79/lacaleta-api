@@ -82,15 +82,13 @@ class Sale {
     toDTO() {
         return {
             id: this.id,
-            recipeId: this.recipeId,
-            recipeName: this.recipeName,
-            quantity: this.quantity,
-            unitPrice: this.unitPrice,
+            receta_id: this.recipeId,
+            receta_nombre: this.recipeName,
+            cantidad: this.quantity,
+            precio_unitario: this.unitPrice,
             total: this.total,
-            date: this.date,
-            formattedDate: this.getFormattedDate(),
-            isActive: this.isActive(),
-            isToday: this.isToday()
+            fecha: this.date,
+            restaurante_id: this.restaurantId
         };
     }
 

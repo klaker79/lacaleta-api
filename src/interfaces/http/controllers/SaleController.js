@@ -27,11 +27,8 @@ class SaleController {
                 sales = await repo.findActive(restaurantId, parseInt(limit) || 100);
             }
 
-            res.json({
-                success: true,
-                data: sales.map(s => s.toDTO()),
-                count: sales.length
-            });
+            // Retornar array directo para compatibilidad con frontend
+            res.json(sales.map(s => s.toDTO()));
         } catch (error) {
             next(error);
         }

@@ -16,10 +16,6 @@ const { setupEventHandlers } = require('./src/application/bootstrap');
 const recipeRoutesV2 = require('./src/interfaces/http/routes/recipe.routes.v2');
 const alertRoutes = require('./src/interfaces/http/routes/alert.routes');
 const kpiRoutes = require('./src/interfaces/http/routes/kpi.routes');
-const SupplierController = require('./src/interfaces/http/controllers/SupplierController');
-const PurchaseController = require('./src/interfaces/http/controllers/PurchaseController');
-const RecipeController = require('./src/interfaces/http/controllers/RecipeController');
-const SaleController = require('./src/interfaces/http/controllers/SaleController');
 
 // ========== RESEND (Email) ==========
 // 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
@@ -1861,14 +1857,6 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 });
 
 // ========== RECETAS ==========
-// === MIGRADO A CONTROLLER (Fase 4C) ===
-app.get('/api/recipes', authMiddleware, RecipeController.list);
-app.get('/api/recipes/:id', authMiddleware, RecipeController.getById);
-app.post('/api/recipes', authMiddleware, RecipeController.create);
-app.put('/api/recipes/:id', authMiddleware, RecipeController.update);
-app.delete('/api/recipes/:id', authMiddleware, RecipeController.delete);
-
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
@@ -1927,14 +1915,6 @@ app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== PROVEEDORES ==========
-// === MIGRADO A CONTROLLER (Fase 4B) ===
-app.get('/api/suppliers', authMiddleware, SupplierController.list);
-app.get('/api/suppliers/:id', authMiddleware, SupplierController.getById);
-app.post('/api/suppliers', authMiddleware, SupplierController.create);
-app.put('/api/suppliers/:id', authMiddleware, SupplierController.update);
-app.delete('/api/suppliers/:id', authMiddleware, SupplierController.delete);
-
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
 app.get('/api/suppliers', authMiddleware, async (req, res) => {
     try {
         // Obtener proveedores base
@@ -2021,14 +2001,6 @@ app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== PEDIDOS ==========
-// === MIGRADO A CONTROLLER (Fase 4E) ===
-app.get('/api/orders', authMiddleware, PurchaseController.list);
-app.get('/api/orders/:id', authMiddleware, PurchaseController.getById);
-app.post('/api/orders', authMiddleware, PurchaseController.create);
-app.put('/api/orders/:id', authMiddleware, PurchaseController.update);
-app.delete('/api/orders/:id', authMiddleware, PurchaseController.delete);
-
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
 app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY fecha DESC', [req.restauranteId]);
@@ -2178,13 +2150,6 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== VENTAS ==========
-// === MIGRADO A CONTROLLER (Fase 4D) ===
-app.get('/api/sales', authMiddleware, SaleController.list);
-app.post('/api/sales', authMiddleware, SaleController.create);
-app.post('/api/sales/bulk', authMiddleware, SaleController.createBulk);
-app.delete('/api/sales/:id', authMiddleware, SaleController.delete);
-
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha } = req.query;

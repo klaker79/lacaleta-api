@@ -18,11 +18,8 @@ class RecipeController {
 
             const recipes = await repo.findActive(restaurante_id);
 
-            res.json({
-                success: true,
-                data: recipes.map(r => r.toDTO()),
-                count: recipes.length
-            });
+            // Retornar array directo para compatibilidad con frontend
+            res.json(recipes.map(r => r.toDTO()));
         } catch (error) {
             next(error);
         }

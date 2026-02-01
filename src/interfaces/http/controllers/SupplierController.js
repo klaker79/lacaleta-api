@@ -18,11 +18,8 @@ class SupplierController {
 
             const suppliers = await repo.findActive(restaurantId);
 
-            res.json({
-                success: true,
-                data: suppliers.map(s => s.toDTO()),
-                count: suppliers.length
-            });
+            // Retornar array directo para compatibilidad con frontend
+            res.json(suppliers.map(s => s.toDTO()));
         } catch (error) {
             next(error);
         }
