@@ -39,12 +39,21 @@ class Recipe {
                 return [];
             }
         }
-        return (components || []).map(c => ({
-            ingredientId: c.ingrediente_id || c.ingredientId,
-            quantity: parseFloat(c.cantidad || c.quantity || 0),
-            unit: c.unidad || c.unit || 'g'
-        }));
+        return (components || []).map(c => {
+            const id = c.ingrediente_id || c.ingredienteId || c.ingredientId;
+            return {
+                ingrediente_id: id,
+                ingredientId: id,
+                ingredienteId: id,  // Frontend español espera este campo
+                cantidad: parseFloat(c.cantidad || c.quantity || 0),
+                quantity: parseFloat(c.cantidad || c.quantity || 0),
+                unidad: c.unidad || c.unit || 'g',
+                unit: c.unidad || c.unit || 'g'
+            };
+        });
     }
+
+
 
     /**
      * Actualiza los costes calculados

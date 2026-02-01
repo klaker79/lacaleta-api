@@ -43,14 +43,45 @@ class RecipeController {
                 });
             }
 
+            // Enriquecer ingredientes con nombres
+            const dto = recipe.toDTO();
+            if (dto.ingredientes && dto.ingredientes.length > 0) {
+                const ingredientIds = dto.ingredientes
+                    .map(i => i.ingrediente_id || i.ingredientId)
+                    .filter(id => id);
+
+                if (ingredientIds.length > 0) {
+                    const ingredientQuery = await pool.query(
+                        'SELECT id, nombre, unidad, precio FROM ingredientes WHERE id = ANY($1)',
+                        [ingredientIds]
+                    );
+                    const ingredientMap = {};
+                    ingredientQuery.rows.forEach(ing => {
+                        ingredientMap[ing.id] = ing;
+                    });
+
+                    dto.ingredientes = dto.ingredientes.map(i => {
+                        const ingId = i.ingrediente_id || i.ingredientId;
+                        const ingData = ingredientMap[ingId] || {};
+                        return {
+                            ...i,
+                            nombre: ingData.nombre,
+                            ingrediente_nombre: ingData.nombre,
+                            precio: ingData.precio
+                        };
+                    });
+                }
+            }
+
             res.json({
                 success: true,
-                data: recipe.toDTO()
+                data: dto
             });
         } catch (error) {
             next(error);
         }
     }
+
 
     /**
      * POST /api/recipes/:id/calculate-cost
