@@ -10,7 +10,8 @@ class Sale {
     constructor(data) {
         this.id = data.id;
         this.restaurantId = data.restaurante_id || data.restaurantId;
-        this.recipeId = data.receta_id || data.recipeId;
+        // Soportar todos los formatos: receta_id, recipeId, recetaId
+        this.recipeId = data.receta_id || data.recipeId || data.recetaId;
         this.recipeName = data.receta_nombre || data.recipeName || null;
         this.quantity = parseInt(data.cantidad || data.quantity) || 0;
         this.unitPrice = parseFloat(data.precio_unitario || data.unitPrice) || 0;
@@ -18,6 +19,7 @@ class Sale {
         this.date = data.fecha || data.date || new Date();
         this.deletedAt = data.deleted_at || data.deletedAt;
     }
+
 
     /**
      * Verifica si la venta está activa (no eliminada)
