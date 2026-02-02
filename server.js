@@ -2219,8 +2219,10 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
 app.post('/api/sales', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        // ⚡ NUEVO: Capturar variante, precio personalizado y fecha
-        const { recetaId, cantidad, varianteId, precioVariante, fecha } = req.body;
+        // ⚡ Soportar ambos formatos: recetaId (camelCase) y receta_id (snake_case)
+        const { recetaId: recetaIdCamel, receta_id, cantidad, varianteId: varianteIdCamel, variante_id, precioVariante, precio_unitario, fecha } = req.body;
+        const recetaId = recetaIdCamel || receta_id;
+        const varianteId = varianteIdCamel || variante_id;
 
         // Validar cantidad
         const cantidadValidada = validateCantidad(cantidad);
