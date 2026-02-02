@@ -1091,7 +1091,7 @@ app.post('/api/ingredients/match', authMiddleware, async (req, res) => {
 
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
     try {
-        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato } = req.body;
+        const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato, rendimiento } = req.body;
 
         // Validación numérica segura (previene NaN, valores negativos)
         const finalPrecio = validatePrecio(precio);
@@ -1101,10 +1101,11 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
         const finalFamilia = familia || 'alimento';
         const finalFormatoCompra = formato_compra || null;
         const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;
+        const finalRendimiento = parseInt(rendimiento) || 100;
 
         const result = await pool.query(
-            'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-            [nombre, finalProveedorId, finalPrecio, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
+            'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato, rendimiento) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+            [nombre, finalProveedorId, finalPrecio, unidad || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -1156,6 +1157,9 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
         const finalCantidadPorFormato = body.cantidad_por_formato !== undefined
             ? (body.cantidad_por_formato ? validateCantidad(body.cantidad_por_formato) : null)
             : existing.cantidad_por_formato;
+        const finalRendimiento = body.rendimiento !== undefined
+            ? (parseInt(body.rendimiento) || 100)
+            : (existing.rendimiento || 100);
 
         // Log para debug (remover en producción)
         log('info', 'Actualizando ingrediente con preservación de datos', {
@@ -1165,8 +1169,8 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
         });
 
         const result = await pool.query(
-            'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
-            [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato]
+            'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
+            [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
         );
         res.json(result.rows[0] || {});
     } catch (err) {
