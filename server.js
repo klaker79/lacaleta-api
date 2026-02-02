@@ -2183,13 +2183,15 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== VENTAS ==========
-// === MIGRADO A CONTROLLER (Fase 4D) ===
-app.get('/api/sales', authMiddleware, SaleController.list);
-app.post('/api/sales', authMiddleware, SaleController.create);
-app.post('/api/sales/bulk', authMiddleware, SaleController.createBulk);
-app.delete('/api/sales/:id', authMiddleware, SaleController.delete);
+// === MIGRADO A CONTROLLER (Fase 4D) - DESHABILITADO ===
+// TODO: SaleController.create no busca precio de receta ni descuenta inventario
+// El código legacy SÍ lo hace. Restaurar legacy hasta migrar completamente.
+// app.get('/api/sales', authMiddleware, SaleController.list);
+// app.post('/api/sales', authMiddleware, SaleController.create);
+// app.post('/api/sales/bulk', authMiddleware, SaleController.createBulk);
+// app.delete('/api/sales/:id', authMiddleware, SaleController.delete);
 
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
+// --- LEGACY (RESTAURADO - Busca precio y descuenta inventario) ---
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha } = req.query;
