@@ -1863,14 +1863,17 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 });
 
 // ========== RECETAS ==========
-// === MIGRADO A CONTROLLER (Fase 4C) ===
-app.get('/api/recipes', authMiddleware, RecipeController.list);
-app.get('/api/recipes/:id', authMiddleware, RecipeController.getById);
-app.post('/api/recipes', authMiddleware, RecipeController.create);
-app.put('/api/recipes/:id', authMiddleware, RecipeController.update);
-app.delete('/api/recipes/:id', authMiddleware, RecipeController.delete);
+// === MIGRADO A CONTROLLER (Fase 4C) - DESHABILITADO POR BUG EN PRODUCCIÓN ===
+// TODO: El RecipeRepository.findActive() filtra por 'activo = true' pero 
+// algunas recetas en producción pueden tener activo = null, causando 500
+// app.get('/api/recipes', authMiddleware, RecipeController.list);
+// app.get('/api/recipes/:id', authMiddleware, RecipeController.getById);
+// app.post('/api/recipes', authMiddleware, RecipeController.create);
+// app.put('/api/recipes/:id', authMiddleware, RecipeController.update);
+// app.delete('/api/recipes/:id', authMiddleware, RecipeController.delete);
 
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
+
+// --- LEGACY (RESTAURADO - El controller tiene bug con 'activo') ---
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
