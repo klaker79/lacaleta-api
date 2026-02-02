@@ -2285,17 +2285,27 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
         const porciones = parseInt(receta.porciones) || 1;
         for (const ing of ingredientesReceta) {
+            // 🔧 FIX: Soportar múltiples formatos de ID de ingrediente
+            const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
+            const ingCantidad = ing.cantidad || ing.quantity || 0;
+
+            if (!ingId) {
+                log('warn', 'Ingrediente sin ID en receta', { recetaId, ing });
+                continue;
+            }
+
             // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
             await client.query(
                 'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
-                [ing.ingredienteId]
+                [ingId]
             );
             // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
-            const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidadValidada * factorVariante;
+            const cantidadADescontar = (ingCantidad / porciones) * cantidadValidada * factorVariante;
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
-                [cantidadADescontar, ing.ingredienteId]
+                [cantidadADescontar, ingId]
             );
+            log('debug', 'Stock descontado', { ingredienteId: ingId, cantidad: cantidadADescontar });
         }
 
         await client.query('COMMIT');
