@@ -2142,13 +2142,28 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 
             const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
 
-            // Borrar TODAS las compras de este pedido de una sola vez
-            await client.query(
+            // Borrar compras de este pedido (primero intenta por pedido_id)
+            const deleteResult = await client.query(
                 `DELETE FROM precios_compra_diarios 
                  WHERE pedido_id = $1 
                  AND restaurante_id = $2`,
                 [req.params.id, req.restauranteId]
             );
+
+            // Fallback: Si no se borrò nada (registros antiguos sin pedido_id), usar método legacy
+            if (deleteResult.rowCount === 0 && fechaRecepcion) {
+                for (const item of ingredientes) {
+                    const ingId = item.ingredienteId || item.ingrediente_id;
+                    await client.query(
+                        `DELETE FROM precios_compra_diarios 
+                         WHERE ingrediente_id = $1 
+                         AND fecha::date = $2::date 
+                         AND restaurante_id = $3
+                         AND pedido_id IS NULL`,
+                        [ingId, fechaRecepcion, req.restauranteId]
+                    );
+                }
+            }
 
             // Revertir stock de cada ingrediente
             for (const item of ingredientes) {
