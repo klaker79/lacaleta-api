@@ -2083,8 +2083,8 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
             for (const item of ingredientes) {
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
-                const cantidad = parseFloat(item.cantidad) || 0;
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
+                const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                 const total = precioReal * cantidad;
 
                 // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
