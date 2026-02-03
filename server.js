@@ -2091,14 +2091,15 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                 // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
                 await client.query(`
                     INSERT INTO precios_compra_diarios 
-                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     ON CONFLICT (ingrediente_id, fecha, restaurante_id)
                     DO UPDATE SET 
                         precio_unitario = EXCLUDED.precio_unitario,
                         cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [item.ingredienteId, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null]);
+                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra,
+                        pedido_id = EXCLUDED.pedido_id
+                `, [item.ingredienteId || item.ingrediente_id, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null, id]);
             }
 
             log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
@@ -2141,20 +2142,19 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 
             const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
 
+            // Borrar TODAS las compras de este pedido de una sola vez
+            await client.query(
+                `DELETE FROM precios_compra_diarios 
+                 WHERE pedido_id = $1 
+                 AND restaurante_id = $2`,
+                [req.params.id, req.restauranteId]
+            );
+
+            // Revertir stock de cada ingrediente
             for (const item of ingredientes) {
                 const ingId = item.ingredienteId || item.ingrediente_id;
                 const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
-                // Borrar de precios_compra_diarios
-                await client.query(
-                    `DELETE FROM precios_compra_diarios 
-                     WHERE ingrediente_id = $1 
-                     AND fecha::date = $2::date 
-                     AND restaurante_id = $3`,
-                    [ingId, fechaRecepcion, req.restauranteId]
-                );
-
-                // Revertir el stock del ingrediente
                 if (cantidadRecibida > 0) {
                     await client.query(
                         `UPDATE ingredientes 
