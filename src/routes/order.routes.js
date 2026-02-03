@@ -114,21 +114,26 @@ router.put('/:id', authMiddleware, async (req, res) => {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
             for (const item of ingredientes) {
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
-                const cantidad = parseFloat(item.cantidad) || 0;
-                const total = precioReal * cantidad;
+                // ⚠️ CRITICAL FIX: Usar cantidadRecibida y precioReal (datos reales de recepción)
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
+                const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
+                const total = precioReal * cantidadRecibida;
+                const ingId = item.ingredienteId || item.ingrediente_id;
 
-                await client.query(`
-                    INSERT INTO precios_compra_diarios 
-                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
-                    DO UPDATE SET 
-                        precio_unitario = EXCLUDED.precio_unitario,
-                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [item.ingredienteId, fechaCompra, precioReal, cantidad, total,
-                req.restauranteId, result.rows[0]?.proveedor_id || null]);
+                // Solo insertar si hay cantidad recibida y el item NO está como no-entregado
+                if (ingId && cantidadRecibida > 0 && item.estado !== 'no-entregado') {
+                    await client.query(`
+                        INSERT INTO precios_compra_diarios 
+                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                        DO UPDATE SET 
+                            precio_unitario = EXCLUDED.precio_unitario,
+                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+                    `, [ingId, fechaCompra, precioReal, cantidadRecibida, total,
+                        req.restauranteId, result.rows[0]?.proveedor_id || null]);
+                }
             }
 
             log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
