@@ -25,8 +25,12 @@ const { validatePrecio, validateCantidad, validateNumber } = require('../utils/v
  */
 router.get('/', authMiddleware, async (req, res) => {
     try {
-        const { include_inactive } = req.query;
+        const { include_inactive, include_deleted } = req.query;
         let query = 'SELECT * FROM ingredientes WHERE restaurante_id = $1';
+        // Filter out soft-deleted unless explicitly requested
+        if (include_deleted !== 'true') {
+            query += ' AND deleted_at IS NULL';
+        }
         if (include_inactive !== 'true') {
             query += ' AND (activo IS NULL OR activo = TRUE)';
         }
@@ -141,17 +145,39 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
 /**
  * DELETE /api/ingredients/:id
- * Eliminar ingrediente
+ * Soft delete ingrediente (NO elimina permanentemente)
+ * ⚠️ SECURITY: Usa soft delete para preservar integridad de datos
  */
 router.delete('/:id', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1', [req.params.id]);
-        await client.query('DELETE FROM ingredientes_alias WHERE ingrediente_id = $1', [req.params.id]);
-        await client.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
+
+        // Soft delete: marcar deleted_at en lugar de DELETE
+        const result = await client.query(
+            `UPDATE ingredientes SET deleted_at = CURRENT_TIMESTAMP, activo = false 
+             WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING id`,
+            [req.params.id, req.restauranteId]
+        );
+
+        if (result.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Ingrediente no encontrado o ya eliminado' });
+        }
+
+        // Soft delete también en tablas relacionadas
+        await client.query(
+            'DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1',
+            [req.params.id]
+        );
+        await client.query(
+            'DELETE FROM ingredientes_alias WHERE ingrediente_id = $1',
+            [req.params.id]
+        );
+
         await client.query('COMMIT');
-        res.json({ message: 'Eliminado' });
+        log('info', 'Ingrediente soft-deleted', { id: req.params.id, restaurante: req.restauranteId });
+        res.json({ message: 'Eliminado', id: req.params.id });
     } catch (err) {
         await client.query('ROLLBACK');
         log('error', 'Error eliminando ingrediente', { error: err.message });

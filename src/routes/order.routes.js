@@ -113,6 +113,19 @@ router.put('/:id', authMiddleware, async (req, res) => {
         if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
+            // 🔍 DEBUG: Log completo de lo que recibimos
+            log('info', '🔍 DEBUG: Procesando recepción de pedido', {
+                pedidoId: id,
+                estado,
+                fechaCompra: fechaCompra.toISOString(),
+                totalItems: ingredientes.length,
+                proveedorId: result.rows[0]?.proveedor_id,
+                restauranteId: req.restauranteId
+            });
+
+            let insertCount = 0;
+            let skipCount = 0;
+
             for (const item of ingredientes) {
                 // ⚠️ CRITICAL FIX: Usar cantidadRecibida y precioReal (datos reales de recepción)
                 const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
@@ -120,9 +133,22 @@ router.put('/:id', authMiddleware, async (req, res) => {
                 const total = precioReal * cantidadRecibida;
                 const ingId = item.ingredienteId || item.ingrediente_id;
 
+                // 🔍 DEBUG: Log cada item
+                log('info', `🔍 DEBUG: Item ${ingId}`, {
+                    ingId,
+                    precioReal,
+                    cantidadRecibida,
+                    total,
+                    itemEstado: item.estado,
+                    rawPrecioReal: item.precioReal,
+                    rawPrecioUnitario: item.precioUnitario,
+                    rawCantidadRecibida: item.cantidadRecibida,
+                    rawCantidad: item.cantidad
+                });
+
                 // Solo insertar si hay cantidad recibida y el item NO está como no-entregado
                 if (ingId && cantidadRecibida > 0 && item.estado !== 'no-entregado') {
-                    await client.query(`
+                    const insertResult = await client.query(`
                         INSERT INTO precios_compra_diarios 
                         (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -131,12 +157,32 @@ router.put('/:id', authMiddleware, async (req, res) => {
                             precio_unitario = EXCLUDED.precio_unitario,
                             cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
                             total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+                        RETURNING id, ingrediente_id, cantidad_comprada, total_compra
                     `, [ingId, fechaCompra, precioReal, cantidadRecibida, total,
                         req.restauranteId, result.rows[0]?.proveedor_id || null]);
+
+                    insertCount++;
+                    log('info', `✅ INSERT OK: ing ${ingId}`, {
+                        rowsAffected: insertResult.rowCount,
+                        returnedRow: insertResult.rows[0]
+                    });
+                } else {
+                    skipCount++;
+                    log('info', `⏭️ SKIP: ing ${ingId}`, {
+                        reason: !ingId ? 'no-ingId' : cantidadRecibida <= 0 ? 'cant-zero' : 'no-entregado',
+                        ingId,
+                        cantidadRecibida,
+                        itemEstado: item.estado
+                    });
                 }
             }
 
-            log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
+            log('info', '📊 RESUMEN: precios_compra_diarios', {
+                pedidoId: id,
+                totalItems: ingredientes.length,
+                insertados: insertCount,
+                saltados: skipCount
+            });
         }
 
         await client.query('COMMIT');
