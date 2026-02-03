@@ -113,42 +113,18 @@ router.put('/:id', authMiddleware, async (req, res) => {
         if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
-            // 🔍 DEBUG: Log completo de lo que recibimos
-            log('info', '🔍 DEBUG: Procesando recepción de pedido', {
-                pedidoId: id,
-                estado,
-                fechaCompra: fechaCompra.toISOString(),
-                totalItems: ingredientes.length,
-                proveedorId: result.rows[0]?.proveedor_id,
-                restauranteId: req.restauranteId
-            });
-
             let insertCount = 0;
             let skipCount = 0;
 
             for (const item of ingredientes) {
-                // ⚠️ CRITICAL FIX: Usar cantidadRecibida y precioReal (datos reales de recepción)
                 const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                 const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                 const total = precioReal * cantidadRecibida;
                 const ingId = item.ingredienteId || item.ingrediente_id;
 
-                // 🔍 DEBUG: Log cada item
-                log('info', `🔍 DEBUG: Item ${ingId}`, {
-                    ingId,
-                    precioReal,
-                    cantidadRecibida,
-                    total,
-                    itemEstado: item.estado,
-                    rawPrecioReal: item.precioReal,
-                    rawPrecioUnitario: item.precioUnitario,
-                    rawCantidadRecibida: item.cantidadRecibida,
-                    rawCantidad: item.cantidad
-                });
-
                 // Solo insertar si hay cantidad recibida y el item NO está como no-entregado
                 if (ingId && cantidadRecibida > 0 && item.estado !== 'no-entregado') {
-                    const insertResult = await client.query(`
+                    await client.query(`
                         INSERT INTO precios_compra_diarios 
                         (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -157,31 +133,16 @@ router.put('/:id', authMiddleware, async (req, res) => {
                             precio_unitario = EXCLUDED.precio_unitario,
                             cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
                             total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                        RETURNING id, ingrediente_id, cantidad_comprada, total_compra
                     `, [ingId, fechaCompra, precioReal, cantidadRecibida, total,
                         req.restauranteId, result.rows[0]?.proveedor_id || null]);
-
                     insertCount++;
-                    log('info', `✅ INSERT OK: ing ${ingId}`, {
-                        rowsAffected: insertResult.rowCount,
-                        returnedRow: insertResult.rows[0]
-                    });
                 } else {
                     skipCount++;
-                    log('info', `⏭️ SKIP: ing ${ingId}`, {
-                        reason: !ingId ? 'no-ingId' : cantidadRecibida <= 0 ? 'cant-zero' : 'no-entregado',
-                        ingId,
-                        cantidadRecibida,
-                        itemEstado: item.estado
-                    });
                 }
             }
 
-            log('info', '📊 RESUMEN: precios_compra_diarios', {
-                pedidoId: id,
-                totalItems: ingredientes.length,
-                insertados: insertCount,
-                saltados: skipCount
+            log('info', 'Pedido recibido - precios registrados', {
+                pedidoId: id, insertados: insertCount, saltados: skipCount
             });
         }
 
@@ -229,16 +190,32 @@ router.delete('/:id', authMiddleware, async (req, res) => {
             for (const item of ingredientes) {
                 const ingId = item.ingredienteId || item.ingrediente_id;
                 const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
+                const totalItem = precioReal * cantidadRecibida;
 
-                // Borrar de precios_compra_diarios
-                await client.query(
-                    `DELETE FROM precios_compra_diarios 
-                     WHERE ingrediente_id = $1 AND fecha::date = $2::date AND restaurante_id = $3`,
-                    [ingId, fechaRecepcion, req.restauranteId]
-                );
+                // 🔧 FIX Bug #2: Restar cantidad en vez de borrar todo el día
+                // Solo borra si la cantidad restante es <= 0
+                if (cantidadRecibida > 0) {
+                    await client.query(`
+                        UPDATE precios_compra_diarios 
+                        SET cantidad_comprada = cantidad_comprada - $4,
+                            total_compra = total_compra - $5
+                        WHERE ingrediente_id = $1 AND fecha::date = $2::date AND restaurante_id = $3`,
+                        [ingId, fechaRecepcion, req.restauranteId, cantidadRecibida, totalItem]
+                    );
+                    // Limpiar registros con cantidad <= 0
+                    await client.query(`
+                        DELETE FROM precios_compra_diarios 
+                        WHERE ingrediente_id = $1 AND fecha::date = $2::date AND restaurante_id = $3 
+                          AND cantidad_comprada <= 0`,
+                        [ingId, fechaRecepcion, req.restauranteId]
+                    );
+                }
 
                 // Revertir stock
                 if (cantidadRecibida > 0) {
+                    // 🔧 FIX Bug #3: FOR UPDATE lock para evitar race conditions
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ingId]);
                     await client.query(
                         `UPDATE ingredientes SET stock_actual = stock_actual - $1 
                          WHERE id = $2 AND restaurante_id = $3`,
