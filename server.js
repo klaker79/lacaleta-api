@@ -2142,24 +2142,32 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 
             const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
 
-            // Borrar compras de este pedido (primero intenta por pedido_id)
-            const deleteResult = await client.query(
-                `DELETE FROM precios_compra_diarios 
-                 WHERE pedido_id = $1 
-                 AND restaurante_id = $2`,
-                [req.params.id, req.restauranteId]
-            );
+            // Decrementar las compras de este pedido (en vez de borrar)
+            for (const item of ingredientes) {
+                const ingId = item.ingredienteId || item.ingrediente_id;
+                const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
+                const totalItem = precioReal * cantidadRecibida;
 
-            // Fallback: Si no se borrò nada (registros antiguos sin pedido_id), usar método legacy
-            if (deleteResult.rowCount === 0 && fechaRecepcion) {
-                for (const item of ingredientes) {
-                    const ingId = item.ingredienteId || item.ingrediente_id;
+                if (cantidadRecibida > 0 && fechaRecepcion) {
+                    // Restar cantidad y total de la fila existente
+                    await client.query(
+                        `UPDATE precios_compra_diarios 
+                         SET cantidad_comprada = cantidad_comprada - $1,
+                             total_compra = total_compra - $2
+                         WHERE ingrediente_id = $3 
+                         AND fecha::date = $4::date 
+                         AND restaurante_id = $5`,
+                        [cantidadRecibida, totalItem, ingId, fechaRecepcion, req.restauranteId]
+                    );
+
+                    // Si la cantidad quedó en 0 o negativo, eliminar la fila
                     await client.query(
                         `DELETE FROM precios_compra_diarios 
                          WHERE ingrediente_id = $1 
                          AND fecha::date = $2::date 
                          AND restaurante_id = $3
-                         AND pedido_id IS NULL`,
+                         AND cantidad_comprada <= 0`,
                         [ingId, fechaRecepcion, req.restauranteId]
                     );
                 }
