@@ -2069,18 +2069,19 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
         const { id } = req.params;
-        const { estado, ingredientes, totalRecibido, fechaRecepcion } = req.body;
+        const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido } = req.body;
+        const fechaRecepcionFinal = fecha_recepcion || fechaRecepcion;
 
         await client.query('BEGIN');
 
         const result = await client.query(
             'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
-            [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id, req.restauranteId]
+            [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinal || new Date(), id, req.restauranteId]
         );
 
         // Si el pedido se marca como recibido, registrar los precios de compra diarios
         if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
-            const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
+            const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
 
             for (const item of ingredientes) {
                 const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
