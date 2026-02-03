@@ -2030,12 +2030,15 @@ app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== PEDIDOS ==========
-// === MIGRADO A CONTROLLER (Fase 4E) ===
-app.get('/api/orders', authMiddleware, PurchaseController.list);
-app.get('/api/orders/:id', authMiddleware, PurchaseController.getById);
-app.post('/api/orders', authMiddleware, PurchaseController.create);
-app.put('/api/orders/:id', authMiddleware, PurchaseController.update);
-app.delete('/api/orders/:id', authMiddleware, PurchaseController.delete);
+// 🔧 IMPORTANTE: Las rutas de orders ahora se manejan en src/routes/order.routes.js
+// El PurchaseController.update tiene validación canBeModified() que bloquea la recepción de pedidos.
+// Las rutas modularizadas tienen la lógica correcta para registrar precios_compra_diarios.
+// --- DESHABILITADO: PurchaseController routes causan conflicto con order.routes.js ---
+// app.get('/api/orders', authMiddleware, PurchaseController.list);
+// app.get('/api/orders/:id', authMiddleware, PurchaseController.getById);
+// app.post('/api/orders', authMiddleware, PurchaseController.create);
+// app.put('/api/orders/:id', authMiddleware, PurchaseController.update);
+// app.delete('/api/orders/:id', authMiddleware, PurchaseController.delete);
 
 // --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
 app.get('/api/orders', authMiddleware, async (req, res) => {
