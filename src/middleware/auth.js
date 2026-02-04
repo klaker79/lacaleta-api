@@ -1,28 +1,20 @@
 /**
- * ============================================
- * auth.js - Middleware de Autenticación
- * ============================================
- * 
- * Middleware para verificar JWT tokens.
- * 
- * @author MindLoopIA
- * @version 1.0.0
+ * Middleware de Autenticación
+ * Extraído de server.js para modularización
  */
 
 const jwt = require('jsonwebtoken');
-const { log } = require('../utils/logger');
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-2024';
 
-/**
- * Middleware de autenticación JWT
- * Lee token de cookie httpOnly o header Authorization
- */
-function authMiddleware(req, res, next) {
-    // 1. Intentar leer token de httpOnly cookie
+// Logger simple (importar el real después)
+const log = (level, message, data = {}) => {
+    console.log(JSON.stringify({ timestamp: new Date().toISOString(), level, message, ...data }));
+};
+
+const authMiddleware = (req, res, next) => {
     let token = req.cookies?.auth_token;
 
-    // 2. Fallback a Authorization header
     if (!token) {
         const authHeader = req.headers.authorization;
         if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -68,12 +60,9 @@ function authMiddleware(req, res, next) {
             expiredAt: error.expiredAt || null
         });
     }
-}
+};
 
-/**
- * Middleware que requiere rol admin
- */
-function requireAdmin(req, res, next) {
+const requireAdmin = (req, res, next) => {
     if (!req.user || (req.user.rol !== 'admin' && req.user.rol !== 'api')) {
         log('warn', 'Acceso denegado a ruta protegida', {
             user: req.user ? req.user.email : 'anon',
@@ -82,6 +71,6 @@ function requireAdmin(req, res, next) {
         return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
     }
     next();
-}
+};
 
 module.exports = { authMiddleware, requireAdmin };

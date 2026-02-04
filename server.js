@@ -23,6 +23,12 @@ const SaleController = require('./src/interfaces/http/controllers/SaleController
 const StockMovementController = require('./src/interfaces/http/controllers/StockMovementController');
 const IngredientController = require('./src/interfaces/http/controllers/IngredientController');
 
+// Middleware modularizado
+const { authMiddleware, requireAdmin } = require('./src/middleware/auth');
+const { globalLimiter, authLimiter } = require('./src/middleware/rateLimit');
+const { log } = require('./src/utils/logger');
+const { validateNumber, validatePrecio, validateCantidad } = require('./src/utils/validators');
+
 // ========== RESEND (Email) ==========
 // 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -43,6 +49,7 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'https://app.mindloop.cloud',
+    'http://localhost:5173',
     'http://localhost:5500',
     'http://127.0.0.1:5500',
     'http://localhost:3000',
@@ -108,57 +115,7 @@ app.use(express.json({ limit: '10mb' }));
 // Parser de cookies para auth segura
 app.use(cookieParser());
 
-// ========== RATE LIMITING ==========
-// Protección contra DDoS y brute-force
-const globalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 1000, // 1000 requests por ventana
-    message: { error: 'Demasiadas peticiones, intenta más tarde' },
-    standardHeaders: true,
-    legacyHeaders: false
-});
-
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 50, // 50 intentos de login (aumentado para evitar bloqueos frecuentes)
-    message: { error: 'Demasiados intentos de login, espera 15 minutos' },
-    standardHeaders: true,
-    legacyHeaders: false
-});
-
 app.use(globalLimiter);
-
-// Logging Persistente
-const LOG_FILE = path.join(__dirname, 'server.log');
-const log = (level, message, data = {}) => {
-    const logEntry = JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level,
-        message,
-        ...data
-    });
-    console.log(logEntry);
-    fs.appendFile(LOG_FILE, logEntry + '\n', (err) => {
-        if (err) console.error('Error writing to log file:', err);
-    });
-};
-
-// ========== VALIDACIÓN NUMÉRICA SEGURA ==========
-// Helper para validar y sanitizar inputs numéricos (previene NaN, Infinity, negativos)
-const validateNumber = (value, defaultVal = 0, min = 0, max = Infinity) => {
-    const num = parseFloat(value);
-    if (isNaN(num) || !isFinite(num)) return defaultVal;
-    if (num < min) return min;
-    if (num > max) return max;
-    return num;
-};
-
-// Helper para validar precio (debe ser >= 0)
-const validatePrecio = (value) => validateNumber(value, 0, 0, 999999);
-
-// Helper para validar cantidad/stock (debe ser >= 0)
-const validateCantidad = (value) => validateNumber(value, 0, 0, 999999);
-
 // ========== GLOBAL ERROR HANDLERS ==========
 // Catch unhandled promise rejections (async errors) - prevents server crash
 process.on('unhandledRejection', (reason, promise) => {
@@ -526,71 +483,6 @@ pool.on('error', (err) => {
         log('error', 'Error DB', { error: err.message });
     }
 })();
-
-// ========== MIDDLEWARE DE AUTENTICACIÓN ==========
-const authMiddleware = (req, res, next) => {
-    // 1. Intentar leer token de httpOnly cookie (navegador)
-    // 2. Fallback a Authorization header (API/n8n/Postman)
-    let token = req.cookies?.auth_token;
-
-    if (!token) {
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            token = authHeader.split(' ')[1];
-        }
-    }
-
-    if (!token) {
-        log('warn', 'Auth fallido: Token no proporcionado', {
-            url: req.originalUrl,
-            origin: req.headers.origin || 'sin-origin'
-        });
-        return res.status(401).json({
-            error: 'Token no proporcionado',
-            code: 'NO_TOKEN',
-            hint: 'Incluye header: Authorization: Bearer <tu_token> o inicia sesión'
-        });
-    }
-
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-        req.restauranteId = decoded.restauranteId;
-        next();
-    } catch (error) {
-        log('warn', 'Auth fallido: Token inválido', {
-            error: error.message,
-            url: req.originalUrl
-        });
-
-        let errorMsg = 'Token inválido';
-        let code = 'INVALID_TOKEN';
-
-        if (error.name === 'TokenExpiredError') {
-            errorMsg = 'Token expirado. Por favor, vuelve a iniciar sesión.';
-            code = 'TOKEN_EXPIRED';
-            // Limpiar cookie expirada
-            res.clearCookie('auth_token');
-        }
-
-        return res.status(401).json({
-            error: errorMsg,
-            code: code,
-            expiredAt: error.expiredAt || null
-        });
-    }
-};
-
-const requireAdmin = (req, res, next) => {
-    if (!req.user || (req.user.rol !== 'admin' && req.user.rol !== 'api')) {
-        log('warn', 'Acceso denegado a ruta protegida', {
-            user: req.user ? req.user.email : 'anon',
-            url: req.originalUrl
-        });
-        return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
-    }
-    next();
-};
 
 // ========== RUTAS V2 (Arquitectura Limpia) ==========
 // Montar rutas de recetas v2 con autenticación
