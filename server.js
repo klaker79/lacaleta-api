@@ -493,6 +493,7 @@ pool.on('error', (err) => {
                 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
                 ALTER TABLE recetas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
                 ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
             `);
             log('info', 'Migraciones soft delete completadas');
         } catch (e) { log('warn', 'Migración soft delete', { error: e.message }); }
@@ -592,7 +593,54 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-// ========== RUTAS V2 (Arquitectura Limpia) ==========
+// ========== RATE LIMITING ==========
+// Protección contra abuso de API (200 req/min por usuario)
+const rateLimit = {};
+const RATE_LIMIT_WINDOW = 60000; // 1 minuto
+const RATE_LIMIT_MAX = 200; // requests por minuto
+
+const rateLimitMiddleware = (req, res, next) => {
+    const key = req.restauranteId || req.ip || 'anonymous';
+    const now = Date.now();
+
+    if (!rateLimit[key]) {
+        rateLimit[key] = { count: 1, start: now };
+        return next();
+    }
+
+    // Reset si pasó la ventana
+    if (now - rateLimit[key].start > RATE_LIMIT_WINDOW) {
+        rateLimit[key] = { count: 1, start: now };
+        return next();
+    }
+
+    rateLimit[key].count++;
+
+    if (rateLimit[key].count > RATE_LIMIT_MAX) {
+        const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - rateLimit[key].start)) / 1000);
+        log('warn', 'Rate limit exceeded', { key, count: rateLimit[key].count });
+        return res.status(429).json({
+            error: 'Demasiadas solicitudes. Espera un momento.',
+            retryAfter
+        });
+    }
+
+    next();
+};
+
+// Limpiar rate limits cada 5 minutos para evitar memory leak
+setInterval(() => {
+    const now = Date.now();
+    for (const key in rateLimit) {
+        if (now - rateLimit[key].start > RATE_LIMIT_WINDOW * 2) {
+            delete rateLimit[key];
+        }
+    }
+}, 300000);
+
+// Aplicar rate limiting a todas las rutas API (después de auth)
+app.use('/api', rateLimitMiddleware);
+
 // Montar rutas de recetas v2 con autenticación
 app.use('/api/v2/recipes', authMiddleware, recipeRoutesV2);
 app.use('/api/v2/alerts', authMiddleware, alertRoutes);
@@ -953,8 +1001,8 @@ app.delete('/api/team/:id', authMiddleware, requireAdmin, async (req, res) => {
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const { include_inactive } = req.query;
-        // Por defecto solo devuelve activos, a menos que se pida incluir inactivos
-        let query = 'SELECT * FROM ingredientes WHERE restaurante_id = $1';
+        // Por defecto solo devuelve activos y no eliminados
+        let query = 'SELECT * FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL';
         if (include_inactive !== 'true') {
             query += ' AND (activo IS NULL OR activo = TRUE)';
         }
@@ -1174,23 +1222,22 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        // Borrar asociaciones con proveedores (foreign key)
-        await client.query('DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1', [req.params.id]);
-        // Borrar alias (foreign key)
-        await client.query('DELETE FROM ingredientes_alias WHERE ingrediente_id = $1', [req.params.id]);
-        // Luego borrar el ingrediente
-        await client.query('DELETE FROM ingredientes WHERE id=$1 AND restaurante_id=$2', [req.params.id, req.restauranteId]);
-        await client.query('COMMIT');
-        res.json({ message: 'Eliminado' });
+        // SOFT DELETE: marca como eliminado sin borrar datos
+        const result = await pool.query(
+            'UPDATE ingredientes SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING id',
+            [req.params.id, req.restauranteId]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado o ya eliminado' });
+        }
+
+        log('info', 'Ingrediente soft deleted', { id: req.params.id });
+        res.json({ message: 'Eliminado', id: result.rows[0].id });
     } catch (err) {
-        await client.query('ROLLBACK');
         log('error', 'Error eliminando ingrediente', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
-    } finally {
-        client.release();
     }
 });
 
