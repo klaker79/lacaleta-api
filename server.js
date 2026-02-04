@@ -3931,7 +3931,7 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
 
         // Primero, contar TODAS las mermas del restaurante sin filtro de fecha
         const countAll = await pool.query(`
-            SELECT COUNT(*) as total FROM mermas WHERE restaurante_id = $1
+            SELECT COUNT(*) as total FROM mermas WHERE restaurante_id = $1 AND deleted_at IS NULL
         `, [req.restauranteId]);
 
         log('info', `Total mermas en BD para restaurante ${req.restauranteId}: ${countAll.rows[0].total}`);
@@ -4029,7 +4029,7 @@ app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
 
         // 1. Obtener la merma antes de borrarla
         const mermaResult = await client.query(
-            'SELECT * FROM mermas WHERE id = $1 AND restaurante_id = $2',
+            'SELECT * FROM mermas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
             [req.params.id, req.restauranteId]
         );
 
@@ -4055,14 +4055,15 @@ app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
             });
         }
 
-        // 3. Borrar la merma
+        // 3. SOFT DELETE de la merma (no borrar físicamente para tener historial)
+        // ⚡ FIX Bug #6: Cambiar de HARD DELETE a SOFT DELETE
         await client.query(
-            'DELETE FROM mermas WHERE id = $1',
+            'UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
             [req.params.id]
         );
 
         await client.query('COMMIT');
-        log('info', 'Merma eliminada', { id: req.params.id, ingrediente: merma.ingrediente_nombre });
+        log('info', 'Merma eliminada (soft delete)', { id: req.params.id, ingrediente: merma.ingrediente_nombre });
         res.json({ success: true, message: 'Merma eliminada y stock restaurado' });
     } catch (err) {
         await client.query('ROLLBACK');
