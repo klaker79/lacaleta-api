@@ -615,14 +615,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// DEBUG: Test supplier routes
-app.get('/api/debug/suppliers-test', (req, res) => {
-    res.json({
-        message: 'Supplier routes debug endpoint works',
-        timestamp: new Date().toISOString(),
-        routes: ['GET /api/ingredients/:id/suppliers', 'POST /api/ingredients/:id/suppliers']
-    });
-});
+// DEBUG: REMOVED - No exponer en producción
+// app.get('/api/debug/suppliers-test', (req, res) => { ... });
 
 // Health Check
 app.get('/api/health', async (req, res) => {
@@ -1867,9 +1861,9 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 });
 
 // ========== RECETAS ==========
-// === MIGRADO A CONTROLLER (Fase 4C) - DESHABILITADO POR BUG EN PRODUCCIÓN ===
-// TODO: El RecipeRepository.findActive() filtra por 'activo = true' pero 
-// algunas recetas en producción pueden tener activo = null, causando 500
+// === MIGRADO A CONTROLLER (Fase 4C) ===
+// FIXED: RecipeRepository.findActive() ahora acepta activo = true OR NULL
+// El controller se puede reactivar cuando se quiera migrar completamente.
 // app.get('/api/recipes', authMiddleware, RecipeController.list);
 // app.get('/api/recipes/:id', authMiddleware, RecipeController.getById);
 // app.post('/api/recipes', authMiddleware, RecipeController.create);
@@ -1877,7 +1871,7 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 // app.delete('/api/recipes/:id', authMiddleware, RecipeController.delete);
 
 
-// --- LEGACY (RESTAURADO - El controller tiene bug con 'activo') ---
+// --- LEGACY (Mantener activo hasta migración completa) ---
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
@@ -1943,91 +1937,17 @@ app.post('/api/suppliers', authMiddleware, SupplierController.create);
 app.put('/api/suppliers/:id', authMiddleware, SupplierController.update);
 app.delete('/api/suppliers/:id', authMiddleware, SupplierController.delete);
 
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
-app.get('/api/suppliers', authMiddleware, async (req, res) => {
-    try {
-        // Obtener proveedores base
-        const result = await pool.query('SELECT * FROM proveedores WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
-        const proveedores = result.rows || [];
-
-        // Obtener ingredientes de la tabla de relación (ingredientes secundarios)
-        const relaciones = await pool.query(
-            'SELECT proveedor_id, ingrediente_id FROM ingredientes_proveedores WHERE proveedor_id = ANY($1)',
-            [proveedores.map(p => p.id)]
-        );
-
-        // Crear mapa de ingredientes por proveedor
-        const ingPorProveedor = {};
-        relaciones.rows.forEach(rel => {
-            if (!ingPorProveedor[rel.proveedor_id]) {
-                ingPorProveedor[rel.proveedor_id] = new Set();
-            }
-            ingPorProveedor[rel.proveedor_id].add(rel.ingrediente_id);
-        });
-
-        // Combinar ingredientes de columna y de tabla de relación
-        proveedores.forEach(prov => {
-            const ingColumna = Array.isArray(prov.ingredientes) ? prov.ingredientes : [];
-            const ingRelacion = ingPorProveedor[prov.id] ? Array.from(ingPorProveedor[prov.id]) : [];
-
-            // Combinar sin duplicados
-            const todosIng = new Set([...ingColumna, ...ingRelacion]);
-            prov.ingredientes = Array.from(todosIng);
-        });
-
-        res.json(proveedores);
-    } catch (err) {
-        log('error', 'Error obteniendo proveedores', { error: err.message });
-        res.status(500).json({ error: 'Error interno', data: [] });
-    }
-});
-
-app.post('/api/suppliers', authMiddleware, async (req, res) => {
-    try {
-        const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
-        const result = await pool.query(
-            'INSERT INTO proveedores (nombre, contacto, telefono, email, direccion, notas, ingredientes, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-            [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], req.restauranteId]
-        );
-        res.status(201).json(result.rows[0]);
-    } catch (err) {
-        log('error', 'Error creando proveedor', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-app.put('/api/suppliers/:id', authMiddleware, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { nombre, contacto, telefono, email, direccion, notas, ingredientes } = req.body;
-        const result = await pool.query(
-            'UPDATE proveedores SET nombre=$1, contacto=$2, telefono=$3, email=$4, direccion=$5, notas=$6, ingredientes=$7 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
-            [nombre, contacto || '', telefono || '', email || '', direccion || '', notas || '', ingredientes || [], id, req.restauranteId]
-        );
-        res.status(201).json(result.rows[0]);
-    } catch (err) {
-        log('error', 'Error actualizando proveedor', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
-    try {
-        // SOFT DELETE: marca como eliminado sin borrar datos
-        const result = await pool.query(
-            'UPDATE proveedores SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
-            [req.params.id, req.restauranteId]
-        );
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Proveedor no encontrado o ya eliminado' });
-        }
-        log('info', 'Proveedor soft deleted', { id: req.params.id });
-        res.json({ message: 'Eliminado', id: result.rows[0].id });
-    } catch (err) {
-        log('error', 'Error eliminando proveedor', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
+// --- LEGACY SUPPLIERS ELIMINADO ---
+// Estas rutas nunca se ejecutaban porque Express usa la primera ruta que coincide.
+// La lógica de ingredientes_proveedores debe añadirse a SupplierController si se necesita.
+// Código original comentado para referencia futura.
+/*
+OLD LEGACY CODE REMOVED - Was dead code (lines 1940-2024)
+- GET /api/suppliers (con lógica ingredientes_proveedores)
+- POST /api/suppliers
+- PUT /api/suppliers/:id
+- DELETE /api/suppliers/:id
+*/
 
 // ========== PEDIDOS ==========
 // 🔧 IMPORTANTE: Las rutas de orders ahora se manejan en src/routes/order.routes.js
@@ -3965,6 +3885,8 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
 
         log('info', `Total mermas en BD para restaurante ${req.restauranteId}: ${countAll.rows[0].total}`);
 
+        // DEBUG REMOVIDO - Logs excesivos ya no necesarios después de depuración
+        /*
         // DEBUG: Obtener la última merma para ver qué fecha tiene
         if (parseInt(countAll.rows[0].total) > 0) {
             const ultimaMerma = await pool.query(`
@@ -3988,6 +3910,7 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
 
         // DEBUG TEMPORAL: Quitar TODOS los filtros para confirmar que hay datos
         log('info', `DEBUG - req.restauranteId value: ${req.restauranteId} (type: ${typeof req.restauranteId})`);
+        */
 
         const result = await pool.query(`
             SELECT 
@@ -4008,12 +3931,8 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
             LIMIT $1
         `, [lim]);
 
-        log('info', `GET /api/mermas - Encontradas ${result.rows.length} mermas (SIN NINGUN FILTRO)`, {
-            reqRestauranteId: req.restauranteId,
-            totalSinFiltro: countAll.rows[0].total,
-            resultados: result.rows.length,
-            primerasMermas: result.rows.slice(0, 2).map(r => ({ id: r.id, restaurante_id: r.restaurante_id }))
-        });
+        // Log reducido para producción
+        log('debug', 'Mermas listadas', { count: result.rows.length, restauranteId: req.restauranteId });
 
         res.json(result.rows || []);
     } catch (err) {
