@@ -2168,9 +2168,10 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         // 📅 Usar fecha proporcionada o NOW() por defecto
         const fechaVenta = fecha ? new Date(fecha) : new Date();
 
+        // ⚡ FIX Bug #5: Guardar factor_variante para restaurar stock correctamente al borrar
         const ventaResult = await client.query(
-            'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [recetaId, cantidadValidada, precioUnitario, total, fechaVenta, req.restauranteId]
+            'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante, variante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [recetaId, cantidadValidada, precioUnitario, total, fechaVenta, req.restauranteId, factorVariante, varianteId || null]
         );
 
         // ⚡ NUEVO: Aplicar factor de variante al descuento de stock
@@ -2239,12 +2240,14 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
             const receta = recetaResult.rows[0];
             const ingredientesReceta = receta.ingredientes || [];
             const porciones = parseInt(receta.porciones) || 1;
+            // ⚡ FIX Bug #5: Usar el factor guardado en la venta (para variantes COPA/BOTELLA)
+            const factorVariante = parseFloat(venta.factor_variante) || 1;
 
             // 3. Restaurar stock de cada ingrediente (inverso del descuento)
             for (const ing of ingredientesReceta) {
                 if (ing.ingredienteId && ing.cantidad) {
-                    // Cantidad a restaurar = (cantidad_receta ÷ porciones) × cantidad_vendida
-                    const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad;
+                    // Cantidad a restaurar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
+                    const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
 
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -2560,8 +2563,8 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
 
             // Registrar venta individual
             await client.query(
-                'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6)',
-                [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId]
+                'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId, factorAplicado]
             );
 
             // Descontar stock (aplicando factor de variante)
