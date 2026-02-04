@@ -2146,6 +2146,8 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
                 const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
                 if (cantidadRecibida > 0) {
+                    // ⚡ FIX Bug #7: Lock row before update to prevent race condition
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ingId]);
                     await client.query(
                         `UPDATE ingredientes 
                          SET stock_actual = stock_actual - $1, 
@@ -2357,6 +2359,8 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
                     // Cantidad a restaurar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
 
+                    // ⚡ FIX Bug #7: Lock row before update to prevent race condition
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
                         [cantidadARestaurar, ing.ingredienteId, req.restauranteId]
@@ -4042,6 +4046,8 @@ app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
 
         // 2. Restaurar stock del ingrediente (sumar la cantidad que se había restado)
         if (merma.ingrediente_id && merma.cantidad > 0) {
+            // ⚡ FIX Bug #7: Lock row before update to prevent race condition
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [merma.ingrediente_id]);
             await client.query(
                 `UPDATE ingredientes 
                  SET stock_actual = stock_actual + $1, 
