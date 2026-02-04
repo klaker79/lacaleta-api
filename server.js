@@ -3322,6 +3322,8 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             // Solo actualizar stock, NO el precio (el precio solo se cambia manualmente)
             // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
             const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
+            // ⚡ FIX Bug #8: Lock row before update to prevent race condition
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ingredienteId]);
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2',
                 [stockASumar, ingredienteId]
