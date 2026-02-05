@@ -169,18 +169,20 @@ process.on('unhandledRejection', (reason, promise) => {
     // Don't exit - keep server running
 });
 
-// Catch uncaught exceptions (sync errors) - prevents server crash
+// Catch uncaught exceptions (sync errors) - log and exit gracefully
+// After uncaughtException the process is in an undefined state; Docker/PM2 will restart
 process.on('uncaughtException', (error) => {
-    log('error', 'Uncaught Exception', {
+    log('error', 'Uncaught Exception - restarting', {
         error: error.message,
         stack: error.stack
     });
-    // Don't exit - keep server running
+    process.exit(1);
 });
 
-// Graceful shutdown
+// Graceful shutdown - close pool before exit
 process.on('SIGTERM', async () => {
     log('info', 'SIGTERM received, shutting down gracefully');
+    try { await pool.end(); } catch (e) { /* ignore */ }
     process.exit(0);
 });
 
@@ -508,6 +510,66 @@ pool.on('error', (err) => {
             log('info', 'Migración variantes en ventas completada');
         } catch (e) { log('warn', 'Migración variante_id', { error: e.message }); }
 
+        // ========== MIGRACIÓN: Tablas faltantes ==========
+        log('info', 'Verificando tablas faltantes...');
+
+        // Tabla ingredientes_alias (requerida por match y delete de ingredientes)
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS ingredientes_alias (
+                    id SERIAL PRIMARY KEY,
+                    ingrediente_id INTEGER NOT NULL REFERENCES ingredientes(id) ON DELETE CASCADE,
+                    alias VARCHAR(255) NOT NULL,
+                    restaurante_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(alias, restaurante_id)
+                );
+            `);
+            log('info', 'Tabla ingredientes_alias verificada');
+        } catch (e) { log('warn', 'Migración ingredientes_alias', { error: e.message }); }
+
+        // Tabla gastos_fijos (requerida por expense routes)
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS gastos_fijos (
+                    id SERIAL PRIMARY KEY,
+                    concepto VARCHAR(255) NOT NULL,
+                    monto_mensual DECIMAL(10, 2) DEFAULT 0,
+                    activo BOOLEAN DEFAULT TRUE,
+                    restaurante_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+            log('info', 'Tabla gastos_fijos verificada');
+        } catch (e) { log('warn', 'Migración gastos_fijos', { error: e.message }); }
+
+        // Columnas faltantes en ingredientes
+        try {
+            await pool.query(`
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato DECIMAL(10, 3);
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento INTEGER DEFAULT 100;
+            `);
+            log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
+        } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
+
+        // Columna pedido_id en precios_compra_diarios
+        try {
+            await pool.query(`
+                ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
+            `);
+            log('info', 'Columna pedido_id en precios_compra_diarios verificada');
+        } catch (e) { log('warn', 'Migración pedido_id', { error: e.message }); }
+
+        // Columna periodo_id en mermas
+        try {
+            await pool.query(`
+                ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
+            `);
+            log('info', 'Columna periodo_id en mermas verificada');
+        } catch (e) { log('warn', 'Migración periodo_id mermas', { error: e.message }); }
+
         // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
         log('info', 'Limpiando tablas obsoletas...');
 
@@ -593,9 +655,9 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-// ========== RATE LIMITING ==========
+// ========== RATE LIMITING (Per-User) ==========
 // Protección contra abuso de API (200 req/min por usuario)
-const rateLimit = {};
+const rateLimitStore = {};
 const RATE_LIMIT_WINDOW = 60000; // 1 minuto
 const RATE_LIMIT_MAX = 200; // requests por minuto
 
@@ -603,22 +665,22 @@ const rateLimitMiddleware = (req, res, next) => {
     const key = req.restauranteId || req.ip || 'anonymous';
     const now = Date.now();
 
-    if (!rateLimit[key]) {
-        rateLimit[key] = { count: 1, start: now };
+    if (!rateLimitStore[key]) {
+        rateLimitStore[key] = { count: 1, start: now };
         return next();
     }
 
     // Reset si pasó la ventana
-    if (now - rateLimit[key].start > RATE_LIMIT_WINDOW) {
-        rateLimit[key] = { count: 1, start: now };
+    if (now - rateLimitStore[key].start > RATE_LIMIT_WINDOW) {
+        rateLimitStore[key] = { count: 1, start: now };
         return next();
     }
 
-    rateLimit[key].count++;
+    rateLimitStore[key].count++;
 
-    if (rateLimit[key].count > RATE_LIMIT_MAX) {
-        const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - rateLimit[key].start)) / 1000);
-        log('warn', 'Rate limit exceeded', { key, count: rateLimit[key].count });
+    if (rateLimitStore[key].count > RATE_LIMIT_MAX) {
+        const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - rateLimitStore[key].start)) / 1000);
+        log('warn', 'Rate limit exceeded', { key, count: rateLimitStore[key].count });
         return res.status(429).json({
             error: 'Demasiadas solicitudes. Espera un momento.',
             retryAfter
@@ -631,9 +693,9 @@ const rateLimitMiddleware = (req, res, next) => {
 // Limpiar rate limits cada 5 minutos para evitar memory leak
 setInterval(() => {
     const now = Date.now();
-    for (const key in rateLimit) {
-        if (now - rateLimit[key].start > RATE_LIMIT_WINDOW * 2) {
-            delete rateLimit[key];
+    for (const key in rateLimitStore) {
+        if (now - rateLimitStore[key].start > RATE_LIMIT_WINDOW * 2) {
+            delete rateLimitStore[key];
         }
     }
 }, 300000);
@@ -673,8 +735,7 @@ app.get('/api/health', async (req, res) => {
         res.json({
             status: 'healthy',
             timestamp: new Date().toISOString(),
-            version: '2.3.0',
-            cors_origins: ALLOWED_ORIGINS
+            version: '2.3.0'
         });
     } catch (e) {
         res.status(503).json({
@@ -1637,7 +1698,7 @@ app.get('/api/inventory/complete', authMiddleware, async (req, res) => {
           ELSE i.precio 
         END) as valor_stock
       FROM ingredientes i
-      WHERE i.restaurante_id = $1
+      WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
       ORDER BY i.id
     `, [req.restauranteId]);
         res.json(result.rows || []);

@@ -149,9 +149,10 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
             for (const ing of (receta.ingredientes || [])) {
                 if (ing.ingredienteId && ing.cantidad) {
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad;
                     await client.query(
-                        `UPDATE ingredientes SET stock_actual = stock_actual + $1 
+                        `UPDATE ingredientes SET stock_actual = stock_actual + $1
                          WHERE id = $2 AND restaurante_id = $3`,
                         [cantidadARestaurar, ing.ingredienteId, req.restauranteId]
                     );
