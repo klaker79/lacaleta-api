@@ -101,11 +101,11 @@ router.post('/', authMiddleware, async (req, res) => {
         const porciones = parseInt(receta.porciones) || 1;
 
         for (const ing of ingredientesReceta) {
-            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
             const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidadValidada * factorVariante;
             await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
-                [cantidadADescontar, ing.ingredienteId]
+                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                [cantidadADescontar, ing.ingredienteId, req.restauranteId]
             );
         }
 
@@ -149,7 +149,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
             for (const ing of (receta.ingredientes || [])) {
                 if (ing.ingredienteId && ing.cantidad) {
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad;
                     await client.query(
                         `UPDATE ingredientes SET stock_actual = stock_actual + $1
@@ -218,7 +218,7 @@ router.post('/bulk', authMiddleware, async (req, res) => {
                     const porciones = parseInt(receta.porciones) || 1;
                     for (const ing of (receta.ingredientes || [])) {
                         if (ing.ingredienteId && ing.cantidad) {
-                            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
+                            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
                             const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad;
                             await client.query(
                                 'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',

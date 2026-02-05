@@ -2208,11 +2208,11 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 
                 if (cantidadRecibida > 0) {
                     // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ingId]);
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
                     await client.query(
-                        `UPDATE ingredientes 
-                         SET stock_actual = stock_actual - $1, 
-                             ultima_actualizacion_stock = NOW() 
+                        `UPDATE ingredientes
+                         SET stock_actual = stock_actual - $1,
+                             ultima_actualizacion_stock = NOW()
                          WHERE id = $2 AND restaurante_id = $3`,
                         [cantidadRecibida, ingId, req.restauranteId]
                     );
@@ -2360,14 +2360,14 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
             // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
             await client.query(
-                'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
-                [ingId]
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                [ingId, req.restauranteId]
             );
             // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
             const cantidadADescontar = (ingCantidad / porciones) * cantidadValidada * factorVariante;
             await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
-                [cantidadADescontar, ingId]
+                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                [cantidadADescontar, ingId, req.restauranteId]
             );
             log('debug', 'Stock descontado', { ingredienteId: ingId, cantidad: cantidadADescontar });
         }
@@ -2403,8 +2403,8 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
 
         // 2. Obtener la receta para saber qué ingredientes restaurar
         const recetaResult = await client.query(
-            'SELECT * FROM recetas WHERE id = $1',
-            [venta.receta_id]
+            'SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2',
+            [venta.receta_id, req.restauranteId]
         );
 
         if (recetaResult.rows.length > 0) {
@@ -2421,7 +2421,7 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
 
                     // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
                         [cantidadARestaurar, ing.ingredienteId, req.restauranteId]
@@ -2590,9 +2590,9 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
         // Obtener la fecha de las ventas (usar la primera venta o la fecha actual)
         const fechaVenta = ventas[0]?.fecha ? ventas[0].fecha.split('T')[0] : new Date().toISOString().split('T')[0];
 
-        // Verificar si ya existen ventas para esta fecha
+        // Verificar si ya existen ventas para esta fecha (ignorar soft-deleted)
         const existingResult = await client.query(
-            'SELECT COUNT(*) as count FROM ventas WHERE restaurante_id = $1 AND fecha::date = $2',
+            'SELECT COUNT(*) as count FROM ventas WHERE restaurante_id = $1 AND fecha::date = $2 AND deleted_at IS NULL',
             [req.restauranteId, fechaVenta]
         );
 
@@ -2751,8 +2751,8 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                     if (cantidadADescontar > 0 && ing.ingredienteId) {
                         // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
                         await client.query(
-                            'SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE',
-                            [ing.ingredienteId]
+                            'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            [ing.ingredienteId, req.restauranteId]
                         );
                         // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
                         const updateResult = await client.query(
@@ -3384,10 +3384,10 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
             const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
             // ⚡ FIX Bug #8: Lock row before update to prevent race condition
-            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ingredienteId]);
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
             await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2',
-                [stockASumar, ingredienteId]
+                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                [stockASumar, ingredienteId, req.restauranteId]
             );
 
             resultados.procesados++;
@@ -4110,11 +4110,11 @@ app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
         // 2. Restaurar stock del ingrediente (sumar la cantidad que se había restado)
         if (merma.ingrediente_id && merma.cantidad > 0) {
             // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [merma.ingrediente_id]);
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
             await client.query(
-                `UPDATE ingredientes 
-                 SET stock_actual = stock_actual + $1, 
-                     ultima_actualizacion_stock = NOW() 
+                `UPDATE ingredientes
+                 SET stock_actual = stock_actual + $1,
+                     ultima_actualizacion_stock = NOW()
                  WHERE id = $2 AND restaurante_id = $3`,
                 [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
             );

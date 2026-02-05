@@ -303,7 +303,7 @@ router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
             `, [ingredienteData.id, fecha, precio, cantidad, precio * cantidad, req.restauranteId]);
 
             const stockASumar = ingredienteData.cantidadPorFormato > 0 ? cantidad * ingredienteData.cantidadPorFormato : cantidad;
-            await client.query('UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2', [stockASumar, ingredienteData.id]);
+            await client.query('UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2 AND restaurante_id = $3', [stockASumar, ingredienteData.id, req.restauranteId]);
 
             resultados.procesados++;
         }
