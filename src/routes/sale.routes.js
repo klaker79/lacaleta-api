@@ -142,7 +142,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
         const venta = ventaResult.rows[0];
 
         // Restaurar stock
-        const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1', [venta.receta_id]);
+        const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2', [venta.receta_id, req.restauranteId]);
         if (recetaResult.rows.length > 0) {
             const receta = recetaResult.rows[0];
             const porciones = parseInt(receta.porciones) || 1;
