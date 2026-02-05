@@ -3590,12 +3590,11 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
 });
 
 // ========== 🧠 INTELIGENCIA - ENDPOINT FRESCURA ==========
-// Días de vida útil por familia (estándares industria marisquería)
-// NOTA: Marisco y pescado tienen valor alto porque llegan congelados
-// La caducidad real empieza al cocer/descongelar, no al recibir
+// Días de vida útil por familia (estándares conservadores para seguridad alimentaria)
+// NOTA: Valores conservadores asumiendo producto fresco/descongelado
 const VIDA_UTIL_DIAS = {
-    'pescado': 7,    // Congelado: vida larga al llegar
-    'marisco': 7,    // Congelado: vida larga al llegar  
+    'pescado': 3,    // Fresco o descongelado: usar rápido
+    'marisco': 3,    // Fresco o descongelado: usar rápido  
     'carne': 4,
     'verdura': 5,
     'lacteo': 5,
