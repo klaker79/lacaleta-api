@@ -576,6 +576,15 @@ pool.on('error', (err) => {
             log('info', 'Columna pedido_id en precios_compra_diarios verificada');
         } catch (e) { log('warn', 'Migración pedido_id', { error: e.message }); }
 
+        // Columna estado en precios_compra_diarios (para validación de compras automáticas)
+        try {
+            await pool.query(`
+                ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'validado';
+            `);
+            log('info', 'Columna estado en precios_compra_diarios verificada');
+        } catch (e) { log('warn', 'Migración estado precios_compra_diarios', { error: e.message }); }
+
+
         // Columna periodo_id en mermas
         try {
             await pool.query(`
@@ -3295,7 +3304,9 @@ app.get('/api/daily/purchases', authMiddleware, async (req, res) => {
 app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { compras } = req.body;
+        const { compras, estado: estadoParam } = req.body;
+        // Estado: 'pendiente' (no afecta inventario) o 'validado' (afecta inventario)
+        const estado = estadoParam === 'pendiente' ? 'pendiente' : 'validado';
 
         if (!Array.isArray(compras)) {
             return res.status(400).json({
@@ -3384,27 +3395,30 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             const total = precio * cantidad;
             const fecha = compra.fecha || new Date().toISOString().split('T')[0];
 
-            // Upsert: actualizar si existe, insertar si no
+            // Upsert: actualizar si existe, insertar si no (incluye estado)
             await client.query(`
                 INSERT INTO precios_compra_diarios 
-                (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, estado)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (ingrediente_id, fecha, restaurante_id)
                 DO UPDATE SET 
                     precio_unitario = EXCLUDED.precio_unitario,
                     cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                    total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-            `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId]);
+                    total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra,
+                    estado = EXCLUDED.estado
+            `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId, estado]);
 
-            // Solo actualizar stock, NO el precio (el precio solo se cambia manualmente)
-            // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
-            const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
-            // ⚡ FIX Bug #8: Lock row before update to prevent race condition
-            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
-            await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
-                [stockASumar, ingredienteId, req.restauranteId]
-            );
+            // Solo actualizar inventario si estado = 'validado' (no para 'pendiente')
+            if (estado === 'validado') {
+                // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
+                const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
+                // ⚡ FIX Bug #8: Lock row before update to prevent race condition
+                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
+                await client.query(
+                    'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                    [stockASumar, ingredienteId, req.restauranteId]
+                );
+            }
 
             resultados.procesados++;
         }
@@ -3421,7 +3435,136 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
     }
 });
 
+// ========== VALIDACIÓN DE COMPRAS PENDIENTES ==========
+
+// Listar compras pendientes de validación
+app.get('/api/daily/purchases/pending', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT p.*, i.nombre as ingrediente_nombre, i.unidad
+            FROM precios_compra_diarios p
+            LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
+            WHERE p.restaurante_id = $1 AND p.estado = 'pendiente'
+            ORDER BY p.fecha DESC, p.created_at DESC
+        `, [req.restauranteId]);
+
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error obteniendo compras pendientes', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// Validar una compra pendiente (actualiza inventario)
+app.post('/api/daily/purchases/:id/validate', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { id } = req.params;
+
+        await client.query('BEGIN');
+
+        // Obtener la compra pendiente
+        const compraResult = await client.query(`
+            SELECT p.*, i.cantidad_por_formato
+            FROM precios_compra_diarios p
+            LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
+            WHERE p.id = $1 AND p.restaurante_id = $2 AND p.estado = 'pendiente'
+        `, [id, req.restauranteId]);
+
+        if (compraResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Compra pendiente no encontrada' });
+        }
+
+        const compra = compraResult.rows[0];
+        const cantidadPorFormato = parseFloat(compra.cantidad_por_formato) || 0;
+        const cantidad = parseFloat(compra.cantidad_comprada) || 0;
+
+        // Actualizar estado a validado
+        await client.query('UPDATE precios_compra_diarios SET estado = $1 WHERE id = $2', ['validado', id]);
+
+        // Actualizar inventario
+        const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
+        await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [compra.ingrediente_id]);
+        await client.query(
+            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2',
+            [stockASumar, compra.ingrediente_id]
+        );
+
+        await client.query('COMMIT');
+        log('info', 'Compra validada', { id, ingredienteId: compra.ingrediente_id, cantidad: stockASumar });
+        res.json({ success: true, message: 'Compra validada y stock actualizado' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error validando compra', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
+    }
+});
+
+// Descartar una compra pendiente (no afecta inventario)
+app.post('/api/daily/purchases/:id/discard', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(
+            'UPDATE precios_compra_diarios SET estado = $1 WHERE id = $2 AND restaurante_id = $3 AND estado = $4 RETURNING *',
+            ['descartado', id, req.restauranteId, 'pendiente']
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Compra pendiente no encontrada' });
+        }
+
+        log('info', 'Compra descartada', { id });
+        res.json({ success: true, message: 'Compra descartada' });
+    } catch (err) {
+        log('error', 'Error descartando compra', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// Validar todas las compras pendientes
+app.post('/api/daily/purchases/validate-all', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const comprasResult = await client.query(`
+            SELECT p.*, i.cantidad_por_formato
+            FROM precios_compra_diarios p
+            LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
+            WHERE p.restaurante_id = $1 AND p.estado = 'pendiente'
+        `, [req.restauranteId]);
+
+        for (const compra of comprasResult.rows) {
+            const cantidadPorFormato = parseFloat(compra.cantidad_por_formato) || 0;
+            const cantidad = parseFloat(compra.cantidad_comprada) || 0;
+            const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
+
+            await client.query('UPDATE precios_compra_diarios SET estado = $1 WHERE id = $2', ['validado', compra.id]);
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [compra.ingrediente_id]);
+            await client.query(
+                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2',
+                [stockASumar, compra.ingrediente_id]
+            );
+        }
+
+        await client.query('COMMIT');
+        log('info', 'Compras validadas en lote', { validadas: comprasResult.rows.length });
+        res.json({ success: true, validadas: comprasResult.rows.length });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error validando compras en lote', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
+    }
+});
+
 // Obtener resumen diario de ventas
+
 app.get('/api/daily/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha, mes, ano } = req.query;
