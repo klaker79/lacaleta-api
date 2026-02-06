@@ -352,7 +352,7 @@ pool.on('error', (err) => {
          TABLAS QUE FALTABAN (Añadidas por auditoría)
          ========================================= */
       
-      // Tabla de perdidas_stock
+      -- Tabla de perdidas_stock
       CREATE TABLE IF NOT EXISTS perdidas_stock (
         id SERIAL PRIMARY KEY,
         restaurante_id INTEGER NOT NULL,
@@ -362,7 +362,7 @@ pool.on('error', (err) => {
         fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      // Tabla ingredientes_alias
+      -- Tabla ingredientes_alias
       CREATE TABLE IF NOT EXISTS ingredientes_alias (
         id SERIAL PRIMARY KEY,
         restaurante_id INTEGER NOT NULL,
@@ -372,7 +372,7 @@ pool.on('error', (err) => {
         CONSTRAINT uk_alias_restaurante UNIQUE (alias, restaurante_id)
       );
 
-      // Tabla gastos_fijos
+      -- Tabla gastos_fijos
       CREATE TABLE IF NOT EXISTS gastos_fijos (
         id SERIAL PRIMARY KEY,
         restaurante_id INTEGER NOT NULL,
@@ -386,7 +386,7 @@ pool.on('error', (err) => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      // Tabla para registro de mermas/pérdidas
+      -- Tabla para registro de mermas/pérdidas
       CREATE TABLE IF NOT EXISTS mermas (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
