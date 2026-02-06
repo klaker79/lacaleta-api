@@ -127,12 +127,17 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Catch uncaught exceptions (sync errors) - prevents server crash
+// Catch uncaught exceptions (sync errors) - log and exit gracefully
+// After uncaughtException the process is in an undefined state; Docker/PM2 will restart
 process.on('uncaughtException', (error) => {
-    log('error', 'Uncaught Exception', {
+    log('error', 'Uncaught Exception - restarting', {
         error: error.message,
         stack: error.stack
     });
-    // Don't exit - keep server running
+    // Give logs time to flush (optional but good practice)
+    setTimeout(() => {
+        process.exit(1);
+    }, 100);
 });
 
 // Graceful shutdown
@@ -343,7 +348,45 @@ pool.on('error', (err) => {
         diferencia DECIMAL(10, 2) NOT NULL,
         restaurante_id INTEGER NOT NULL
       );
-      -- Tabla para registro de mermas/pérdidas
+      /* =========================================
+         TABLAS QUE FALTABAN (Añadidas por auditoría)
+         ========================================= */
+      
+      // Tabla de perdidas_stock
+      CREATE TABLE IF NOT EXISTS perdidas_stock (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL,
+        ingrediente_id INTEGER REFERENCES ingredientes(id),
+        cantidad NUMERIC(10,2) NOT NULL,
+        motivo TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      // Tabla ingredientes_alias
+      CREATE TABLE IF NOT EXISTS ingredientes_alias (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        alias VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_alias_restaurante UNIQUE (alias, restaurante_id)
+      );
+
+      // Tabla gastos_fijos
+      CREATE TABLE IF NOT EXISTS gastos_fijos (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL,
+        concepto VARCHAR(255) NOT NULL,
+        monto_mensual NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        activo BOOLEAN DEFAULT true,
+        dia_pago INTEGER DEFAULT 1,
+        categoria VARCHAR(50),
+        observaciones TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      // Tabla para registro de mermas/pérdidas
       CREATE TABLE IF NOT EXISTS mermas (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
@@ -412,6 +455,22 @@ pool.on('error', (err) => {
                 ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
             `);
         } catch (e) { log('warn', 'Migración ingredientes.codigo', { error: e.message }); }
+
+        // ⚡ FIX: Columnas faltantes detectadas en auditoría
+        try {
+            await pool.query(`
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento NUMERIC(5,2) DEFAULT 100;
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(10,3);
+                
+                ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
+                
+                ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
+                
+                ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
+            `);
+            log('info', 'Migración columnas auditoría completada');
+        } catch (e) { log('warn', 'Migración columnas auditoría', { error: e.message }); }
 
         // Añadir columna 'codigo' a recetas
         try {
@@ -2232,8 +2291,8 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
 
         // 2. Obtener la receta para saber qué ingredientes restaurar
         const recetaResult = await client.query(
-            'SELECT * FROM recetas WHERE id = $1',
-            [venta.receta_id]
+            'SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2',
+            [venta.receta_id, req.restauranteId]
         );
 
         if (recetaResult.rows.length > 0) {
@@ -2248,6 +2307,12 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
                 if (ing.ingredienteId && ing.cantidad) {
                     // Cantidad a restaurar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
+
+                    // ⚡ FIX: Lock FOR UPDATE para evitar race conditions
+                    await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                        [ing.ingredienteId, req.restauranteId]
+                    );
 
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -3418,8 +3483,8 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
 // NOTA: Marisco y pescado tienen valor alto porque llegan congelados
 // La caducidad real empieza al cocer/descongelar, no al recibir
 const VIDA_UTIL_DIAS = {
-    'pescado': 7,    // Congelado: vida larga al llegar
-    'marisco': 7,    // Congelado: vida larga al llegar  
+    'pescado': 3,    // Fresco o descongelado: usar rápido
+    'marisco': 3,    // Fresco o descongelado: usar rápido  
     'carne': 4,
     'verdura': 5,
     'lacteo': 5,
