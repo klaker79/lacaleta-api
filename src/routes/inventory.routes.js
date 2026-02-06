@@ -45,7 +45,7 @@ router.get('/complete', authMiddleware, async (req, res) => {
                     ELSE i.precio 
                 END) as valor_stock
             FROM ingredientes i
-            WHERE i.restaurante_id = $1
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
             ORDER BY i.id
         `, [req.restauranteId]);
         res.json(result.rows || []);

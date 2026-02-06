@@ -116,11 +116,16 @@ router.get('/balance/mes', authMiddleware, async (req, res) => {
             [mesActual, anoActual, req.restauranteId]
         );
 
+        // 🔧 FIX Bug #4: Incluir cantidad_por_formato para calcular precio por unidad
         const ingredientesResult = await pool.query(
-            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]
+            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]
         );
         const preciosMap = new Map();
-        ingredientesResult.rows.forEach(i => preciosMap.set(i.id, parseFloat(i.precio) || 0));
+        ingredientesResult.rows.forEach(i => {
+            const precio = parseFloat(i.precio) || 0;
+            const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
+            preciosMap.set(i.id, precio / cantidadPorFormato);
+        });
 
         let costos = 0;
         for (const venta of ventasDetalle.rows) {
@@ -298,7 +303,7 @@ router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
             `, [ingredienteData.id, fecha, precio, cantidad, precio * cantidad, req.restauranteId]);
 
             const stockASumar = ingredienteData.cantidadPorFormato > 0 ? cantidad * ingredienteData.cantidadPorFormato : cantidad;
-            await client.query('UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2', [stockASumar, ingredienteData.id]);
+            await client.query('UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2 AND restaurante_id = $3', [stockASumar, ingredienteData.id, req.restauranteId]);
 
             resultados.procesados++;
         }

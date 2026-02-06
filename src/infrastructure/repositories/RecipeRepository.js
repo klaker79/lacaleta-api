@@ -28,7 +28,7 @@ class RecipeRepository {
     async findActive(restaurantId) {
         const query = `
             SELECT * FROM recetas
-            WHERE restaurante_id = $1 AND activo = true AND deleted_at IS NULL
+            WHERE restaurante_id = $1 AND (activo = true OR activo IS NULL) AND deleted_at IS NULL
             ORDER BY nombre
         `;
         const result = await this.pool.query(query, [restaurantId]);
@@ -42,7 +42,7 @@ class RecipeRepository {
         const query = `
             SELECT * FROM recetas
             WHERE restaurante_id = $1
-              AND activo = true
+              AND (activo = true OR activo IS NULL)
               AND deleted_at IS NULL
               AND EXISTS (
                   SELECT 1 FROM jsonb_array_elements(ingredientes) AS ing

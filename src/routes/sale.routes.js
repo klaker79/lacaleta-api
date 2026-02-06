@@ -101,11 +101,11 @@ router.post('/', authMiddleware, async (req, res) => {
         const porciones = parseInt(receta.porciones) || 1;
 
         for (const ing of ingredientesReceta) {
-            await client.query('SELECT id FROM ingredientes WHERE id = $1 FOR UPDATE', [ing.ingredienteId]);
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
             const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidadValidada * factorVariante;
             await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2',
-                [cantidadADescontar, ing.ingredienteId]
+                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                [cantidadADescontar, ing.ingredienteId, req.restauranteId]
             );
         }
 
@@ -149,9 +149,10 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
             for (const ing of (receta.ingredientes || [])) {
                 if (ing.ingredienteId && ing.cantidad) {
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad;
                     await client.query(
-                        `UPDATE ingredientes SET stock_actual = stock_actual + $1 
+                        `UPDATE ingredientes SET stock_actual = stock_actual + $1
                          WHERE id = $2 AND restaurante_id = $3`,
                         [cantidadARestaurar, ing.ingredienteId, req.restauranteId]
                     );
@@ -206,6 +207,27 @@ router.post('/bulk', authMiddleware, async (req, res) => {
                     [recetaId, cantidad, precioUnitario || 0, total || 0,
                         fecha || new Date(), req.restauranteId]
                 );
+
+                // 🔧 FIX Bug #1: Descontar stock (igual que POST /api/sales)
+                const recetaResult = await client.query(
+                    'SELECT ingredientes, porciones FROM recetas WHERE id = $1 AND restaurante_id = $2',
+                    [recetaId, req.restauranteId]
+                );
+                if (recetaResult.rows.length > 0) {
+                    const receta = recetaResult.rows[0];
+                    const porciones = parseInt(receta.porciones) || 1;
+                    for (const ing of (receta.ingredientes || [])) {
+                        if (ing.ingredienteId && ing.cantidad) {
+                            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
+                            const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad;
+                            await client.query(
+                                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                                [cantidadADescontar, ing.ingredienteId, req.restauranteId]
+                            );
+                        }
+                    }
+                }
+
                 resultados.push({ recetaId, ventaId: result.rows[0].id });
             } catch (e) {
                 errores.push({ venta, error: e.message });

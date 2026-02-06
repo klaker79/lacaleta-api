@@ -35,20 +35,59 @@ router.get('/', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/orders
- * Crear pedido
+ * Crear pedido (con registro de precios_compra_diarios si está recibido)
  */
 router.post('/', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
         const { proveedorId, fecha, ingredientes, total, estado } = req.body;
-        const result = await pool.query(
+
+        await client.query('BEGIN');
+
+        const result = await client.query(
             `INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id) 
              VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
             [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente', req.restauranteId]
         );
+
+        // Si el pedido se crea directamente como 'recibido', registrar precios de compra diarios
+        if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
+            const fechaCompra = fecha ? new Date(fecha) : new Date();
+
+            for (const item of ingredientes) {
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
+                const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
+                const totalItem = precioReal * cantidad;
+                const ingId = item.ingredienteId || item.ingrediente_id;
+
+                if (ingId && cantidad > 0) {
+                    await client.query(`
+                        INSERT INTO precios_compra_diarios 
+                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                        DO UPDATE SET 
+                            precio_unitario = EXCLUDED.precio_unitario,
+                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+                    `, [ingId, fechaCompra, precioReal, cantidad, totalItem, req.restauranteId, proveedorId]);
+                }
+            }
+
+            log('info', 'Compras diarias registradas al crear pedido recibido', {
+                pedidoId: result.rows[0].id,
+                items: ingredientes.length
+            });
+        }
+
+        await client.query('COMMIT');
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error creando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
@@ -74,25 +113,37 @@ router.put('/:id', authMiddleware, async (req, res) => {
         if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
             const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
 
-            for (const item of ingredientes) {
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario) || 0;
-                const cantidad = parseFloat(item.cantidad) || 0;
-                const total = precioReal * cantidad;
+            let insertCount = 0;
+            let skipCount = 0;
 
-                await client.query(`
-                    INSERT INTO precios_compra_diarios 
-                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
-                    DO UPDATE SET 
-                        precio_unitario = EXCLUDED.precio_unitario,
-                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [item.ingredienteId, fechaCompra, precioReal, cantidad, total,
-                req.restauranteId, result.rows[0]?.proveedor_id || null]);
+            for (const item of ingredientes) {
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
+                const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
+                const total = precioReal * cantidadRecibida;
+                const ingId = item.ingredienteId || item.ingrediente_id;
+
+                // Solo insertar si hay cantidad recibida y el item NO está como no-entregado
+                if (ingId && cantidadRecibida > 0 && item.estado !== 'no-entregado') {
+                    await client.query(`
+                        INSERT INTO precios_compra_diarios 
+                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                        DO UPDATE SET 
+                            precio_unitario = EXCLUDED.precio_unitario,
+                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+                    `, [ingId, fechaCompra, precioReal, cantidadRecibida, total,
+                        req.restauranteId, result.rows[0]?.proveedor_id || null]);
+                    insertCount++;
+                } else {
+                    skipCount++;
+                }
             }
 
-            log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
+            log('info', 'Pedido recibido - precios registrados', {
+                pedidoId: id, insertados: insertCount, saltados: skipCount
+            });
         }
 
         await client.query('COMMIT');
@@ -139,16 +190,32 @@ router.delete('/:id', authMiddleware, async (req, res) => {
             for (const item of ingredientes) {
                 const ingId = item.ingredienteId || item.ingrediente_id;
                 const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
+                const totalItem = precioReal * cantidadRecibida;
 
-                // Borrar de precios_compra_diarios
-                await client.query(
-                    `DELETE FROM precios_compra_diarios 
-                     WHERE ingrediente_id = $1 AND fecha::date = $2::date AND restaurante_id = $3`,
-                    [ingId, fechaRecepcion, req.restauranteId]
-                );
+                // 🔧 FIX Bug #2: Restar cantidad en vez de borrar todo el día
+                // Solo borra si la cantidad restante es <= 0
+                if (cantidadRecibida > 0) {
+                    await client.query(`
+                        UPDATE precios_compra_diarios 
+                        SET cantidad_comprada = cantidad_comprada - $4,
+                            total_compra = total_compra - $5
+                        WHERE ingrediente_id = $1 AND fecha::date = $2::date AND restaurante_id = $3`,
+                        [ingId, fechaRecepcion, req.restauranteId, cantidadRecibida, totalItem]
+                    );
+                    // Limpiar registros con cantidad <= 0
+                    await client.query(`
+                        DELETE FROM precios_compra_diarios 
+                        WHERE ingrediente_id = $1 AND fecha::date = $2::date AND restaurante_id = $3 
+                          AND cantidad_comprada <= 0`,
+                        [ingId, fechaRecepcion, req.restauranteId]
+                    );
+                }
 
                 // Revertir stock
                 if (cantidadRecibida > 0) {
+                    // 🔧 FIX Bug #3: FOR UPDATE lock para evitar race conditions
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
                     await client.query(
                         `UPDATE ingredientes SET stock_actual = stock_actual - $1 
                          WHERE id = $2 AND restaurante_id = $3`,
