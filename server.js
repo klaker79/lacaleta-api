@@ -23,6 +23,12 @@ const SaleController = require('./src/interfaces/http/controllers/SaleController
 const StockMovementController = require('./src/interfaces/http/controllers/StockMovementController');
 const IngredientController = require('./src/interfaces/http/controllers/IngredientController');
 
+// Middleware modularizado
+const { authMiddleware, requireAdmin } = require('./src/middleware/auth');
+const { globalLimiter, authLimiter } = require('./src/middleware/rateLimit');
+const { log } = require('./src/utils/logger');
+const { validateNumber, validatePrecio, validateCantidad } = require('./src/utils/validators');
+
 // ========== RESEND (Email) ==========
 // 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -43,6 +49,7 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'https://app.mindloop.cloud',
+    'http://localhost:5173',
     'http://localhost:5500',
     'http://127.0.0.1:5500',
     'http://localhost:3000',
@@ -108,57 +115,7 @@ app.use(express.json({ limit: '10mb' }));
 // Parser de cookies para auth segura
 app.use(cookieParser());
 
-// ========== RATE LIMITING ==========
-// Protección contra DDoS y brute-force
-const globalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 1000, // 1000 requests por ventana
-    message: { error: 'Demasiadas peticiones, intenta más tarde' },
-    standardHeaders: true,
-    legacyHeaders: false
-});
-
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 50, // 50 intentos de login (aumentado para evitar bloqueos frecuentes)
-    message: { error: 'Demasiados intentos de login, espera 15 minutos' },
-    standardHeaders: true,
-    legacyHeaders: false
-});
-
 app.use(globalLimiter);
-
-// Logging Persistente
-const LOG_FILE = path.join(__dirname, 'server.log');
-const log = (level, message, data = {}) => {
-    const logEntry = JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level,
-        message,
-        ...data
-    });
-    console.log(logEntry);
-    fs.appendFile(LOG_FILE, logEntry + '\n', (err) => {
-        if (err) console.error('Error writing to log file:', err);
-    });
-};
-
-// ========== VALIDACIÓN NUMÉRICA SEGURA ==========
-// Helper para validar y sanitizar inputs numéricos (previene NaN, Infinity, negativos)
-const validateNumber = (value, defaultVal = 0, min = 0, max = Infinity) => {
-    const num = parseFloat(value);
-    if (isNaN(num) || !isFinite(num)) return defaultVal;
-    if (num < min) return min;
-    if (num > max) return max;
-    return num;
-};
-
-// Helper para validar precio (debe ser >= 0)
-const validatePrecio = (value) => validateNumber(value, 0, 0, 999999);
-
-// Helper para validar cantidad/stock (debe ser >= 0)
-const validateCantidad = (value) => validateNumber(value, 0, 0, 999999);
-
 // ========== GLOBAL ERROR HANDLERS ==========
 // Catch unhandled promise rejections (async errors) - prevents server crash
 process.on('unhandledRejection', (reason, promise) => {
@@ -176,7 +133,10 @@ process.on('uncaughtException', (error) => {
         error: error.message,
         stack: error.stack
     });
-    process.exit(1);
+    // Give logs time to flush (optional but good practice)
+    setTimeout(() => {
+        process.exit(1);
+    }, 100);
 });
 
 // Graceful shutdown - close pool before exit
@@ -388,7 +348,45 @@ pool.on('error', (err) => {
         diferencia DECIMAL(10, 2) NOT NULL,
         restaurante_id INTEGER NOT NULL
       );
-      -- Tabla para registro de mermas/pérdidas
+      /* =========================================
+         TABLAS QUE FALTABAN (Añadidas por auditoría)
+         ========================================= */
+      
+      // Tabla de perdidas_stock
+      CREATE TABLE IF NOT EXISTS perdidas_stock (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL,
+        ingrediente_id INTEGER REFERENCES ingredientes(id),
+        cantidad NUMERIC(10,2) NOT NULL,
+        motivo TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      // Tabla ingredientes_alias
+      CREATE TABLE IF NOT EXISTS ingredientes_alias (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        alias VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_alias_restaurante UNIQUE (alias, restaurante_id)
+      );
+
+      // Tabla gastos_fijos
+      CREATE TABLE IF NOT EXISTS gastos_fijos (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL,
+        concepto VARCHAR(255) NOT NULL,
+        monto_mensual NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        activo BOOLEAN DEFAULT true,
+        dia_pago INTEGER DEFAULT 1,
+        categoria VARCHAR(50),
+        observaciones TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      // Tabla para registro de mermas/pérdidas
       CREATE TABLE IF NOT EXISTS mermas (
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
@@ -457,6 +455,22 @@ pool.on('error', (err) => {
                 ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
             `);
         } catch (e) { log('warn', 'Migración ingredientes.codigo', { error: e.message }); }
+
+        // ⚡ FIX: Columnas faltantes detectadas en auditoría
+        try {
+            await pool.query(`
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento NUMERIC(5,2) DEFAULT 100;
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
+                ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(10,3);
+                
+                ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
+                
+                ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
+                
+                ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
+            `);
+            log('info', 'Migración columnas auditoría completada');
+        } catch (e) { log('warn', 'Migración columnas auditoría', { error: e.message }); }
 
         // Añadir columna 'codigo' a recetas
         try {
@@ -591,6 +605,7 @@ pool.on('error', (err) => {
 })();
 
 // ========== MIDDLEWARE DE AUTENTICACIÓN ==========
+// ========== MIDDLEWARE DE AUTENTICACIÓN ==========
 const authMiddleware = (req, res, next) => {
     // 1. Intentar leer token de httpOnly cookie (navegador)
     // 2. Fallback a Authorization header (API/n8n/Postman)
@@ -703,6 +718,7 @@ setInterval(() => {
 // Aplicar rate limiting a todas las rutas API (después de auth)
 app.use('/api', rateLimitMiddleware);
 
+>>>>>>> 928be193191f0bb3aaeaf9bb918cff75869f822d
 // Montar rutas de recetas v2 con autenticación
 app.use('/api/v2/recipes', authMiddleware, recipeRoutesV2);
 app.use('/api/v2/alerts', authMiddleware, alertRoutes);
@@ -3590,12 +3606,11 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
 });
 
 // ========== 🧠 INTELIGENCIA - ENDPOINT FRESCURA ==========
-// Días de vida útil por familia (estándares industria marisquería)
-// NOTA: Marisco y pescado tienen valor alto porque llegan congelados
-// La caducidad real empieza al cocer/descongelar, no al recibir
+// Días de vida útil por familia (estándares conservadores para seguridad alimentaria)
+// NOTA: Valores conservadores asumiendo producto fresco/descongelado
 const VIDA_UTIL_DIAS = {
-    'pescado': 7,    // Congelado: vida larga al llegar
-    'marisco': 7,    // Congelado: vida larga al llegar  
+    'pescado': 3,    // Fresco o descongelado: usar rápido
+    'marisco': 3,    // Fresco o descongelado: usar rápido  
     'carne': 4,
     'verdura': 5,
     'lacteo': 5,
