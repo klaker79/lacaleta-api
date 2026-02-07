@@ -5,7 +5,10 @@
 
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    throw new Error('FATAL: JWT_SECRET environment variable is required');
+}
 
 // Logger simple (importar el real después)
 const log = (level, message, data = {}) => {
