@@ -104,7 +104,7 @@ router.post('/', authMiddleware, async (req, res) => {
             await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
             const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidadValidada * factorVariante;
             await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1) WHERE id = $2 AND restaurante_id = $3',
                 [cantidadADescontar, ing.ingredienteId, req.restauranteId]
             );
         }
@@ -221,7 +221,7 @@ router.post('/bulk', authMiddleware, async (req, res) => {
                             await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
                             const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad;
                             await client.query(
-                                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                                'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1) WHERE id = $2 AND restaurante_id = $3',
                                 [cantidadADescontar, ing.ingredienteId, req.restauranteId]
                             );
                         }

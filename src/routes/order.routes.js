@@ -217,7 +217,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
                     // 🔧 FIX Bug #3: FOR UPDATE lock para evitar race conditions
                     await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
                     await client.query(
-                        `UPDATE ingredientes SET stock_actual = stock_actual - $1 
+                        `UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1) 
                          WHERE id = $2 AND restaurante_id = $3`,
                         [cantidadRecibida, ingId, req.restauranteId]
                     );
