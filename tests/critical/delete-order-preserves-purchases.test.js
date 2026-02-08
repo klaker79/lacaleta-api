@@ -7,11 +7,11 @@
  * las compras diarias de OTROS pedidos del mismo día.
  *
  * Bug original: DELETE /api/orders/:id borraba TODAS las
- * entradas de precios_compra_diarios del día, no solo las
- * del pedido borrado.
+ * entradas de precios_compra_diarios del día.
  *
- * Fix: Ahora usa UPDATE-subtract + DELETE-if-≤0, protegiendo
- * las compras de otros pedidos.
+ * Fix (Stabilization v1): Cada pedido tiene su propia fila
+ * en precios_compra_diarios (UNIQUE constraint incluye pedido_id).
+ * DELETE usa pedido_id para borrar solo las filas del pedido eliminado.
  *
  * @author MindLoopIA
  * @date 2026-02-08
@@ -100,7 +100,7 @@ describe('DELETE /api/orders — Preserves other orders purchases', () => {
         console.log(`📋 Order B created: ID ${orderB_Id}`);
     });
 
-    it('3. Verify Diario has combined purchases (8kg total)', async () => {
+    it('3. Verify Diario has purchases from both orders', async () => {
         if (!authToken || !testIngredientId) return;
 
         const res = await request(API_URL)
@@ -109,16 +109,19 @@ describe('DELETE /api/orders — Preserves other orders purchases', () => {
             .set('Authorization', `Bearer ${authToken}`);
 
         if (res.status === 200) {
-            const entry = res.body.find(e =>
+            // With the new constraint, there should be SEPARATE entries for each order
+            const entries = res.body.filter(e =>
                 (e.ingrediente_id || e.ingredienteId) === testIngredientId
             );
 
-            if (entry) {
-                const cantidad = parseFloat(entry.cantidad_comprada || entry.cantidadComprada || 0);
-                console.log(`📊 Diario before delete: ${cantidad}kg`);
-                // Should be 5 + 3 = 8 (or at least > 5)
-                expect(cantidad).toBeGreaterThanOrEqual(8);
-            }
+            // Sum total across all matching entries
+            const totalCantidad = entries.reduce((sum, e) => {
+                return sum + parseFloat(e.cantidad_comprada || e.cantidadComprada || 0);
+            }, 0);
+
+            console.log(`📊 Diario entries found: ${entries.length}, total qty: ${totalCantidad}kg`);
+            // Should be at least 8 (5 from A + 3 from B)
+            expect(totalCantidad).toBeGreaterThanOrEqual(8);
         }
     });
 
@@ -141,24 +144,28 @@ describe('DELETE /api/orders — Preserves other orders purchases', () => {
             .set('Authorization', `Bearer ${authToken}`);
 
         if (diarioRes.status === 200) {
-            const entry = diarioRes.body.find(e =>
+            const entries = diarioRes.body.filter(e =>
                 (e.ingrediente_id || e.ingredienteId) === testIngredientId
             );
 
-            if (entry) {
-                const cantidadRestante = parseFloat(entry.cantidad_comprada || entry.cantidadComprada || 0);
-                console.log(`📊 Diario after deleting Order A: ${cantidadRestante}kg`);
+            const totalCantidadRestante = entries.reduce((sum, e) => {
+                return sum + parseFloat(e.cantidad_comprada || e.cantidadComprada || 0);
+            }, 0);
 
-                // CRITICAL ASSERTION:
-                // If the old buggy code ran, this would be 0 (all purchases deleted)
-                // With the fix, it should be 3 (only Order A's 5kg subtracted)
-                expect(cantidadRestante).toBeGreaterThanOrEqual(3);
-                expect(cantidadRestante).toBeLessThan(8); // Should not still be 8
-            } else {
-                // If no entry found, the bug is back — all purchases were deleted
-                console.error('❌ BUG REGRESSION: All daily purchases were deleted!');
-                expect(entry).toBeTruthy(); // Force fail
-            }
+            console.log(`📊 Diario after deleting Order A: ${totalCantidadRestante}kg (entries: ${entries.length})`);
+
+            // CRITICAL ASSERTIONS:
+            // 1. Order B's 3kg MUST still exist
+            expect(totalCantidadRestante).toBeGreaterThanOrEqual(3);
+            // 2. Order A's 5kg should be gone
+            expect(totalCantidadRestante).toBeLessThan(8);
+
+            // Verify no entry has the deleted order's pedido_id
+            const entriesWithDeletedOrderId = entries.filter(e => e.pedido_id === orderA_Id);
+            expect(entriesWithDeletedOrderId.length).toBe(0);
+        } else {
+            // If Diario endpoint fails, force fail with descriptive message
+            expect(diarioRes.status).toBe(200);
         }
     });
 

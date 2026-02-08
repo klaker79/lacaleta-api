@@ -1,3 +1,43 @@
+/**
+ * ═══════════════════════════════════════════════════════
+ * server.js — MindLoop CostOS API (Monolito)
+ * ═══════════════════════════════════════════════════════
+ * Mapa de Secciones (~4400 líneas):
+ *
+ * L1-30:       Imports y dependencias
+ * L31-75:      Configuración (email, CORS origins)
+ * L76-150:     Middlewares globales (CORS, JSON, cookies)
+ * L150-170:    Pool de base de datos (PostgreSQL)
+ * L170-615:    CREATE TABLEs + migraciones idempotentes
+ * L619-670:    Rate limiting (per-user)
+ * L672-720:    Endpoints públicos (health, verify, login)
+ * L724-970:    Autenticación (register, login, profile)
+ * L970-1035:   Gestión de equipo (multi-cuenta, invitaciones)
+ * L1037-1300:  Ingredientes CRUD + búsqueda + alias
+ * L1304-1520:  Ingredientes-Proveedores (múltiples proveedores)
+ * L1522-1640:  Variantes de receta (botella/copa)
+ * L1644-1840:  Inventario avanzado (stock, consolidación)
+ * L1841-1945:  Análisis avanzado (BCG Matrix, food cost)
+ * L1947-2005:  Recetas CRUD
+ * L2006-2015:  Proveedores (→ SupplierController)
+ * L2016-2285:  Pedidos (orders) — ⚡ BUG DELETE FIJADO (Stabilization v1)
+ * L2287-2520:  Ventas (sales) + stock deduction
+ * L2522-2630:  Parse PDF con Claude AI
+ * L2630-2895:  Sales bulk + ventas_diarias_resumen
+ * L2899-2975:  Empleados (staff)
+ * L2978-3115:  Horarios (scheduling)
+ * L3116-3195:  Gastos fijos (fixed expenses)
+ * L3198-3305:  Balance y estadísticas
+ * L3308-3655:  Tracking diario (compras/ventas diarias)
+ * L3657-3985:  Inteligencia (frescura, compras, sobrestock)
+ * L3989-4235:  Mermas (waste tracking)
+ * L4239-4330:  Health check + heartbeat
+ * L4332-4404:  Error handlers + iniciar servidor
+ *
+ * @version Stabilization v1
+ * @date 2026-02-08
+ * ═══════════════════════════════════════════════════════
+ */
 // IMPORTANT: Sentry instrument must be loaded FIRST
 require('./instrument.js');
 
@@ -466,8 +506,6 @@ pool.on('error', (err) => {
                 
                 ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
                 
-                ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
-                
                 ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
             `);
             log('info', 'Migración columnas auditoría completada');
@@ -569,13 +607,24 @@ pool.on('error', (err) => {
             log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
         } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
 
-        // Columna pedido_id en precios_compra_diarios
+        // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
+        // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
         try {
             await pool.query(`
                 ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
             `);
-            log('info', 'Columna pedido_id en precios_compra_diarios verificada');
-        } catch (e) { log('warn', 'Migración pedido_id', { error: e.message }); }
+            // Migrar constraint: de UNIQUE(ingrediente_id, fecha, restaurante_id) 
+            // a UNIQUE INDEX que incluye pedido_id (COALESCE para NULLs)
+            await pool.query(`
+                ALTER TABLE precios_compra_diarios 
+                    DROP CONSTRAINT IF EXISTS precios_compra_diarios_ingrediente_id_fecha_restaurante_id_key;
+            `);
+            await pool.query(`
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_pcd_ing_fecha_rest_pedido
+                    ON precios_compra_diarios (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0));
+            `);
+            log('info', 'Migración UNIQUE constraint precios_compra_diarios completada (ahora incluye pedido_id)');
+        } catch (e) { log('warn', 'Migración pedido_id / UNIQUE constraint', { error: e.message }); }
 
         // Columna periodo_id en mermas
         try {
@@ -2002,17 +2051,7 @@ app.post('/api/suppliers', authMiddleware, SupplierController.create);
 app.put('/api/suppliers/:id', authMiddleware, SupplierController.update);
 app.delete('/api/suppliers/:id', authMiddleware, SupplierController.delete);
 
-// --- LEGACY SUPPLIERS ELIMINADO ---
-// Estas rutas nunca se ejecutaban porque Express usa la primera ruta que coincide.
-// La lógica de ingredientes_proveedores debe añadirse a SupplierController si se necesita.
-// Código original comentado para referencia futura.
-/*
-OLD LEGACY CODE REMOVED - Was dead code (lines 1940-2024)
-- GET /api/suppliers (con lógica ingredientes_proveedores)
-- POST /api/suppliers
-- PUT /api/suppliers/:id
-- DELETE /api/suppliers/:id
-*/
+
 
 // ========== PEDIDOS ==========
 // ✅ PRODUCCIÓN: Estas rutas inline en server.js son las únicas activas.
@@ -2088,16 +2127,16 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                 const totalItem = precioReal * cantidad;
 
+                // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                 await client.query(`
                     INSERT INTO precios_compra_diarios 
                     (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0))
                     DO UPDATE SET 
                         precio_unitario = EXCLUDED.precio_unitario,
                         cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra,
-                        pedido_id = EXCLUDED.pedido_id
+                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
                 `, [item.ingredienteId || item.ingrediente_id, fechaCompra, precioReal, cantidad, totalItem, req.restauranteId, proveedorId || null, result.rows[0].id]);
             }
 
@@ -2139,16 +2178,16 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                 const total = precioReal * cantidad;
 
                 // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
+                // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                 await client.query(`
                     INSERT INTO precios_compra_diarios 
                     (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0))
                     DO UPDATE SET 
                         precio_unitario = EXCLUDED.precio_unitario,
                         cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra,
-                        pedido_id = EXCLUDED.pedido_id
+                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
                 `, [item.ingredienteId || item.ingrediente_id, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null, id]);
             }
 
@@ -2192,34 +2231,54 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 
             const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
 
-            // Decrementar las compras de este pedido (en vez de borrar)
-            for (const item of ingredientes) {
-                const ingId = item.ingredienteId || item.ingrediente_id;
-                const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
-                const totalItem = precioReal * cantidadRecibida;
+            // ⚡ FIX Stabilization v1: Borrar compras diarias por pedido_id (preciso)
+            // Si el pedido tiene ID, borrar directamente sus filas (cada pedido tiene sus propias filas ahora)
+            const hasPedidoBasedRows = await client.query(
+                `SELECT COUNT(*) as cnt FROM precios_compra_diarios 
+                 WHERE pedido_id = $1 AND restaurante_id = $2`,
+                [pedido.id, req.restauranteId]
+            );
 
-                if (cantidadRecibida > 0 && fechaRecepcion) {
-                    // Restar cantidad y total de la fila existente
-                    await client.query(
-                        `UPDATE precios_compra_diarios 
-                         SET cantidad_comprada = cantidad_comprada - $1,
-                             total_compra = total_compra - $2
-                         WHERE ingrediente_id = $3 
-                         AND fecha::date = $4::date 
-                         AND restaurante_id = $5`,
-                        [cantidadRecibida, totalItem, ingId, fechaRecepcion, req.restauranteId]
-                    );
+            if (parseInt(hasPedidoBasedRows.rows[0].cnt) > 0) {
+                // Camino nuevo: borrar por pedido_id (seguro, no afecta otros pedidos)
+                await client.query(
+                    `DELETE FROM precios_compra_diarios 
+                     WHERE pedido_id = $1 AND restaurante_id = $2`,
+                    [pedido.id, req.restauranteId]
+                );
+                log('info', 'Compras diarias borradas por pedido_id', { pedidoId: pedido.id });
+            } else {
+                // Camino legacy: filas sin pedido_id (datos anteriores a la migración)
+                // Usar UPDATE-subtract + DELETE-if-≤0 como fallback
+                log('warn', 'Pedido sin filas con pedido_id, usando fallback legacy', { pedidoId: pedido.id });
+                for (const item of ingredientes) {
+                    const ingId = item.ingredienteId || item.ingrediente_id;
+                    const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                    const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
+                    const totalItem = precioReal * cantidadRecibida;
 
-                    // Si la cantidad quedó en 0 o negativo, eliminar la fila
-                    await client.query(
-                        `DELETE FROM precios_compra_diarios 
-                         WHERE ingrediente_id = $1 
-                         AND fecha::date = $2::date 
-                         AND restaurante_id = $3
-                         AND cantidad_comprada <= 0`,
-                        [ingId, fechaRecepcion, req.restauranteId]
-                    );
+                    if (cantidadRecibida > 0 && fechaRecepcion) {
+                        await client.query(
+                            `UPDATE precios_compra_diarios 
+                             SET cantidad_comprada = cantidad_comprada - $1,
+                                 total_compra = total_compra - $2
+                             WHERE ingrediente_id = $3 
+                             AND fecha::date = $4::date 
+                             AND restaurante_id = $5
+                             AND pedido_id IS NULL`,
+                            [cantidadRecibida, totalItem, ingId, fechaRecepcion, req.restauranteId]
+                        );
+
+                        await client.query(
+                            `DELETE FROM precios_compra_diarios 
+                             WHERE ingrediente_id = $1 
+                             AND fecha::date = $2::date 
+                             AND restaurante_id = $3
+                             AND pedido_id IS NULL
+                             AND cantidad_comprada <= 0`,
+                            [ingId, fechaRecepcion, req.restauranteId]
+                        );
+                    }
                 }
             }
 
@@ -2359,6 +2418,12 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
         const total = precioUnitario * cantidadValidada;
 
         const ingredientesReceta = receta.ingredientes || [];
+        /**
+         * @deprecated VALIDACIÓN DE STOCK DESACTIVADA (desde 2025-12)
+         * Motivo: Los restaurantes frecuentemente venden antes de recibir mercancía.
+         * El stock negativo es un comportamiento esperado en este contexto.
+         * Reactivar solo si se implementa un sistema de alertas de stock bajo.
+         */
         /* VALIDACIÓN DESACTIVADA - Permitir stock negativo (restaurantes venden antes de recibir mercancía)
         for (const ing of ingredientesReceta) {
             const stockResult = await client.query('SELECT stock_actual, nombre FROM ingredientes WHERE id = $1', [ing.ingredienteId]);
@@ -3408,11 +3473,12 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             const fecha = compra.fecha || new Date().toISOString().split('T')[0];
 
             // Upsert: actualizar si existe, insertar si no
+            // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id (bulk purchases sin pedido_id usan COALESCE default 0)
             await client.query(`
                 INSERT INTO precios_compra_diarios 
                 (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
                 VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                ON CONFLICT (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0))
                 DO UPDATE SET 
                     precio_unitario = EXCLUDED.precio_unitario,
                     cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
