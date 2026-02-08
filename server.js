@@ -2017,6 +2017,25 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         const { proveedorId, fecha, ingredientes, total, estado } = req.body;
 
+        // Validar inputs críticos
+        if (!fecha) {
+            return res.status(400).json({ error: 'Fecha es requerida' });
+        }
+        if (estado && !['pendiente', 'recibido', 'cancelado'].includes(estado)) {
+            return res.status(400).json({ error: 'Estado inválido. Valores: pendiente, recibido, cancelado' });
+        }
+        if (ingredientes && !Array.isArray(ingredientes)) {
+            return res.status(400).json({ error: 'Ingredientes debe ser un array' });
+        }
+        if (estado === 'recibido' && ingredientes) {
+            for (const item of ingredientes) {
+                const ingId = item.ingredienteId || item.ingrediente_id;
+                if (!ingId) {
+                    return res.status(400).json({ error: 'Cada ingrediente debe tener ingredienteId' });
+                }
+            }
+        }
+
         await client.query('BEGIN');
 
         const result = await client.query(
