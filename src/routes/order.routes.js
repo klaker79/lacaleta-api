@@ -50,35 +50,8 @@ router.post('/', authMiddleware, async (req, res) => {
             [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente', req.restauranteId]
         );
 
-        // Si el pedido se crea directamente como 'recibido', registrar precios de compra diarios
-        if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
-            const fechaCompra = fecha ? new Date(fecha) : new Date();
-
-            for (const item of ingredientes) {
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
-                const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
-                const totalItem = precioReal * cantidad;
-                const ingId = item.ingredienteId || item.ingrediente_id;
-
-                if (ingId && cantidad > 0) {
-                    await client.query(`
-                        INSERT INTO precios_compra_diarios 
-                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
-                        DO UPDATE SET 
-                            precio_unitario = EXCLUDED.precio_unitario,
-                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                    `, [ingId, fechaCompra, precioReal, cantidad, totalItem, req.restauranteId, proveedorId]);
-                }
-            }
-
-            log('info', 'Compras diarias registradas al crear pedido recibido', {
-                pedidoId: result.rows[0].id,
-                items: ingredientes.length
-            });
-        }
+        // ℹ️ Precios de compra diarios se registran desde el frontend vía /api/analytics/daily/purchases/bulk
+        // NO registrar aquí para evitar doble conteo (Phase 2 fix)
 
         await client.query('COMMIT');
         res.status(201).json(result.rows[0]);
