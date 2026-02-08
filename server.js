@@ -690,8 +690,18 @@ app.get('/', (req, res) => {
 // app.get('/api/debug/suppliers-test', (req, res) => { ... });
 
 // Sentry verification endpoint (remove after confirming)
-app.get('/debug-sentry', (req, res) => {
-    throw new Error('Sentry test error from La Caleta API!');
+app.get('/debug-sentry', async (req, res) => {
+    try {
+        throw new Error('Sentry test error from La Caleta API!');
+    } catch (e) {
+        Sentry.captureException(e);
+        await Sentry.flush(2000);
+        res.status(500).json({
+            error: 'Error sent to Sentry',
+            sentryEventId: Sentry.lastEventId(),
+            dsnConfigured: !!process.env.SENTRY_DSN
+        });
+    }
 });
 
 // Health Check
