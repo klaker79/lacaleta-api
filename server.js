@@ -689,6 +689,11 @@ app.get('/', (req, res) => {
 // DEBUG: REMOVED - No exponer en producción
 // app.get('/api/debug/suppliers-test', (req, res) => { ... });
 
+// Sentry verification endpoint (remove after confirming)
+app.get('/debug-sentry', (req, res) => {
+    throw new Error('Sentry test error from La Caleta API!');
+});
+
 // Health Check
 app.get('/api/health', async (req, res) => {
     try {
