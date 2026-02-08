@@ -621,7 +621,7 @@ pool.on('error', (err) => {
             `);
             await pool.query(`
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_pcd_ing_fecha_rest_pedido
-                    ON precios_compra_diarios (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0));
+                    ON precios_compra_diarios (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)));
             `);
             log('info', 'Migración UNIQUE constraint precios_compra_diarios completada (ahora incluye pedido_id)');
         } catch (e) { log('warn', 'Migración pedido_id / UNIQUE constraint', { error: e.message }); }
@@ -2132,7 +2132,7 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                     INSERT INTO precios_compra_diarios 
                     (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0))
+                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
                     DO UPDATE SET 
                         precio_unitario = EXCLUDED.precio_unitario,
                         cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
@@ -2183,7 +2183,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
                     INSERT INTO precios_compra_diarios 
                     (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0))
+                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
                     DO UPDATE SET 
                         precio_unitario = EXCLUDED.precio_unitario,
                         cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
@@ -3478,7 +3478,7 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
                 INSERT INTO precios_compra_diarios 
                 (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
                 VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (ingrediente_id, fecha, restaurante_id, COALESCE(pedido_id, 0))
+                ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
                 DO UPDATE SET 
                     precio_unitario = EXCLUDED.precio_unitario,
                     cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
