@@ -3636,11 +3636,20 @@ app.get('/api/monthly/summary', authMiddleware, async (req, res) => {
                 ingredientesData[row.ingrediente] = { id: row.ingrediente_id, dias: {}, total: 0, totalCantidad: 0 };
             }
 
-            ingredientesData[row.ingrediente].dias[fechaStr] = {
-                precio: parseFloat(row.precio_unitario),
-                cantidad: parseFloat(row.cantidad_comprada),
-                total: parseFloat(row.total_compra)
-            };
+            if (!ingredientesData[row.ingrediente].dias[fechaStr]) {
+                ingredientesData[row.ingrediente].dias[fechaStr] = {
+                    precio: parseFloat(row.precio_unitario),
+                    cantidad: parseFloat(row.cantidad_comprada),
+                    total: parseFloat(row.total_compra)
+                };
+            } else {
+                // ⚡ FIX: Acumular cantidades de múltiples pedidos del mismo día
+                const existing = ingredientesData[row.ingrediente].dias[fechaStr];
+                existing.cantidad += parseFloat(row.cantidad_comprada);
+                existing.total += parseFloat(row.total_compra);
+                // Precio unitario ponderado: total / cantidad
+                existing.precio = existing.cantidad > 0 ? existing.total / existing.cantidad : existing.precio;
+            }
             ingredientesData[row.ingrediente].total += parseFloat(row.total_compra);
             ingredientesData[row.ingrediente].totalCantidad += parseFloat(row.cantidad_comprada);
         });
