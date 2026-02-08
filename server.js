@@ -17,11 +17,8 @@ const recipeRoutesV2 = require('./src/interfaces/http/routes/recipe.routes.v2');
 const alertRoutes = require('./src/interfaces/http/routes/alert.routes');
 const kpiRoutes = require('./src/interfaces/http/routes/kpi.routes');
 const SupplierController = require('./src/interfaces/http/controllers/SupplierController');
-const PurchaseController = require('./src/interfaces/http/controllers/PurchaseController');
-const RecipeController = require('./src/interfaces/http/controllers/RecipeController');
-const SaleController = require('./src/interfaces/http/controllers/SaleController');
-const StockMovementController = require('./src/interfaces/http/controllers/StockMovementController');
-const IngredientController = require('./src/interfaces/http/controllers/IngredientController');
+// NOTA: PurchaseController, RecipeController, SaleController, StockMovementController,
+// IngredientController fueron eliminados — sus rutas están inline en este archivo.
 
 // Middleware modularizado
 const { authMiddleware, requireAdmin } = require('./src/middleware/auth');
@@ -1920,17 +1917,7 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
 });
 
 // ========== RECETAS ==========
-// === MIGRADO A CONTROLLER (Fase 4C) ===
-// FIXED: RecipeRepository.findActive() ahora acepta activo = true OR NULL
-// El controller se puede reactivar cuando se quiera migrar completamente.
-// app.get('/api/recipes', authMiddleware, RecipeController.list);
-// app.get('/api/recipes/:id', authMiddleware, RecipeController.getById);
-// app.post('/api/recipes', authMiddleware, RecipeController.create);
-// app.put('/api/recipes/:id', authMiddleware, RecipeController.update);
-// app.delete('/api/recipes/:id', authMiddleware, RecipeController.delete);
-
-
-// --- LEGACY (Mantener activo hasta migración completa) ---
+// ✅ PRODUCCIÓN: Rutas inline activas. Controllers deshabilitados.
 app.get('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
@@ -2009,17 +1996,12 @@ OLD LEGACY CODE REMOVED - Was dead code (lines 1940-2024)
 */
 
 // ========== PEDIDOS ==========
-// 🔧 IMPORTANTE: Las rutas de orders ahora se manejan en src/routes/order.routes.js
-// El PurchaseController.update tiene validación canBeModified() que bloquea la recepción de pedidos.
-// Las rutas modularizadas tienen la lógica correcta para registrar precios_compra_diarios.
-// --- DESHABILITADO: PurchaseController routes causan conflicto con order.routes.js ---
-// app.get('/api/orders', authMiddleware, PurchaseController.list);
-// app.get('/api/orders/:id', authMiddleware, PurchaseController.getById);
-// app.post('/api/orders', authMiddleware, PurchaseController.create);
-// app.put('/api/orders/:id', authMiddleware, PurchaseController.update);
-// app.delete('/api/orders/:id', authMiddleware, PurchaseController.delete);
+// ✅ PRODUCCIÓN: Estas rutas inline en server.js son las únicas activas.
+// Los archivos src/routes/order.routes.js fueron movidos a _dormant/ (nunca se cargaron).
+// El POST registra Diario para compra mercado (estado='recibido').
+// El PUT registra Diario al recibir pedidos.
+// El DELETE hace rollback preciso (UPDATE-subtract + DELETE-if-≤0).
 
-// --- LEGACY (no se ejecuta - Express usa la primera ruta que coincide) ---
 app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY fecha DESC', [req.restauranteId]);
@@ -2230,15 +2212,7 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== VENTAS ==========
-// === MIGRADO A CONTROLLER (Fase 4D) - DESHABILITADO ===
-// TODO: SaleController.create no busca precio de receta ni descuenta inventario
-// El código legacy SÍ lo hace. Restaurar legacy hasta migrar completamente.
-// app.get('/api/sales', authMiddleware, SaleController.list);
-// app.post('/api/sales', authMiddleware, SaleController.create);
-// app.post('/api/sales/bulk', authMiddleware, SaleController.createBulk);
-// app.delete('/api/sales/:id', authMiddleware, SaleController.delete);
-
-// --- LEGACY (RESTAURADO - Busca precio y descuenta inventario) ---
+// ✅ PRODUCCIÓN: Rutas inline activas con descuento de inventario completo.
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
         const { fecha } = req.query;
