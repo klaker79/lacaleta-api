@@ -109,42 +109,8 @@ router.put('/:id', authMiddleware, async (req, res) => {
             [estado, JSON.stringify(ingredientes), totalRecibido, fechaRecepcion || new Date(), id, req.restauranteId]
         );
 
-        // Registrar precios de compra diarios si se marca como recibido
-        if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
-            const fechaCompra = fechaRecepcion ? new Date(fechaRecepcion) : new Date();
-
-            let insertCount = 0;
-            let skipCount = 0;
-
-            for (const item of ingredientes) {
-                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
-                const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
-                const total = precioReal * cantidadRecibida;
-                const ingId = item.ingredienteId || item.ingrediente_id;
-
-                // Solo insertar si hay cantidad recibida y el item NO está como no-entregado
-                if (ingId && cantidadRecibida > 0 && item.estado !== 'no-entregado') {
-                    await client.query(`
-                        INSERT INTO precios_compra_diarios 
-                        (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (ingrediente_id, fecha, restaurante_id)
-                        DO UPDATE SET 
-                            precio_unitario = EXCLUDED.precio_unitario,
-                            cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                            total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                    `, [ingId, fechaCompra, precioReal, cantidadRecibida, total,
-                        req.restauranteId, result.rows[0]?.proveedor_id || null]);
-                    insertCount++;
-                } else {
-                    skipCount++;
-                }
-            }
-
-            log('info', 'Pedido recibido - precios registrados', {
-                pedidoId: id, insertados: insertCount, saltados: skipCount
-            });
-        }
+        // ℹ️ Precios de compra diarios se registran desde el frontend vía /api/analytics/daily/purchases/bulk
+        // NO registrar aquí para evitar doble conteo (Phase 2 fix)
 
         await client.query('COMMIT');
         res.json(result.rows[0] || {});
