@@ -320,6 +320,37 @@ router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
     }
 });
 
+/**
+ * DELETE /api/analytics/daily/purchases
+ * Elimina compras diarias por fecha (y opcionalmente por ingrediente)
+ * Query params: fecha (required), ingrediente_id (optional)
+ */
+router.delete('/daily/purchases', authMiddleware, async (req, res) => {
+    try {
+        const { fecha, ingrediente_id } = req.query;
+        if (!fecha) {
+            return res.status(400).json({ error: 'Parámetro fecha requerido' });
+        }
+
+        let query = 'DELETE FROM precios_compra_diarios WHERE restaurante_id = $1 AND fecha = $2';
+        let params = [req.restauranteId, fecha];
+
+        if (ingrediente_id) {
+            query += ' AND ingrediente_id = $3';
+            params.push(ingrediente_id);
+        }
+
+        query += ' RETURNING *';
+        const result = await pool.query(query, params);
+
+        log('info', 'Compras diarias eliminadas', { fecha, count: result.rowCount });
+        res.json({ success: true, deleted: result.rowCount });
+    } catch (err) {
+        log('error', 'Error eliminando compras diarias', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // ========== MONTHLY SUMMARY ==========
 
 /**
