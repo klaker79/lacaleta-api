@@ -120,7 +120,7 @@ app.use((req, res, next) => {
     // 🔒 FIX SEGURIDAD: Solo permitir * para health checks, no para toda la API
     if (!origin || origin === '') {
         // Rutas permitidas sin origin (health checks, métricas, Uptime Kuma)
-        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat'];
+        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password'];
         const isPublicPath = publicPaths.some(p => req.path === p || (p !== '/' && req.path.startsWith(p)));
 
         if (isPublicPath) {
@@ -1028,7 +1028,9 @@ app.post('/api/auth/register', async (req, res) => {
 app.get('/api/auth/verify-email', async (req, res) => {
     try {
         const { token } = req.query;
-        if (!token) return res.status(400).json({ error: 'Token requerido' });
+        if (!token) {
+            return res.send(verifyPageHTML('❌ Error', 'Token de verificación no proporcionado.', false));
+        }
 
         const result = await pool.query(
             `SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id 
@@ -1036,29 +1038,41 @@ app.get('/api/auth/verify-email', async (req, res) => {
         );
 
         if (result.rows.length === 0) {
-            return res.status(400).json({ error: 'Token inválido o expirado' });
+            return res.send(verifyPageHTML('❌ Token inválido', 'El enlace ha expirado o ya fue utilizado. Solicita uno nuevo desde la app.', false));
         }
 
         const user = result.rows[0];
         await pool.query(`UPDATE usuarios SET email_verified = TRUE, verification_token = NULL WHERE id = $1`, [user.id]);
 
-        const jwtToken = jwt.sign(
-            { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
-            JWT_SECRET, { expiresIn: '7d' } // 7 días de sesión
-        );
-
         log('info', 'Email verificado', { email: user.email });
 
-        res.json({
-            message: '¡Cuenta verificada!',
-            token: jwtToken,
-            user: { id: user.id, email: user.email, nombre: user.nombre, rol: user.rol, restaurante: user.restaurante_nombre, restauranteId: user.restaurante_id }
-        });
+        res.send(verifyPageHTML('✅ ¡Cuenta verificada!', `Hola ${user.nombre}, tu cuenta ha sido verificada correctamente. Ya puedes iniciar sesión.`, true));
     } catch (err) {
         log('error', 'Error verificando email', { error: err.message });
-        res.status(500).json({ error: 'Error interno' });
+        res.status(500).send(verifyPageHTML('❌ Error', 'Ocurrió un error interno. Inténtalo de nuevo más tarde.', false));
     }
 });
+
+// Helper: HTML page for email verification result
+function verifyPageHTML(title, message, success) {
+    const color = success ? '#10b981' : '#ef4444';
+    return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} — MindLoop CostOS</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#1e293b;border-radius:16px;padding:40px;max-width:420px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.icon{font-size:48px;margin-bottom:16px}.title{font-size:22px;font-weight:700;margin-bottom:12px;color:${color}}
+.msg{color:#94a3b8;font-size:15px;line-height:1.6;margin-bottom:28px}
+.btn{display:inline-block;background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;transition:transform .2s}
+.btn:hover{transform:translateY(-2px)}</style></head>
+<body><div class="card">
+<div class="icon">${success ? '🎉' : '⚠️'}</div>
+<h1 class="title">${title}</h1>
+<p class="msg">${message}</p>
+<a href="https://app.mindloop.cloud" class="btn">Ir a MindLoop CostOS</a>
+</div></body></html>`;
+}
 
 // ========== RECUPERACIÓN DE CONTRASEÑA ==========
 // Solicitar reset de contraseña
