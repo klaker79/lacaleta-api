@@ -1,4 +1,5 @@
 require('dotenv').config();
+const Sentry = require('@sentry/node');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -10,6 +11,18 @@ const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
+
+// ========== SENTRY - Monitorización de errores ==========
+Sentry.init({
+    dsn: process.env.SENTRY_DSN,  // Si no está configurado, Sentry es no-op
+    environment: process.env.NODE_ENV || 'development',
+    release: '2.3.1',
+    beforeSend(event) {
+        // No enviar errores en desarrollo sin DSN
+        if (!process.env.SENTRY_DSN) return null;
+        return event;
+    }
+});
 
 // ========== ARQUITECTURA LIMPIA V2 ==========
 const { setupEventHandlers } = require('./src/application/bootstrap');
@@ -4294,6 +4307,10 @@ app.use((req, res) => {
 });
 
 
+
+// ========== SENTRY ERROR HANDLER ==========
+// Debe ir ANTES del error handler custom para capturar errores no manejados
+Sentry.setupExpressErrorHandler(app);
 
 // ========== ERROR HANDLER GLOBAL ==========
 app.use((err, req, res, next) => {

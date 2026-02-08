@@ -4,6 +4,7 @@
  */
 
 const jwt = require('jsonwebtoken');
+const Sentry = require('@sentry/node');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-2024';
 
@@ -38,6 +39,14 @@ const authMiddleware = (req, res, next) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded;
         req.restauranteId = decoded.restauranteId;
+
+        // Contexto de usuario para Sentry
+        Sentry.setUser({
+            id: decoded.id,
+            email: decoded.email,
+            restauranteId: decoded.restauranteId
+        });
+
         next();
     } catch (error) {
         log('warn', 'Auth fallido: Token inválido', {
