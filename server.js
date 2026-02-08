@@ -3352,8 +3352,22 @@ app.get('/api/daily/purchases', authMiddleware, async (req, res) => {
     try {
         const { fecha, mes, ano } = req.query;
         let query = `
-            SELECT p.*, i.nombre as ingrediente_nombre, i.unidad,
-                   pr.nombre as proveedor_nombre
+            SELECT p.ingrediente_id, p.fecha, p.restaurante_id,
+                   i.nombre as ingrediente_nombre, i.unidad,
+                   -- Agregar cantidades de múltiples pedidos del mismo día
+                   SUM(p.cantidad_comprada) as cantidad_comprada,
+                   SUM(p.total_compra) as total_compra,
+                   -- Precio unitario ponderado: total / cantidad
+                   CASE WHEN SUM(p.cantidad_comprada) > 0 
+                        THEN SUM(p.total_compra) / SUM(p.cantidad_comprada)
+                        ELSE MAX(p.precio_unitario)
+                   END as precio_unitario,
+                   MAX(pr.nombre) as proveedor_nombre,
+                   MAX(p.proveedor_id) as proveedor_id,
+                   MAX(p.id) as id,
+                   MAX(p.pedido_id) as pedido_id,
+                   MAX(p.created_at) as created_at,
+                   MAX(p.notas) as notas
             FROM precios_compra_diarios p
             LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
             LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
@@ -3369,6 +3383,7 @@ app.get('/api/daily/purchases', authMiddleware, async (req, res) => {
             params.push(mes, ano);
         }
 
+        query += ' GROUP BY p.ingrediente_id, p.fecha, p.restaurante_id, i.nombre, i.unidad';
         query += ' ORDER BY p.fecha DESC, i.nombre';
 
         const result = await pool.query(query, params);
