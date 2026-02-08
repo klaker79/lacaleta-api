@@ -250,7 +250,7 @@ router.get('/daily/sales', authMiddleware, async (req, res) => {
 router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { compras } = req.body;
+        const { compras, skipStockUpdate } = req.body;
         if (!Array.isArray(compras)) {
             return res.status(400).json({ error: 'Array compras requerido' });
         }
@@ -302,8 +302,11 @@ router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
                     total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
             `, [ingredienteData.id, fecha, precio, cantidad, precio * cantidad, req.restauranteId]);
 
-            const stockASumar = ingredienteData.cantidadPorFormato > 0 ? cantidad * ingredienteData.cantidadPorFormato : cantidad;
-            await client.query('UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2 AND restaurante_id = $3', [stockASumar, ingredienteData.id, req.restauranteId]);
+            // Solo actualizar stock si no se pidió omitir (evita doble conteo cuando el frontend ya actualizó)
+            if (!skipStockUpdate) {
+                const stockASumar = ingredienteData.cantidadPorFormato > 0 ? cantidad * ingredienteData.cantidadPorFormato : cantidad;
+                await client.query('UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2 AND restaurante_id = $3', [stockASumar, ingredienteData.id, req.restauranteId]);
+            }
 
             resultados.procesados++;
         }
