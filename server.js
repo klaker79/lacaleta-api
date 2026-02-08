@@ -151,7 +151,7 @@ const pool = new Pool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     // Configuración optimizada para estabilidad
-    max: 10,                          // Aumentado para manejar más usuarios
+    max: 20,                          // Escalado para múltiples restaurantes concurrentes
     idleTimeoutMillis: 30000,         // Mantener conexiones 30s
     connectionTimeoutMillis: 10000,   // Timeout más generoso: 10s
     keepAlive: true,                  // Mantener conexiones vivas
@@ -2004,7 +2004,23 @@ OLD LEGACY CODE REMOVED - Was dead code (lines 1940-2024)
 
 app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM pedidos WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY fecha DESC', [req.restauranteId]);
+        const { limit, page } = req.query;
+        let query = 'SELECT * FROM pedidos WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY fecha DESC';
+        const params = [req.restauranteId];
+
+        if (limit) {
+            const limitNum = Math.min(Math.max(parseInt(limit) || 50, 1), 500);
+            const pageNum = Math.max(parseInt(page) || 1, 1);
+            const offset = (pageNum - 1) * limitNum;
+
+            const countResult = await pool.query('SELECT COUNT(*) FROM pedidos WHERE restaurante_id=$1 AND deleted_at IS NULL', [req.restauranteId]);
+            res.set('X-Total-Count', countResult.rows[0].count);
+
+            query += ` LIMIT $2 OFFSET $3`;
+            params.push(limitNum, offset);
+        }
+
+        const result = await pool.query(query, params);
         res.json(result.rows || []);
     } catch (err) {
         log('error', 'Error obteniendo pedidos', { error: err.message });
@@ -2234,16 +2250,41 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
 // ✅ PRODUCCIÓN: Rutas inline activas con descuento de inventario completo.
 app.get('/api/sales', authMiddleware, async (req, res) => {
     try {
-        const { fecha } = req.query;
+        const { fecha, limit, page } = req.query;
         let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL';
         let params = [req.restauranteId];
+        let paramIdx = 1;
 
         if (fecha) {
-            query += ' AND DATE(v.fecha) = $2';
+            paramIdx++;
+            query += ` AND DATE(v.fecha) = $${paramIdx}`;
             params.push(fecha);
         }
 
         query += ' ORDER BY v.fecha DESC';
+
+        if (limit) {
+            const limitNum = Math.min(Math.max(parseInt(limit) || 50, 1), 500);
+            const pageNum = Math.max(parseInt(page) || 1, 1);
+            const offset = (pageNum - 1) * limitNum;
+
+            let countQuery = 'SELECT COUNT(*) FROM ventas v WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL';
+            const countParams = [req.restauranteId];
+            if (fecha) {
+                countQuery += ' AND DATE(v.fecha) = $2';
+                countParams.push(fecha);
+            }
+            const countResult = await pool.query(countQuery, countParams);
+            res.set('X-Total-Count', countResult.rows[0].count);
+
+            paramIdx++;
+            query += ` LIMIT $${paramIdx}`;
+            params.push(limitNum);
+            paramIdx++;
+            query += ` OFFSET $${paramIdx}`;
+            params.push(offset);
+        }
+
         const result = await pool.query(query, params);
         res.json(result.rows || []);
     } catch (err) {
