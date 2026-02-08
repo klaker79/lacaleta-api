@@ -2031,16 +2031,51 @@ app.get('/api/orders', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/orders', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
         const { proveedorId, fecha, ingredientes, total, estado } = req.body;
-        const result = await pool.query(
+
+        await client.query('BEGIN');
+
+        const result = await client.query(
             'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
             [proveedorId, fecha, JSON.stringify(ingredientes), total, estado || 'pendiente', req.restauranteId]
         );
+
+        // 📊 Registrar en Diario si pedido se crea como 'recibido' (compra mercado)
+        // NOTA: El frontend NO llama a /daily/purchases/bulk. Esta es la ÚNICA fuente.
+        if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
+            const fechaCompra = fecha ? new Date(fecha) : new Date();
+
+            for (const item of ingredientes) {
+                const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
+                const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
+                const totalItem = precioReal * cantidad;
+
+                await client.query(`
+                    INSERT INTO precios_compra_diarios 
+                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (ingrediente_id, fecha, restaurante_id)
+                    DO UPDATE SET 
+                        precio_unitario = EXCLUDED.precio_unitario,
+                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra,
+                        pedido_id = EXCLUDED.pedido_id
+                `, [item.ingredienteId || item.ingrediente_id, fechaCompra, precioReal, cantidad, totalItem, req.restauranteId, proveedorId || null, result.rows[0].id]);
+            }
+
+            log('info', 'Compras diarias registradas desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
+        }
+
+        await client.query('COMMIT');
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error creando pedido', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
@@ -2162,7 +2197,7 @@ app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
                     await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
                     await client.query(
                         `UPDATE ingredientes
-                         SET stock_actual = stock_actual - $1,
+                         SET stock_actual = GREATEST(0, stock_actual - $1),
                              ultima_actualizacion_stock = NOW()
                          WHERE id = $2 AND restaurante_id = $3`,
                         [cantidadRecibida, ingId, req.restauranteId]
@@ -2317,7 +2352,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
             // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
             const cantidadADescontar = (ingCantidad / porciones) * cantidadValidada * factorVariante;
             await client.query(
-                'UPDATE ingredientes SET stock_actual = stock_actual - $1 WHERE id = $2 AND restaurante_id = $3',
+                'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1) WHERE id = $2 AND restaurante_id = $3',
                 [cantidadADescontar, ingId, req.restauranteId]
             );
             log('debug', 'Stock descontado', { ingredienteId: ingId, cantidad: cantidadADescontar });
@@ -2707,7 +2742,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
                         );
                         // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
                         const updateResult = await client.query(
-                            'UPDATE ingredientes SET stock_actual = stock_actual - $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
+                            'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
                             [cantidadADescontar, ing.ingredienteId, req.restauranteId]
                         );
                         if (updateResult.rows.length > 0) {
