@@ -3737,7 +3737,23 @@ app.post('/api/purchases/pending', authMiddleware, async (req, res) => {
 
             const precio = parseFloat(compra.precio) || 0;
             const cantidad = parseFloat(compra.cantidad) || 0;
-            const fecha = compra.fecha || new Date().toISOString().split('T')[0];
+            let fecha = compra.fecha || new Date().toISOString().split('T')[0];
+            // Smart date correction: detect DD/MM vs MM/DD swap
+            try {
+                const pd = new Date(fecha + 'T00:00:00');
+                const now = new Date(); now.setHours(0, 0, 0, 0);
+                const diff = (pd - now) / 86400000;
+                const pts = fecha.split('-');
+                if (pts.length === 3 && parseInt(pts[2]) <= 12 && (diff > 7 || diff < -365)) {
+                    const sw = `${pts[0]}-${pts[2]}-${pts[1]}`;
+                    const sd = new Date(sw + 'T00:00:00');
+                    if (Math.abs((sd - now) / 86400000) < Math.abs(diff)) {
+                        log('info', 'Auto-corrected date DD/MM swap', { original: fecha, corrected: sw });
+                        fecha = sw;
+                    }
+                }
+            } catch (e) { /* keep original */ }
+
 
             placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
             values.push(batchId, compra.ingrediente, ingredienteId, precio, cantidad, fecha, req.restauranteId);
