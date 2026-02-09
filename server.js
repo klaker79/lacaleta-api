@@ -3646,7 +3646,7 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
 
         await client.query('BEGIN');
 
-        const resultados = { procesados: 0, fallidos: 0, errores: [] };
+        const resultados = { procesados: 0, fallidos: 0, duplicados: 0, errores: [] };
 
         // Función para normalizar nombres (quitar acentos, mayúsculas, espacios extra)
         const normalizar = (str) => {
@@ -3724,8 +3724,21 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             const total = precio * cantidad;
             const fecha = compra.fecha || new Date().toISOString().split('T')[0];
 
-            // Upsert: actualizar si existe, insertar si no
-            // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id (bulk purchases sin pedido_id usan COALESCE default 0)
+            // 🛡️ Deduplicación: si ya existe una compra de este ingrediente en esta fecha
+            // (por ejemplo, desde un pedido manual), SKIP para no duplicar
+            const existingPurchase = await client.query(
+                `SELECT id FROM precios_compra_diarios 
+                 WHERE ingrediente_id = $1 AND fecha = $2 AND restaurante_id = $3
+                 LIMIT 1`,
+                [ingredienteId, fecha, req.restauranteId]
+            );
+
+            if (existingPurchase.rows.length > 0) {
+                resultados.duplicados++;
+                continue;
+            }
+
+            // Insertar nueva compra (sin pedido_id = NULL → COALESCE default 0)
             await client.query(`
                 INSERT INTO precios_compra_diarios 
                 (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
@@ -3751,7 +3764,7 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
         }
 
         await client.query('COMMIT');
-        log('info', 'Compras diarias importadas', { procesados: resultados.procesados, fallidos: resultados.fallidos });
+        log('info', 'Compras diarias importadas', { procesados: resultados.procesados, fallidos: resultados.fallidos, duplicados: resultados.duplicados });
         res.json(resultados);
     } catch (err) {
         await client.query('ROLLBACK');
