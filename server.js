@@ -1274,7 +1274,7 @@ app.post('/api/team/invite', authMiddleware, requireAdmin, async (req, res) => {
         const passwordHash = await bcrypt.hash(password, 10);
         const nuevoRol = rol || 'usuario';
         const result = await pool.query(
-            'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol) VALUES ($1, $2, $3, $4, $5) RETURNING id, nombre, email, rol',
+            'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
             [req.restauranteId, nombre, email, passwordHash, nuevoRol]
         );
 
