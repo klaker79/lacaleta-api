@@ -3939,7 +3939,7 @@ app.post('/api/purchases/pending/approve-batch', authMiddleware, async (req, res
 // PUT: Editar un item pendiente (cambiar ingrediente_id, precio, cantidad)
 app.put('/api/purchases/pending/:id', authMiddleware, async (req, res) => {
     try {
-        const { ingrediente_id, precio, cantidad } = req.body;
+        const { ingrediente_id, precio, cantidad, fecha } = req.body;
 
         // Verificar que el item existe y es pendiente
         const existing = await pool.query(
@@ -3975,6 +3975,10 @@ app.put('/api/purchases/pending/:id', authMiddleware, async (req, res) => {
         if (cantidad !== undefined) {
             updates.push(`cantidad = $${paramIdx++}`);
             values.push(parseFloat(cantidad));
+        }
+        if (fecha !== undefined) {
+            updates.push(`fecha = $${paramIdx++}`);
+            values.push(fecha);
         }
 
         if (updates.length === 0) {
