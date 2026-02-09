@@ -484,6 +484,23 @@ pool.on('error', (err) => {
       CREATE INDEX IF NOT EXISTS idx_ingredientes_restaurante ON ingredientes(restaurante_id);
       CREATE INDEX IF NOT EXISTS idx_precios_compra_fecha ON precios_compra_diarios(fecha);
       CREATE INDEX IF NOT EXISTS idx_ventas_diarias_fecha ON ventas_diarias_resumen(fecha);
+      -- Cola de revisión: compras importadas por n8n que requieren aprobación
+      CREATE TABLE IF NOT EXISTS compras_pendientes (
+        id SERIAL PRIMARY KEY,
+        batch_id UUID NOT NULL,
+        ingrediente_nombre TEXT NOT NULL,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE SET NULL,
+        precio DECIMAL(10,2) NOT NULL,
+        cantidad DECIMAL(10,2) NOT NULL,
+        fecha DATE NOT NULL,
+        estado VARCHAR(20) DEFAULT 'pendiente',
+        restaurante_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        aprobado_at TIMESTAMP,
+        notas TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_compras_pendientes_estado ON compras_pendientes(estado, restaurante_id);
+      CREATE INDEX IF NOT EXISTS idx_compras_pendientes_batch ON compras_pendientes(batch_id);
     `);
 
         // ========== MIGRACIONES DE COLUMNAS ESTÁNDAR ==========
@@ -3631,7 +3648,372 @@ app.get('/api/daily/purchases', authMiddleware, async (req, res) => {
     }
 });
 
-// Registrar compras diarias (bulk - para n8n)
+// ==========================================
+// 🔔 COMPRAS PENDIENTES (Cola de revisión)
+// ==========================================
+
+// POST: n8n envía compras aquí (van a cola de revisión, NO directamente al diario)
+app.post('/api/purchases/pending', authMiddleware, async (req, res) => {
+    try {
+        const { compras } = req.body;
+
+        if (!Array.isArray(compras) || compras.length === 0) {
+            return res.status(400).json({
+                error: 'Formato inválido: se esperaba un array "compras" no vacío',
+                ejemplo: { compras: [{ ingrediente: "Pulpo", precio: 26, cantidad: 10, fecha: "2025-12-17" }] }
+            });
+        }
+
+        // Generar batch_id único para agrupar items del mismo albarán
+        const batchId = require('crypto').randomUUID();
+
+        // Función para normalizar nombres
+        const normalizar = (str) => {
+            return (str || '')
+                .toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9\s]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+        };
+
+        // Obtener ingredientes y alias para matching
+        const ingredientesResult = await pool.query(
+            'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1',
+            [req.restauranteId]
+        );
+        const ingredientesMap = new Map();
+        ingredientesResult.rows.forEach(i => {
+            ingredientesMap.set(normalizar(i.nombre), i.id);
+        });
+
+        const aliasResult = await pool.query(
+            `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a 
+             JOIN ingredientes i ON a.ingrediente_id = i.id
+             WHERE a.restaurante_id = $1`,
+            [req.restauranteId]
+        );
+        const aliasMap = new Map();
+        aliasResult.rows.forEach(a => {
+            aliasMap.set(normalizar(a.alias), a.ingrediente_id);
+        });
+
+        const resultados = { recibidos: 0, batchId };
+        const values = [];
+        const placeholders = [];
+        let paramIdx = 1;
+
+        for (const compra of compras) {
+            const nombreNorm = normalizar(compra.ingrediente);
+            let ingredienteId = null;
+
+            // Búsqueda exacta
+            ingredienteId = ingredientesMap.get(nombreNorm) || null;
+
+            // Búsqueda parcial en ingredientes
+            if (!ingredienteId) {
+                for (const [nombreDB, id] of ingredientesMap) {
+                    if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) {
+                        ingredienteId = id;
+                        break;
+                    }
+                }
+            }
+
+            // Búsqueda en alias
+            if (!ingredienteId) {
+                ingredienteId = aliasMap.get(nombreNorm) || null;
+            }
+
+            // Búsqueda parcial en alias
+            if (!ingredienteId) {
+                for (const [aliasNombre, id] of aliasMap) {
+                    if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) {
+                        ingredienteId = id;
+                        break;
+                    }
+                }
+            }
+
+            const precio = parseFloat(compra.precio) || 0;
+            const cantidad = parseFloat(compra.cantidad) || 0;
+            const fecha = compra.fecha || new Date().toISOString().split('T')[0];
+
+            placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
+            values.push(batchId, compra.ingrediente, ingredienteId, precio, cantidad, fecha, req.restauranteId);
+            paramIdx += 7;
+            resultados.recibidos++;
+        }
+
+        if (placeholders.length > 0) {
+            await pool.query(
+                `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id)
+                 VALUES ${placeholders.join(', ')}`,
+                values
+            );
+        }
+
+        log('info', 'Compras pendientes recibidas', { batchId, items: resultados.recibidos });
+        res.json(resultados);
+    } catch (err) {
+        log('error', 'Error recibiendo compras pendientes', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// GET: Listar compras pendientes
+app.get('/api/purchases/pending', authMiddleware, async (req, res) => {
+    try {
+        const { estado } = req.query;
+        let query = `
+            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad
+            FROM compras_pendientes cp
+            LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
+            WHERE cp.restaurante_id = $1`;
+        const params = [req.restauranteId];
+
+        if (estado) {
+            query += ' AND cp.estado = $2';
+            params.push(estado);
+        } else {
+            query += " AND cp.estado = 'pendiente'";
+        }
+
+        query += ' ORDER BY cp.created_at DESC, cp.batch_id, cp.ingrediente_nombre';
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        log('error', 'Error listando compras pendientes', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// POST: Aprobar un item pendiente → insertar en precios_compra_diarios + actualizar stock
+app.post('/api/purchases/pending/:id/approve', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Obtener el item pendiente
+        const itemResult = await client.query(
+            "SELECT * FROM compras_pendientes WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente'",
+            [req.params.id, req.restauranteId]
+        );
+
+        if (itemResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Item no encontrado o ya procesado' });
+        }
+
+        const item = itemResult.rows[0];
+
+        if (!item.ingrediente_id) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El item no tiene ingrediente asignado. Edítalo primero.' });
+        }
+
+        const total = item.precio * item.cantidad;
+
+        // Insertar en precios_compra_diarios
+        await client.query(`
+            INSERT INTO precios_compra_diarios 
+            (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
+            DO UPDATE SET 
+                precio_unitario = EXCLUDED.precio_unitario,
+                cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+        `, [item.ingrediente_id, item.fecha, item.precio, item.cantidad, total, req.restauranteId]);
+
+        // Actualizar stock
+        const ingResult = await client.query(
+            'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+            [item.ingrediente_id, req.restauranteId]
+        );
+        const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
+        const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+
+        await client.query(
+            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+            [stockASumar, item.ingrediente_id, req.restauranteId]
+        );
+
+        // Marcar como aprobado
+        await client.query(
+            "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1",
+            [req.params.id]
+        );
+
+        await client.query('COMMIT');
+        log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id });
+        res.json({ success: true, message: 'Compra aprobada y registrada' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error aprobando compra pendiente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
+    }
+});
+
+// POST: Aprobar todos los items de un batch
+app.post('/api/purchases/pending/approve-batch', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { batchId } = req.body;
+        if (!batchId) {
+            return res.status(400).json({ error: 'batchId requerido' });
+        }
+
+        await client.query('BEGIN');
+
+        // Obtener items pendientes del batch
+        const itemsResult = await client.query(
+            "SELECT * FROM compras_pendientes WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'pendiente'",
+            [batchId, req.restauranteId]
+        );
+
+        if (itemsResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'No hay items pendientes en este batch' });
+        }
+
+        const resultados = { aprobados: 0, omitidos: 0 };
+
+        for (const item of itemsResult.rows) {
+            if (!item.ingrediente_id) {
+                resultados.omitidos++;
+                continue;
+            }
+
+            const total = item.precio * item.cantidad;
+
+            // Insertar en precios_compra_diarios
+            await client.query(`
+                INSERT INTO precios_compra_diarios 
+                (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
+                DO UPDATE SET 
+                    precio_unitario = EXCLUDED.precio_unitario,
+                    cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
+                    total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
+            `, [item.ingrediente_id, item.fecha, item.precio, item.cantidad, total, req.restauranteId]);
+
+            // Actualizar stock
+            const ingResult = await client.query(
+                'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                [item.ingrediente_id, req.restauranteId]
+            );
+            const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
+            const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+
+            await client.query(
+                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                [stockASumar, item.ingrediente_id, req.restauranteId]
+            );
+
+            // Marcar como aprobado
+            await client.query(
+                "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1",
+                [item.id]
+            );
+
+            resultados.aprobados++;
+        }
+
+        await client.query('COMMIT');
+        log('info', 'Batch de compras aprobado', { batchId, aprobados: resultados.aprobados, omitidos: resultados.omitidos });
+        res.json(resultados);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        log('error', 'Error aprobando batch', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
+    }
+});
+
+// PUT: Editar un item pendiente (cambiar ingrediente_id, precio, cantidad)
+app.put('/api/purchases/pending/:id', authMiddleware, async (req, res) => {
+    try {
+        const { ingrediente_id, precio, cantidad } = req.body;
+
+        // Verificar que el item existe y es pendiente
+        const existing = await pool.query(
+            "SELECT id FROM compras_pendientes WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente'",
+            [req.params.id, req.restauranteId]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: 'Item no encontrado o ya procesado' });
+        }
+
+        // Construir update dinámico
+        const updates = [];
+        const values = [];
+        let paramIdx = 1;
+
+        if (ingrediente_id !== undefined) {
+            // Validar que el ingrediente existe y pertenece al restaurante
+            const ingCheck = await pool.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+                [ingrediente_id, req.restauranteId]
+            );
+            if (ingCheck.rows.length === 0) {
+                return res.status(400).json({ error: 'Ingrediente no válido' });
+            }
+            updates.push(`ingrediente_id = $${paramIdx++}`);
+            values.push(ingrediente_id);
+        }
+        if (precio !== undefined) {
+            updates.push(`precio = $${paramIdx++}`);
+            values.push(parseFloat(precio));
+        }
+        if (cantidad !== undefined) {
+            updates.push(`cantidad = $${paramIdx++}`);
+            values.push(parseFloat(cantidad));
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ error: 'No se proporcionó nada para actualizar' });
+        }
+
+        values.push(req.params.id, req.restauranteId);
+        await pool.query(
+            `UPDATE compras_pendientes SET ${updates.join(', ')} WHERE id = $${paramIdx} AND restaurante_id = $${paramIdx + 1}`,
+            values
+        );
+
+        res.json({ success: true, message: 'Item actualizado' });
+    } catch (err) {
+        log('error', 'Error editando compra pendiente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// DELETE: Rechazar/eliminar un item pendiente
+app.delete('/api/purchases/pending/:id', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente' RETURNING id",
+            [req.params.id, req.restauranteId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Item no encontrado o ya procesado' });
+        }
+
+        res.json({ success: true, message: 'Item rechazado' });
+    } catch (err) {
+        log('error', 'Error rechazando compra pendiente', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// Registrar compras diarias (bulk - para n8n, LEGACY — mantenido por compatibilidad)
 app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
     const client = await pool.connect();
     try {
@@ -4391,7 +4773,7 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
                 WHERE restaurante_id = $1
                 ORDER BY id DESC LIMIT 1
             `, [req.restauranteId]);
-
+ 
             if (ultimaMerma.rows.length > 0) {
                 log('info', 'DEBUG - Última merma en BD', {
                     id: ultimaMerma.rows[0].id,
@@ -4403,7 +4785,7 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
                 });
             }
         }
-
+ 
         // DEBUG TEMPORAL: Quitar TODOS los filtros para confirmar que hay datos
         log('info', `DEBUG - req.restauranteId value: ${req.restauranteId} (type: ${typeof req.restauranteId})`);
         */
