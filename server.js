@@ -5101,6 +5101,10 @@ app.listen(PORT, '0.0.0.0', () => {
     const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL;
 
     const sendHeartbeat = async () => {
+        if (!UPTIME_KUMA_PUSH_URL) {
+            log('warn', 'UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado');
+            return;
+        }
         const https = require('https');
         try {
             // Verificar que la BD responde antes de enviar heartbeat
