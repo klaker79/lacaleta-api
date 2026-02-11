@@ -69,6 +69,7 @@ const { authMiddleware, requireAdmin } = require('./src/middleware/auth');
 const { globalLimiter, authLimiter, costlyApiLimiter } = require('./src/middleware/rateLimit');
 const { log } = require('./src/utils/logger');
 const { validateNumber, validatePrecio, validateCantidad } = require('./src/utils/validators');
+const { calcularPrecioUnitario, upsertCompraDiaria, buildIngredientPriceMap } = require('./src/utils/businessHelpers');
 
 // ========== RESEND (Email) ==========
 // 🔒 FIX SEGURIDAD: API key SOLO desde variable de entorno, sin fallback hardcodeado
@@ -2394,16 +2395,15 @@ app.post('/api/orders', authMiddleware, async (req, res) => {
                 const totalItem = precioReal * cantidad;
 
                 // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
-                await client.query(`
-                    INSERT INTO precios_compra_diarios 
-                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
-                    DO UPDATE SET 
-                        precio_unitario = EXCLUDED.precio_unitario,
-                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [item.ingredienteId || item.ingrediente_id, fechaCompra, precioReal, cantidad, totalItem, req.restauranteId, proveedorId || null, result.rows[0].id]);
+                await upsertCompraDiaria(client, {
+                    ingredienteId: item.ingredienteId || item.ingrediente_id,
+                    fecha: fechaCompra,
+                    precioUnitario: precioReal,
+                    cantidad, total: totalItem,
+                    restauranteId: req.restauranteId,
+                    proveedorId: proveedorId || null,
+                    pedidoId: result.rows[0].id
+                });
             }
 
             log('info', 'Compras diarias registradas desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
@@ -2456,16 +2456,15 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
 
                 // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
                 // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
-                await client.query(`
-                    INSERT INTO precios_compra_diarios 
-                    (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
-                    DO UPDATE SET 
-                        precio_unitario = EXCLUDED.precio_unitario,
-                        cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                        total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-                `, [item.ingredienteId || item.ingrediente_id, fechaCompra, precioReal, cantidad, total, req.restauranteId, result.rows[0]?.proveedor_id || null, id]);
+                await upsertCompraDiaria(client, {
+                    ingredienteId: item.ingredienteId || item.ingrediente_id,
+                    fecha: fechaCompra,
+                    precioUnitario: precioReal,
+                    cantidad, total,
+                    restauranteId: req.restauranteId,
+                    proveedorId: result.rows[0]?.proveedor_id || null,
+                    pedidoId: id
+                });
             }
 
             log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
@@ -3870,16 +3869,14 @@ app.post('/api/purchases/pending/:id/approve', authMiddleware, async (req, res) 
         const total = item.precio * item.cantidad;
 
         // Insertar en precios_compra_diarios
-        await client.query(`
-            INSERT INTO precios_compra_diarios 
-            (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
-            DO UPDATE SET 
-                precio_unitario = EXCLUDED.precio_unitario,
-                cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-        `, [item.ingrediente_id, item.fecha, item.precio, item.cantidad, total, req.restauranteId]);
+        await upsertCompraDiaria(client, {
+            ingredienteId: item.ingrediente_id,
+            fecha: item.fecha,
+            precioUnitario: item.precio,
+            cantidad: item.cantidad,
+            total,
+            restauranteId: req.restauranteId
+        });
 
         // Actualizar stock
         const ingResult = await client.query(
@@ -3945,16 +3942,14 @@ app.post('/api/purchases/pending/approve-batch', authMiddleware, requireAdmin, a
             const total = item.precio * item.cantidad;
 
             // Insertar en precios_compra_diarios
-            await client.query(`
-                INSERT INTO precios_compra_diarios 
-                (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
-                DO UPDATE SET 
-                    precio_unitario = EXCLUDED.precio_unitario,
-                    cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                    total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-            `, [item.ingrediente_id, item.fecha, item.precio, item.cantidad, total, req.restauranteId]);
+            await upsertCompraDiaria(client, {
+                ingredienteId: item.ingrediente_id,
+                fecha: item.fecha,
+                precioUnitario: item.precio,
+                cantidad: item.cantidad,
+                total,
+                restauranteId: req.restauranteId
+            });
 
             // Actualizar stock
             const ingResult = await client.query(
@@ -4179,16 +4174,13 @@ app.post('/api/daily/purchases/bulk', authMiddleware, async (req, res) => {
             }
 
             // Insertar nueva compra (sin pedido_id = NULL → COALESCE default 0)
-            await client.query(`
-                INSERT INTO precios_compra_diarios 
-                (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
-                DO UPDATE SET 
-                    precio_unitario = EXCLUDED.precio_unitario,
-                    cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
-                    total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
-            `, [ingredienteId, fecha, precio, cantidad, total, req.restauranteId]);
+            await upsertCompraDiaria(client, {
+                ingredienteId,
+                fecha,
+                precioUnitario: precio,
+                cantidad, total,
+                restauranteId: req.restauranteId
+            });
 
             // Solo actualizar stock, NO el precio (el precio solo se cambia manualmente)
             // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
@@ -4633,13 +4625,7 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
             WHERE restaurante_id = $1
         `, [req.restauranteId]);
 
-        const ingMap = {};
-        ingredientes.rows.forEach(i => {
-            const precioUnitario = i.cantidad_por_formato > 0
-                ? parseFloat(i.precio) / i.cantidad_por_formato
-                : parseFloat(i.precio);
-            ingMap[i.id] = precioUnitario;
-        });
+        const ingMap = buildIngredientPriceMap(ingredientes.rows);
 
         const recetasProblema = result.rows
             .map(r => {
