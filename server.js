@@ -531,6 +531,7 @@ pool.on('error', (err) => {
                 ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(10,3);
                 
                 ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
+                ALTER TABLE mermas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
                 
                 ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
             `);
@@ -691,53 +692,7 @@ pool.on('error', (err) => {
 
 // authMiddleware y requireAdmin importados de ./src/middleware/auth (línea 27)
 
-// ========== RATE LIMITING (Per-User) ==========
-// Protección contra abuso de API (200 req/min por usuario)
-const rateLimitStore = {};
-const RATE_LIMIT_WINDOW = 60000; // 1 minuto
-const RATE_LIMIT_MAX = 200; // requests por minuto
-
-const rateLimitMiddleware = (req, res, next) => {
-    const key = req.restauranteId || req.ip || 'anonymous';
-    const now = Date.now();
-
-    if (!rateLimitStore[key]) {
-        rateLimitStore[key] = { count: 1, start: now };
-        return next();
-    }
-
-    // Reset si pasó la ventana
-    if (now - rateLimitStore[key].start > RATE_LIMIT_WINDOW) {
-        rateLimitStore[key] = { count: 1, start: now };
-        return next();
-    }
-
-    rateLimitStore[key].count++;
-
-    if (rateLimitStore[key].count > RATE_LIMIT_MAX) {
-        const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - rateLimitStore[key].start)) / 1000);
-        log('warn', 'Rate limit exceeded', { key, count: rateLimitStore[key].count });
-        return res.status(429).json({
-            error: 'Demasiadas solicitudes. Espera un momento.',
-            retryAfter
-        });
-    }
-
-    next();
-};
-
-// Limpiar rate limits cada 5 minutos para evitar memory leak
-setInterval(() => {
-    const now = Date.now();
-    for (const key in rateLimitStore) {
-        if (now - rateLimitStore[key].start > RATE_LIMIT_WINDOW * 2) {
-            delete rateLimitStore[key];
-        }
-    }
-}, 300000);
-
-// Aplicar rate limiting a todas las rutas API (después de auth)
-app.use('/api', rateLimitMiddleware);
+// [CLEANUP] Rate limiter custom eliminado - express-rate-limit ya cubre esto (globalLimiter, línea ~159)
 
 // Montar rutas de recetas v2 con autenticación
 app.use('/api/v2/recipes', authMiddleware, recipeRoutesV2);
@@ -1066,12 +1021,24 @@ app.get('/api/auth/verify-email', async (req, res) => {
     }
 });
 
+// Helper: Escape HTML to prevent XSS
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // Helper: HTML page for email verification result
 function verifyPageHTML(title, message, success) {
+    const safeTitle = escapeHtml(title);
+    const safeMessage = escapeHtml(message);
     const color = success ? '#10b981' : '#ef4444';
     return `<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title} — MindLoop CostOS</title>
+<title>${safeTitle} — MindLoop CostOS</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
 .card{background:#1e293b;border-radius:16px;padding:40px;max-width:420px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)}
@@ -1081,8 +1048,8 @@ function verifyPageHTML(title, message, success) {
 .btn:hover{transform:translateY(-2px)}</style></head>
 <body><div class="card">
 <div class="icon">${success ? '🎉' : '⚠️'}</div>
-<h1 class="title">${title}</h1>
-<p class="msg">${message}</p>
+<h1 class="title">${safeTitle}</h1>
+<p class="msg">${safeMessage}</p>
 <a href="https://app.mindloop.cloud" class="btn">Ir a MindLoop CostOS</a>
 </div></body></html>`;
 }
