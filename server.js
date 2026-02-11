@@ -703,7 +703,7 @@ app.use('/api/v2/kpis', authMiddleware, kpiRoutes);
 app.get('/', (req, res) => {
     res.json({
         message: '🍽️ La Caleta 102 API',
-        version: '2.3.0',
+        version: require('./package.json').version,
         status: 'running',
         docs: {
             health: '/api/health',
@@ -728,7 +728,7 @@ app.get('/api/health', async (req, res) => {
         res.json({
             status: 'healthy',
             timestamp: new Date().toISOString(),
-            version: '2.3.0'
+            version: require('./package.json').version
         });
     } catch (e) {
         res.status(503).json({
@@ -2764,6 +2764,17 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
             [req.params.id]
         );
 
+        // 5. Actualizar ventas_diarias_resumen (restar la venta eliminada)
+        const fechaVenta = new Date(venta.fecha).toISOString().split('T')[0];
+        await client.query(`
+            UPDATE ventas_diarias_resumen 
+            SET cantidad_vendida = GREATEST(0, cantidad_vendida - $1),
+                total_ingresos = GREATEST(0, total_ingresos - $2),
+                coste_ingredientes = GREATEST(0, coste_ingredientes - $3),
+                beneficio_bruto = total_ingresos - coste_ingredientes
+            WHERE receta_id = $4 AND fecha = $5 AND restaurante_id = $6
+        `, [venta.cantidad, parseFloat(venta.total) || 0, 0, venta.receta_id, fechaVenta, req.restauranteId]);
+
         await client.query('COMMIT');
         log('info', 'Venta eliminada con stock restaurado', { id: req.params.id });
         res.json({ message: 'Eliminado y stock restaurado', id: venta.id });
@@ -3841,7 +3852,7 @@ app.post('/api/purchases/pending/:id/approve', authMiddleware, async (req, res) 
 });
 
 // POST: Aprobar todos los items de un batch
-app.post('/api/purchases/pending/approve-batch', authMiddleware, async (req, res) => {
+app.post('/api/purchases/pending/approve-batch', authMiddleware, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         const { batchId } = req.body;
@@ -4735,7 +4746,7 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
         const { mes, ano, limite } = req.query;
         const mesActual = parseInt(mes) || new Date().getMonth() + 1;
         const anoActual = parseInt(ano) || new Date().getFullYear();
-        const lim = parseInt(limite) || 100;
+        const lim = Math.min(parseInt(limite) || 100, 500);
 
         log('info', 'GET /api/mermas - Buscando mermas', {
             restauranteId: req.restauranteId,
@@ -5079,7 +5090,7 @@ setupEventHandlers();
 module.exports = app;
 
 app.listen(PORT, '0.0.0.0', () => {
-    log('info', 'Servidor iniciado', { port: PORT, version: '2.3.0', cors: ALLOWED_ORIGINS });
+    log('info', 'Servidor iniciado', { port: PORT, version: require('./package.json').version, cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
     console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL (con arquitectura limpia v2)`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
