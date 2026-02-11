@@ -100,7 +100,7 @@ describe('Supplier CRUD — Full lifecycle', () => {
             .put(`/api/suppliers/${createdSupplierId}`)
             .set('Origin', 'http://localhost:3001')
             .set('Authorization', `Bearer ${authToken}`)
-            .send({ contacto: 'María Actualizada', telefono: '700999888' });
+            .send({ nombre: '_TEST_PROVEEDOR_UPDATED_', contacto: 'María Actualizada', telefono: '700999888' });
 
         expect(res.status).toBe(200);
         const supplier = res.body.data || res.body;
