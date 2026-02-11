@@ -501,6 +501,15 @@ pool.on('error', (err) => {
       );
       CREATE INDEX IF NOT EXISTS idx_compras_pendientes_estado ON compras_pendientes(estado, restaurante_id);
       CREATE INDEX IF NOT EXISTS idx_compras_pendientes_batch ON compras_pendientes(batch_id);
+
+      -- Performance indexes (added from analysis report)
+      CREATE INDEX IF NOT EXISTS idx_mermas_rest_fecha ON mermas(restaurante_id, fecha);
+      CREATE INDEX IF NOT EXISTS idx_mermas_deleted ON mermas(deleted_at) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_ingredientes_rest_active ON ingredientes(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_ventas_rest_fecha ON ventas(restaurante_id, fecha) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_pedidos_rest_deleted ON pedidos(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_recetas_rest_deleted ON recetas(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_precios_compra_rest_fecha ON precios_compra_diarios(restaurante_id, fecha);
     `);
 
         // ========== MIGRACIONES DE COLUMNAS ESTÁNDAR ==========
@@ -5104,7 +5113,7 @@ app.listen(PORT, '0.0.0.0', () => {
 
     // ========== UPTIME KUMA HEARTBEAT ==========
     // Heartbeat verifica BD antes de reportar healthy
-    const UPTIME_KUMA_PUSH_URL = 'https://uptime.mindloop.cloud/api/push/nw9yvLKJzf';
+    const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL;
 
     const sendHeartbeat = async () => {
         const https = require('https');
