@@ -1548,6 +1548,118 @@ app.delete('/api/ingredients/:id', authMiddleware, requireAdmin, async (req, res
     }
 });
 
+// 🔒 ATOMIC STOCK ADJUSTMENT - Evita problemas de read-modify-write
+// El frontend ya NO calcula stock nuevo, solo envía el delta (+X o -X)
+app.post('/api/ingredients/:id/adjust-stock', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { delta, reason, min_zero = true } = req.body;
+
+        // Validar delta
+        if (delta === undefined || delta === null || isNaN(parseFloat(delta))) {
+            return res.status(400).json({ error: 'Delta requerido (número positivo o negativo)' });
+        }
+
+        const deltaValue = parseFloat(delta);
+
+        // SQL atómico: GREATEST(0, stock + delta) para evitar negativos
+        const stockExpr = min_zero
+            ? 'GREATEST(0, COALESCE(stock_actual, 0) + $1)'
+            : 'COALESCE(stock_actual, 0) + $1';
+
+        const result = await pool.query(
+            `UPDATE ingredientes 
+             SET stock_actual = ${stockExpr},
+                 ultima_actualizacion_stock = NOW()
+             WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL
+             RETURNING id, nombre, stock_actual, precio, cantidad_por_formato`,
+            [deltaValue, id, req.restauranteId]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Ingrediente no encontrado' });
+        }
+
+        const updated = result.rows[0];
+        log('info', 'Stock ajustado atómicamente', {
+            id,
+            delta: deltaValue,
+            nuevoStock: updated.stock_actual,
+            reason: reason || 'no especificado'
+        });
+
+        res.json({
+            success: true,
+            id: updated.id,
+            nombre: updated.nombre,
+            stock_actual: parseFloat(updated.stock_actual),
+            delta: deltaValue,
+            reason
+        });
+    } catch (err) {
+        log('error', 'Error ajustando stock', { error: err.message, id: req.params.id });
+        res.status(500).json({ error: 'Error interno ajustando stock' });
+    }
+});
+
+// Bulk atomic stock adjustment - Para operaciones con múltiples ingredientes (recepción, producción)
+app.post('/api/ingredients/bulk-adjust-stock', authMiddleware, async (req, res) => {
+    try {
+        const { adjustments, reason } = req.body;
+        // adjustments: [{ id: 123, delta: 5.0 }, { id: 456, delta: -2.0 }]
+
+        if (!Array.isArray(adjustments) || adjustments.length === 0) {
+            return res.status(400).json({ error: 'Array de ajustes requerido' });
+        }
+
+        const results = [];
+        const errors = [];
+
+        // Procesar secuencialmente para mantener integridad
+        for (const adj of adjustments) {
+            if (!adj.id || adj.delta === undefined || isNaN(parseFloat(adj.delta))) {
+                errors.push({ id: adj.id, error: 'ID o delta inválido' });
+                continue;
+            }
+
+            try {
+                const result = await pool.query(
+                    `UPDATE ingredientes 
+                     SET stock_actual = GREATEST(0, COALESCE(stock_actual, 0) + $1),
+                         ultima_actualizacion_stock = NOW()
+                     WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL
+                     RETURNING id, nombre, stock_actual`,
+                    [parseFloat(adj.delta), adj.id, req.restauranteId]
+                );
+
+                if (result.rowCount > 0) {
+                    results.push({
+                        id: result.rows[0].id,
+                        nombre: result.rows[0].nombre,
+                        stock_actual: parseFloat(result.rows[0].stock_actual),
+                        delta: parseFloat(adj.delta)
+                    });
+                } else {
+                    errors.push({ id: adj.id, error: 'No encontrado' });
+                }
+            } catch (itemErr) {
+                errors.push({ id: adj.id, error: itemErr.message });
+            }
+        }
+
+        log('info', 'Bulk stock adjustment', {
+            reason: reason || 'no especificado',
+            exitosos: results.length,
+            fallidos: errors.length
+        });
+
+        res.json({ success: errors.length === 0, results, errors, reason });
+    } catch (err) {
+        log('error', 'Error en bulk adjust stock', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // Toggle activo/inactivo ingrediente (en lugar de eliminar)
 app.patch('/api/ingredients/:id/toggle-active', authMiddleware, async (req, res) => {
     try {
