@@ -2737,19 +2737,20 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
 
             // 3. Restaurar stock de cada ingrediente (inverso del descuento)
             for (const ing of ingredientesReceta) {
-                if (ing.ingredienteId && ing.cantidad) {
+                const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
+                if (ingId && ing.cantidad) {
                     // Cantidad a restaurar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
                     const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
 
                     // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ing.ingredienteId, req.restauranteId]);
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
                     await client.query(
                         'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
-                        [cantidadARestaurar, ing.ingredienteId, req.restauranteId]
+                        [cantidadARestaurar, ingId, req.restauranteId]
                     );
 
                     log('info', 'Stock restaurado por eliminación de venta', {
-                        ingredienteId: ing.ingredienteId,
+                        ingredienteId: ingId,
                         cantidad: cantidadARestaurar,
                         ventaId: venta.id
                     });
@@ -3058,8 +3059,8 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
             // Registrar venta individual
             // ⚡ FIX Bug #5: Guardar factor_variante para restaurar stock correctamente al borrar
             await client.query(
-                'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-                [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId, factorAplicado]
+                'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante, variante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+                [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId, factorAplicado, varianteEncontrada ? varianteEncontrada.variante_id : null]
             );
 
             // Descontar stock (aplicando factor de variante)
@@ -3476,12 +3477,14 @@ app.get('/api/balance/mes', authMiddleware, async (req, res) => {
 
         // Precargar todos los precios de ingredientes en UNA query
         const ingredientesResult = await pool.query(
-            'SELECT id, precio FROM ingredientes WHERE restaurante_id = $1',
+            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
             [req.restauranteId]
         );
         const preciosMap = new Map();
         ingredientesResult.rows.forEach(i => {
-            preciosMap.set(i.id, parseFloat(i.precio) || 0);
+            const precio = parseFloat(i.precio) || 0;
+            const cpf = parseFloat(i.cantidad_por_formato) || 1;
+            preciosMap.set(i.id, precio / cpf);
         });
 
         // Calcular costos usando el Map (sin queries adicionales)
@@ -3698,8 +3701,8 @@ app.post('/api/purchases/pending', authMiddleware, async (req, res) => {
                 }
             }
 
-            const precio = parseFloat(compra.precio) || 0;
-            const cantidad = parseFloat(compra.cantidad) || 0;
+            const precio = Math.abs(parseFloat(compra.precio)) || 0;
+            const cantidad = Math.abs(parseFloat(compra.cantidad)) || 0;
             let fecha = compra.fecha || new Date().toISOString().split('T')[0];
             // Smart date correction: detect DD/MM vs MM/DD swap
             try {
@@ -3776,7 +3779,7 @@ app.post('/api/purchases/pending/:id/approve', authMiddleware, async (req, res) 
 
         // Obtener el item pendiente
         const itemResult = await client.query(
-            "SELECT * FROM compras_pendientes WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente'",
+            "SELECT * FROM compras_pendientes WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente' FOR UPDATE",
             [req.params.id, req.restauranteId]
         );
 
@@ -3821,8 +3824,8 @@ app.post('/api/purchases/pending/:id/approve', authMiddleware, async (req, res) 
 
         // Marcar como aprobado
         await client.query(
-            "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1",
-            [req.params.id]
+            "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1 AND restaurante_id = $2",
+            [req.params.id, req.restauranteId]
         );
 
         await client.query('COMMIT');
@@ -3850,7 +3853,7 @@ app.post('/api/purchases/pending/approve-batch', authMiddleware, async (req, res
 
         // Obtener items pendientes del batch
         const itemsResult = await client.query(
-            "SELECT * FROM compras_pendientes WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'pendiente'",
+            "SELECT * FROM compras_pendientes WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'pendiente' FOR UPDATE",
             [batchId, req.restauranteId]
         );
 
@@ -3896,8 +3899,8 @@ app.post('/api/purchases/pending/approve-batch', authMiddleware, async (req, res
 
             // Marcar como aprobado
             await client.query(
-                "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1",
-                [item.id]
+                "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1 AND restaurante_id = $2",
+                [item.id, req.restauranteId]
             );
 
             resultados.aprobados++;
@@ -4676,6 +4679,7 @@ app.get('/api/intelligence/waste-stats', authMiddleware, async (req, res) => {
             FROM mermas
             WHERE restaurante_id = $1
               AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
         `, [req.restauranteId]);
 
         // Top 5 productos más tirados
@@ -4688,6 +4692,7 @@ app.get('/api/intelligence/waste-stats', authMiddleware, async (req, res) => {
             FROM mermas
             WHERE restaurante_id = $1
               AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
             GROUP BY ingrediente_nombre
             ORDER BY perdida_total DESC
             LIMIT 5
@@ -4700,6 +4705,7 @@ app.get('/api/intelligence/waste-stats', authMiddleware, async (req, res) => {
             WHERE restaurante_id = $1
               AND fecha >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
               AND fecha < DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
         `, [req.restauranteId]);
 
         const totalActual = parseFloat(mesActual.rows[0]?.total_perdida || 0);
@@ -4814,6 +4820,7 @@ app.get('/api/mermas/resumen', authMiddleware, async (req, res) => {
             FROM mermas
             WHERE restaurante_id = $1
               AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
         `, [req.restauranteId]);
 
         const data = result.rows[0] || {};
