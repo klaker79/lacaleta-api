@@ -755,20 +755,7 @@ app.get('/', (req, res) => {
 // DEBUG: REMOVED - No exponer en producción
 // app.get('/api/debug/suppliers-test', (req, res) => { ... });
 
-// Sentry verification endpoint (remove after confirming)
-app.get('/debug-sentry', async (req, res) => {
-    try {
-        throw new Error('Sentry test error from La Caleta API!');
-    } catch (e) {
-        Sentry.captureException(e);
-        await Sentry.flush(2000);
-        res.status(500).json({
-            error: 'Error sent to Sentry',
-            sentryEventId: Sentry.lastEventId(),
-            dsnConfigured: !!process.env.SENTRY_DSN
-        });
-    }
-});
+// [SEC-02] debug-sentry endpoint eliminado por seguridad (era temporal para verificación)
 
 // Health Check
 app.get('/api/health', async (req, res) => {
@@ -4825,9 +4812,10 @@ app.get('/api/mermas', authMiddleware, async (req, res) => {
                 i.nombre as ingrediente_actual
             FROM mermas m
             LEFT JOIN ingredientes i ON m.ingrediente_id = i.id
+            WHERE m.restaurante_id = $1 AND m.deleted_at IS NULL
             ORDER BY m.fecha DESC, m.id DESC
-            LIMIT $1
-        `, [lim]);
+            LIMIT $2
+        `, [req.restauranteId, lim]);
 
         // Log reducido para producción
         log('debug', 'Mermas listadas', { count: result.rows.length, restauranteId: req.restauranteId });
@@ -4925,18 +4913,42 @@ app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
 
 // ========== 🗑️ MERMAS - RESET MENSUAL ==========
 app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
         const { motivo } = req.body || {};
+        await client.query('BEGIN');
 
-        // Archivar mermas actuales antes de borrarlas (opcional: crear tabla de archivo)
-        const deleted = await pool.query(`
-            DELETE FROM mermas 
+        // Obtener mermas a resetear para restaurar stock
+        const mermasToReset = await client.query(`
+            SELECT id, ingrediente_id, cantidad 
+            FROM mermas 
             WHERE restaurante_id = $1 
               AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
-            RETURNING *
+              AND deleted_at IS NULL
         `, [req.restauranteId]);
 
-        log('info', `Reset mermas: ${deleted.rowCount} registros eliminados`, {
+        // Restaurar stock de cada merma
+        for (const merma of mermasToReset.rows) {
+            if (merma.ingrediente_id && parseFloat(merma.cantidad) > 0) {
+                await client.query(
+                    'UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2 AND restaurante_id = $3',
+                    [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
+                );
+            }
+        }
+
+        // Soft delete en vez de hard delete
+        const deleted = await client.query(`
+            UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP
+            WHERE restaurante_id = $1 
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
+            RETURNING id
+        `, [req.restauranteId]);
+
+        await client.query('COMMIT');
+
+        log('info', `Reset mermas: ${deleted.rowCount} registros soft-deleted + stock restaurado`, {
             restauranteId: req.restauranteId,
             motivo: motivo || 'manual'
         });
@@ -4947,8 +4959,11 @@ app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
             motivo: motivo || 'manual'
         });
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error en mermas/reset', { error: err.message });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 

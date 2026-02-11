@@ -6,7 +6,10 @@
 const jwt = require('jsonwebtoken');
 const Sentry = require('@sentry/node');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mindloop-costos-secret-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    throw new Error('❌ FATAL: JWT_SECRET environment variable is required. Server cannot start without it.');
+}
 
 // Logger simple (importar el real después)
 const log = (level, message, data = {}) => {
