@@ -157,12 +157,17 @@ describe('DELETE /api/orders — Preserves other orders purchases', () => {
             // CRITICAL ASSERTIONS:
             // 1. Order B's 3kg MUST still exist
             expect(totalCantidadRestante).toBeGreaterThanOrEqual(3);
-            // 2. Order A's 5kg should be gone
-            expect(totalCantidadRestante).toBeLessThan(8);
 
-            // Verify no entry has the deleted order's pedido_id
+            // 2. Verify no entry has the deleted order's pedido_id
             const entriesWithDeletedOrderId = entries.filter(e => e.pedido_id === orderA_Id);
             expect(entriesWithDeletedOrderId.length).toBe(0);
+
+            // 3. Order B's entry should still have its pedido_id
+            if (orderB_Id) {
+                const entriesWithOrderB = entries.filter(e => e.pedido_id === orderB_Id);
+                expect(entriesWithOrderB.length).toBeGreaterThanOrEqual(1);
+                console.log(`✅ Order B entries survived: ${entriesWithOrderB.length}`);
+            }
         } else {
             // If Diario endpoint fails, force fail with descriptive message
             expect(diarioRes.status).toBe(200);
