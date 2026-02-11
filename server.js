@@ -2158,6 +2158,94 @@ app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => 
     }
 });
 
+// 🏥 INVENTORY HEALTH CHECK — Detecta anomalías de stock
+app.get('/api/inventory/health-check', authMiddleware, async (req, res) => {
+    try {
+        const anomalies = [];
+
+        // 1. Ingredientes con stock negativo
+        const negRes = await pool.query(
+            `SELECT id, nombre, stock_actual FROM ingredientes 
+             WHERE restaurante_id = $1 AND deleted_at IS NULL AND stock_actual < 0`,
+            [req.restauranteId]
+        );
+        negRes.rows.forEach(r => {
+            anomalies.push({
+                type: 'negative_stock',
+                severity: 'critical',
+                ingredientId: r.id,
+                message: `${r.nombre}: stock negativo (${r.stock_actual})`
+            });
+        });
+
+        // 2. Ingredientes con stock NULL
+        const nullRes = await pool.query(
+            `SELECT id, nombre FROM ingredientes 
+             WHERE restaurante_id = $1 AND deleted_at IS NULL AND stock_actual IS NULL`,
+            [req.restauranteId]
+        );
+        nullRes.rows.forEach(r => {
+            anomalies.push({
+                type: 'null_stock',
+                severity: 'warning',
+                ingredientId: r.id,
+                message: `${r.nombre}: stock es NULL (debería ser 0)`
+            });
+        });
+
+        // 3. Ingredientes con stock > 0 pero precio = 0 (valor invisible)
+        const zeroPriceRes = await pool.query(
+            `SELECT id, nombre, stock_actual FROM ingredientes 
+             WHERE restaurante_id = $1 AND deleted_at IS NULL 
+             AND stock_actual > 0 AND (precio IS NULL OR precio = 0)`,
+            [req.restauranteId]
+        );
+        zeroPriceRes.rows.forEach(r => {
+            anomalies.push({
+                type: 'stock_without_price',
+                severity: 'warning',
+                ingredientId: r.id,
+                message: `${r.nombre}: tiene ${r.stock_actual} en stock pero precio=0€`
+            });
+        });
+
+        // 4. Calcular valor total del stock
+        const valueRes = await pool.query(
+            `SELECT COALESCE(SUM(
+                COALESCE(stock_actual, 0) * COALESCE(precio, 0) / 
+                GREATEST(COALESCE(cantidad_por_formato, 1), 1)
+             ), 0) as total_value,
+             COUNT(*) as total_items,
+             COUNT(*) FILTER (WHERE stock_actual > 0) as items_with_stock
+             FROM ingredientes 
+             WHERE restaurante_id = $1 AND deleted_at IS NULL`,
+            [req.restauranteId]
+        );
+
+        const { total_value, total_items, items_with_stock } = valueRes.rows[0];
+
+        // Determine status
+        const hasCritical = anomalies.some(a => a.severity === 'critical');
+        const hasWarning = anomalies.some(a => a.severity === 'warning');
+        const status = hasCritical ? 'critical' : hasWarning ? 'warning' : 'healthy';
+
+        res.json({
+            status,
+            timestamp: new Date().toISOString(),
+            summary: {
+                totalIngredients: parseInt(total_items),
+                ingredientsWithStock: parseInt(items_with_stock),
+                totalStockValue: parseFloat(parseFloat(total_value).toFixed(2)),
+                anomalyCount: anomalies.length
+            },
+            anomalies
+        });
+    } catch (err) {
+        log('error', 'Error en health-check de inventario', { error: err.message });
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
 // Endpoint para consolidar stock con lógica de Ajustes (ERP)
 app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
     const client = await pool.connect();
