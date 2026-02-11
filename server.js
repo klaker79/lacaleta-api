@@ -2122,6 +2122,7 @@ app.get('/api/analysis/menu-engineering', authMiddleware, async (req, res) => {
              FROM ventas v
              JOIN recetas r ON v.receta_id = r.id
              WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
+               AND LOWER(COALESCE(r.categoria, '')) NOT IN ('bebidas', 'bebida')
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes`,
             [req.restauranteId]
         );
