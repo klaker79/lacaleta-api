@@ -1669,6 +1669,14 @@ app.post('/api/ingredients/:id/suppliers', authMiddleware, async (req, res) => {
             RETURNING *
         `, [id, proveedor_id, precioNum, es_proveedor_principal || false]);
 
+        // ⚡ SYNC: Actualizar columna ingredientes del proveedor desde la tabla relacional
+        await pool.query(`
+            UPDATE proveedores SET ingredientes = (
+                SELECT COALESCE(array_agg(ip.ingrediente_id), ARRAY[]::int[])
+                FROM ingredientes_proveedores ip WHERE ip.proveedor_id = $1
+            ) WHERE id = $1
+        `, [proveedor_id]);
+
         log('info', 'Proveedor asociado a ingrediente', { ingrediente_id: id, proveedor_id, precio: precioNum });
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -1767,6 +1775,14 @@ app.delete('/api/ingredients/:id/suppliers/:supplierId', authMiddleware, async (
             'DELETE FROM ingredientes_proveedores WHERE ingrediente_id = $1 AND proveedor_id = $2',
             [id, supplierId]
         );
+
+        // ⚡ SYNC: Actualizar columna ingredientes del proveedor desde la tabla relacional
+        await pool.query(`
+            UPDATE proveedores SET ingredientes = (
+                SELECT COALESCE(array_agg(ip.ingrediente_id), ARRAY[]::int[])
+                FROM ingredientes_proveedores ip WHERE ip.proveedor_id = $1
+            ) WHERE id = $1
+        `, [supplierId]);
 
         log('info', 'Eliminada asociación proveedor-ingrediente', { ingrediente_id: id, proveedor_id: supplierId });
         res.json({ success: true });
@@ -2089,7 +2105,7 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
     } catch (err) {
         await client.query('ROLLBACK');
         log('error', 'Error en consolidación', { error: err.message });
-        res.status(500).json({ error: 'Error interno: ' + err.message });
+        res.status(500).json({ error: 'Error interno' });
     } finally {
         client.release();
     }
@@ -2216,6 +2232,11 @@ app.get('/api/recipes', authMiddleware, async (req, res) => {
 app.post('/api/recipes', authMiddleware, async (req, res) => {
     try {
         const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
+
+        if (!nombre || !nombre.trim()) {
+            return res.status(400).json({ error: 'El nombre de la receta es requerido' });
+        }
+
         const result = await pool.query(
             'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, codigo, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
             [nombre, categoria || 'principal', precio_venta || 0, porciones || 1, JSON.stringify(ingredientes || []), codigo || null, req.restauranteId]
@@ -2380,13 +2401,24 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
 
         await client.query('BEGIN');
 
+        // ⚡ FIX VAL-02: Obtener estado actual para prevenir doble procesamiento
+        const currentOrder = await client.query(
+            'SELECT estado FROM pedidos WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+            [id, req.restauranteId]
+        );
+        if (currentOrder.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Pedido no encontrado' });
+        }
+        const wasAlreadyReceived = currentOrder.rows[0].estado === 'recibido';
+
         const result = await client.query(
             'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
             [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinal || new Date(), id, req.restauranteId]
         );
 
-        // Si el pedido se marca como recibido, registrar los precios de compra diarios
-        if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
+        // Si el pedido se marca como recibido Y no estaba ya recibido, registrar los precios de compra diarios
+        if (estado === 'recibido' && !wasAlreadyReceived && ingredientes && Array.isArray(ingredientes)) {
             const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
 
             for (const item of ingredientes) {
@@ -2771,7 +2803,7 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
             SET cantidad_vendida = GREATEST(0, cantidad_vendida - $1),
                 total_ingresos = GREATEST(0, total_ingresos - $2),
                 coste_ingredientes = GREATEST(0, coste_ingredientes - $3),
-                beneficio_bruto = total_ingresos - coste_ingredientes
+                beneficio_bruto = GREATEST(0, total_ingresos - $2) - GREATEST(0, coste_ingredientes - $3)
             WHERE receta_id = $4 AND fecha = $5 AND restaurante_id = $6
         `, [venta.cantidad, parseFloat(venta.total) || 0, 0, venta.receta_id, fechaVenta, req.restauranteId]);
 
@@ -2903,7 +2935,7 @@ REGLAS:
 
     } catch (error) {
         log('error', 'Error procesando PDF', { error: error.message, stack: error.stack });
-        res.status(500).json({ error: 'Error procesando PDF', details: error.message });
+        res.status(500).json({ error: 'Error procesando PDF' });
     }
 });
 
@@ -3327,7 +3359,7 @@ app.delete('/api/horarios/empleado/:empleadoId/fecha/:fecha', authMiddleware, as
 });
 
 // DELETE todos los horarios (borrado masivo)
-app.delete('/api/horarios/all', authMiddleware, async (req, res) => {
+app.delete('/api/horarios/all', authMiddleware, requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(
             'DELETE FROM horarios WHERE restaurante_id = $1',
@@ -3365,13 +3397,14 @@ app.post('/api/horarios/copiar-semana', authMiddleware, async (req, res) => {
             const nuevaFecha = new Date(semana_destino);
             nuevaFecha.setDate(nuevaFecha.getDate() + h.dia_offset);
 
-            await pool.query(
+            const insertResult = await pool.query(
                 `INSERT INTO horarios (empleado_id, fecha, turno, hora_inicio, hora_fin, es_extra, notas, restaurante_id)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                 ON CONFLICT (empleado_id, fecha) DO NOTHING`,
+                 ON CONFLICT (empleado_id, fecha) DO NOTHING
+                 RETURNING id`,
                 [h.empleado_id, nuevaFecha.toISOString().split('T')[0], h.turno, h.hora_inicio, h.hora_fin, h.es_extra, h.notas, req.restauranteId]
             );
-            insertados++;
+            if (insertResult.rows.length > 0) insertados++;
         }
 
         log('info', 'Semana copiada', { origen: semana_origen, destino: semana_destino, turnos: insertados });
@@ -3963,11 +3996,11 @@ app.put('/api/purchases/pending/:id', authMiddleware, async (req, res) => {
         }
         if (precio !== undefined) {
             updates.push(`precio = $${paramIdx++}`);
-            values.push(parseFloat(precio));
+            values.push(Math.abs(parseFloat(precio)));
         }
         if (cantidad !== undefined) {
             updates.push(`cantidad = $${paramIdx++}`);
-            values.push(parseFloat(cantidad));
+            values.push(Math.abs(parseFloat(cantidad)));
         }
         if (fecha !== undefined) {
             updates.push(`fecha = $${paramIdx++}`);
@@ -4441,6 +4474,7 @@ app.get('/api/intelligence/purchase-plan', authMiddleware, async (req, res) => {
                 ) ri
                 WHERE v.restaurante_id = $1
                   AND v.fecha >= CURRENT_DATE - INTERVAL '8 weeks'
+                  AND v.deleted_at IS NULL AND r.deleted_at IS NULL
                 GROUP BY EXTRACT(DOW FROM v.fecha), ri.ingrediente_id
             )
             SELECT 
@@ -4508,6 +4542,7 @@ app.get('/api/intelligence/overstock', authMiddleware, async (req, res) => {
                 ) ri
                 WHERE v.restaurante_id = $1
                   AND v.fecha >= CURRENT_DATE - INTERVAL '8 weeks'
+                  AND v.deleted_at IS NULL AND r.deleted_at IS NULL
                 GROUP BY ri.ingrediente_id, EXTRACT(DOW FROM v.fecha)
             ),
             consumo_dia_actual AS (
@@ -4561,6 +4596,7 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
             FROM recetas r
             WHERE r.restaurante_id = $1
               AND r.precio_venta > 0
+              AND r.deleted_at IS NULL
         `, [req.restauranteId]);
 
         const ingredientes = await pool.query(`
@@ -4673,9 +4709,9 @@ app.post('/api/mermas', authMiddleware, async (req, res) => {
         log('error', 'Error registrando mermas', {
             error: err.message,
             stack: err.stack,
-            body: JSON.stringify(req.body).substring(0, 1000)
+            mermasCount: req.body?.mermas?.length || 0
         });
-        res.status(500).json({ error: 'Error interno: ' + err.message });
+        res.status(500).json({ error: 'Error interno' });
     }
 });
 
@@ -4906,7 +4942,7 @@ app.delete('/api/mermas/:id', authMiddleware, async (req, res) => {
 });
 
 // ========== 🗑️ MERMAS - RESET MENSUAL ==========
-app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
+app.delete('/api/mermas/reset', authMiddleware, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         const { motivo } = req.body || {};
@@ -4921,11 +4957,12 @@ app.delete('/api/mermas/reset', authMiddleware, async (req, res) => {
               AND deleted_at IS NULL
         `, [req.restauranteId]);
 
-        // Restaurar stock de cada merma
+        // Restaurar stock de cada merma (con lock para evitar race condition)
         for (const merma of mermasToReset.rows) {
             if (merma.ingrediente_id && parseFloat(merma.cantidad) > 0) {
+                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
                 await client.query(
-                    'UPDATE ingredientes SET stock_actual = stock_actual + $1 WHERE id = $2 AND restaurante_id = $3',
+                    'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
                     [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
                 );
             }
@@ -4972,7 +5009,7 @@ app.get('/api/system/health-check', authMiddleware, async (req, res) => {
             await pool.query('SELECT 1');
             results.database = { ok: true, message: 'Conexión OK' };
         } catch (err) {
-            results.database = { ok: false, message: err.message };
+            results.database = { ok: false, message: 'Error de conexión a BD' };
         }
 
         // 2. Recetas sin ingredientes
@@ -5050,16 +5087,14 @@ app.get('/api/system/health-check', authMiddleware, async (req, res) => {
         });
     } catch (err) {
         log('error', 'Error en health-check', { error: err.message });
-        res.status(500).json({ error: 'Error ejecutando health check', message: err.message });
+        res.status(500).json({ error: 'Error ejecutando health check' });
     }
 });
 
 // ========== 404 ==========
 app.use((req, res) => {
     res.status(404).json({
-        error: 'Ruta no encontrada',
-        path: req.originalUrl,
-        method: req.method
+        error: 'Ruta no encontrada'
     });
 });
 
@@ -5100,34 +5135,34 @@ app.listen(PORT, '0.0.0.0', () => {
     // Heartbeat verifica BD antes de reportar healthy
     const UPTIME_KUMA_PUSH_URL = process.env.UPTIME_KUMA_PUSH_URL;
 
-    const sendHeartbeat = async () => {
-        if (!UPTIME_KUMA_PUSH_URL) {
-            log('warn', 'UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado');
-            return;
-        }
-        const https = require('https');
-        try {
-            // Verificar que la BD responde antes de enviar heartbeat
-            await pool.query('SELECT 1');
+    if (!UPTIME_KUMA_PUSH_URL) {
+        log('warn', 'UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado');
+    } else {
+        const sendHeartbeat = async () => {
+            const https = require('https');
+            try {
+                // Verificar que la BD responde antes de enviar heartbeat
+                await pool.query('SELECT 1');
 
-            const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=1`;
-            https.get(url, (res) => {
-                if (res.statusCode === 200) {
-                    log('debug', 'Heartbeat enviado a Uptime Kuma');
-                }
-            }).on('error', (err) => {
-                log('warn', 'Error enviando heartbeat', { error: err.message });
-            });
-        } catch (dbErr) {
-            // Si la BD no responde, NO enviamos heartbeat
-            // Uptime Kuma detectará la falta de heartbeat como problema
-            log('error', 'Heartbeat omitido - BD no responde', { error: dbErr.message });
-        }
-    };
+                const url = `${UPTIME_KUMA_PUSH_URL}?status=up&msg=OK&ping=1`;
+                https.get(url, (res) => {
+                    if (res.statusCode === 200) {
+                        log('debug', 'Heartbeat enviado a Uptime Kuma');
+                    }
+                }).on('error', (err) => {
+                    log('warn', 'Error enviando heartbeat', { error: err.message });
+                });
+            } catch (dbErr) {
+                // Si la BD no responde, NO enviamos heartbeat
+                // Uptime Kuma detectará la falta de heartbeat como problema
+                log('error', 'Heartbeat omitido - BD no responde', { error: dbErr.message });
+            }
+        };
 
-    // Enviar heartbeat cada 60 segundos
-    sendHeartbeat(); // Primer envío inmediato
-    setInterval(sendHeartbeat, 60000);
-    console.log(`💓 Heartbeat configurado para Uptime Kuma (cada 60s)`);
+        // Enviar heartbeat cada 60 segundos
+        sendHeartbeat(); // Primer envío inmediato
+        setInterval(sendHeartbeat, 60000);
+        console.log(`💓 Heartbeat configurado para Uptime Kuma (cada 60s)`);
+    }
 });
 // rebuild Sun Jan  4 01:51:53 CET 2026

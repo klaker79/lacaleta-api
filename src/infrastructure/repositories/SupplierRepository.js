@@ -24,15 +24,27 @@ class SupplierRepository {
 
     /**
      * Busca todos los proveedores activos
+     * ⚡ FIX: Usa ingredientes_proveedores como fuente de verdad para la lista de ingredientes
      */
     async findActive(restaurantId) {
         const query = `
-            SELECT * FROM proveedores
-            WHERE restaurante_id = $1 AND deleted_at IS NULL
-            ORDER BY nombre
+            SELECT p.*, 
+                   COALESCE(
+                       (SELECT array_agg(ip.ingrediente_id) 
+                        FROM ingredientes_proveedores ip 
+                        WHERE ip.proveedor_id = p.id), 
+                       ARRAY[]::int[]
+                   ) as ingredientes_reales
+            FROM proveedores p
+            WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL
+            ORDER BY p.nombre
         `;
         const result = await this.pool.query(query, [restaurantId]);
-        return result.rows.map(row => new Supplier(row));
+        return result.rows.map(row => {
+            // Usar ingredientes_reales (de la tabla relacional) en vez de la columna ingredientes
+            row.ingredientes = row.ingredientes_reales || row.ingredientes || [];
+            return new Supplier(row);
+        });
     }
 
     /**
