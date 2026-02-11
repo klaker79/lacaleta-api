@@ -11,6 +11,7 @@
     "test": "jest",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
+    "test:critical": "jest tests/critical --runInBand --verbose",
     "test:e2e": "jest tests/e2e --runInBand",
     "test:coverage": "jest --coverage"
   },
