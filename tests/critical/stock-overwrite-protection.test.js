@@ -122,7 +122,12 @@ describe('Stock Overwrite Protection — PUT /api/ingredients/:id', () => {
     it('3. PUT updating familia should NOT touch stock', async () => {
         if (!authToken || !testIngredientId) return;
 
-        const stockBefore = originalData.stock_actual;
+        // Read current stock (may differ from originalData due to test 2)
+        const beforeRes = await request(API_URL)
+            .get('/api/ingredients')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+        const stockBefore = parseFloat(beforeRes.body.find(i => i.id === testIngredientId)?.stock_actual) || 0;
 
         const res = await request(API_URL)
             .put(`/api/ingredients/${testIngredientId}`)
@@ -148,7 +153,12 @@ describe('Stock Overwrite Protection — PUT /api/ingredients/:id', () => {
     it('4. PUT updating proveedor should NOT touch stock', async () => {
         if (!authToken || !testIngredientId) return;
 
-        const stockBefore = originalData.stock_actual;
+        // Read current stock
+        const beforeRes = await request(API_URL)
+            .get('/api/ingredients')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+        const stockBefore = parseFloat(beforeRes.body.find(i => i.id === testIngredientId)?.stock_actual) || 0;
 
         const res = await request(API_URL)
             .put(`/api/ingredients/${testIngredientId}`)

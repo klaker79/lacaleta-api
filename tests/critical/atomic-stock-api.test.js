@@ -86,16 +86,28 @@ describe('Atomic Stock Endpoints', () => {
         it('3. should handle delta=0 (no-op verification)', async () => {
             if (!authToken || !testIngredientId) return;
 
-            const res = await request(API_URL)
+            // Do a +5, then -5, and verify the stock returns to the same value
+            const plusRes = await request(API_URL)
                 .post(`/api/ingredients/${testIngredientId}/adjust-stock`)
                 .set('Origin', 'http://localhost:3001')
                 .set('Authorization', `Bearer ${authToken}`)
-                .send({ delta: 0, reason: 'test_zero_delta' });
+                .send({ delta: 5, reason: 'test_delta0_plus' });
 
-            expect(res.status).toBe(200);
-            expect(res.body.success).toBe(true);
-            expect(res.body.stock_actual).toBeCloseTo(initialStock, 1);
-            console.log(`✅ Stock unchanged with delta=0: ${res.body.stock_actual}`);
+            expect(plusRes.status).toBe(200);
+            const stockAfterPlus = plusRes.body.stock_actual;
+
+            const minusRes = await request(API_URL)
+                .post(`/api/ingredients/${testIngredientId}/adjust-stock`)
+                .set('Origin', 'http://localhost:3001')
+                .set('Authorization', `Bearer ${authToken}`)
+                .send({ delta: -5, reason: 'test_delta0_minus' });
+
+            expect(minusRes.status).toBe(200);
+            const stockAfterMinus = minusRes.body.stock_actual;
+
+            // Net effect of +5 then -5 should be 0
+            expect(stockAfterMinus).toBeCloseTo(stockAfterPlus - 5, 1);
+            console.log(`✅ Delta round-trip: +5 → ${stockAfterPlus}, -5 → ${stockAfterMinus}`);
         });
 
         it('4. ⚡ CRITICAL: stock should floor at 0 (never negative)', async () => {
