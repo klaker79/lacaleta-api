@@ -37,9 +37,11 @@ describe('System Health Check — Operational diagnostics', () => {
             .set('Authorization', `Bearer ${authToken}`);
 
         expect(res.status).toBe(200);
-        expect(res.body.database).toBeDefined();
-        expect(res.body.database.ok).toBe(true);
-        console.log(`✅ System health check passed — DB: ${res.body.database.message}`);
+        // Diagnostics may be nested under 'checks' or top-level
+        const checks = res.body.checks || res.body;
+        expect(checks.database).toBeDefined();
+        expect(checks.database.ok).toBe(true);
+        console.log(`✅ System health check passed — DB: ${checks.database.message}`);
     });
 
     it('3. Health check returns expected diagnostic categories', async () => {
@@ -52,8 +54,10 @@ describe('System Health Check — Operational diagnostics', () => {
 
         expect(res.status).toBe(200);
 
-        // Verify all diagnostic categories exist
-        const categories = Object.keys(res.body);
+        // Diagnostics may be nested under 'checks' or top-level
+        const checks = res.body.checks || res.body;
+        const categories = Object.keys(checks);
+
         expect(categories).toContain('database');
         expect(categories).toContain('recetasSinIngredientes');
         expect(categories).toContain('stockNegativo');
@@ -61,13 +65,13 @@ describe('System Health Check — Operational diagnostics', () => {
 
         // Each category should have an 'ok' field
         for (const cat of ['database', 'recetasSinIngredientes', 'stockNegativo']) {
-            expect(res.body[cat].ok).toBeDefined();
+            expect(checks[cat].ok).toBeDefined();
         }
 
         console.log(`✅ Diagnostic categories: ${categories.join(', ')}`);
 
         // Log any warnings
-        const warnings = categories.filter(c => res.body[c].ok === false);
+        const warnings = categories.filter(c => checks[c]?.ok === false);
         if (warnings.length > 0) {
             console.log(`   ⚠️ Warnings: ${warnings.join(', ')}`);
         } else {

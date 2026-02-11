@@ -66,7 +66,7 @@ const SupplierController = require('./src/interfaces/http/controllers/SupplierCo
 
 // Middleware modularizado
 const { authMiddleware, requireAdmin } = require('./src/middleware/auth');
-const { globalLimiter, authLimiter } = require('./src/middleware/rateLimit');
+const { globalLimiter, authLimiter, costlyApiLimiter } = require('./src/middleware/rateLimit');
 const { log } = require('./src/utils/logger');
 const { validateNumber, validatePrecio, validateCantidad } = require('./src/utils/validators');
 
@@ -155,6 +155,18 @@ app.use(express.json({ limit: '10mb' }));
 
 // Parser de cookies para auth segura
 app.use(cookieParser());
+
+// ========== SECURITY HEADERS (C5) ==========
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '0');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    if (process.env.NODE_ENV === 'production') {
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+});
 
 app.use(globalLimiter);
 // ========== GLOBAL ERROR HANDLERS ==========
@@ -1393,7 +1405,7 @@ app.post('/api/ingredients/match', authMiddleware, async (req, res) => {
               AND (activo IS NULL OR activo = TRUE)
             ORDER BY LENGTH(nombre) ASC
             LIMIT 1
-        `, [req.restauranteId, `%${nombreLimpio}%`]);
+        `, [req.restauranteId, `%${nombreLimpio.replace(/[%_]/g, '\\$&')}%`]);
 
         if (result.rows.length > 0) {
             const ing = result.rows[0];
@@ -1515,7 +1527,7 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
     }
 });
 
-app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
+app.delete('/api/ingredients/:id', authMiddleware, requireAdmin, async (req, res) => {
     try {
         // SOFT DELETE: marca como eliminado sin borrar datos
         const result = await pool.query(
@@ -1990,17 +2002,32 @@ app.put('/api/inventory/bulk-update-stock', authMiddleware, async (req, res) => 
     const client = await pool.connect();
     try {
         const { stocks } = req.body;
+
+        // C8: Validar input
+        if (!stocks || !Array.isArray(stocks) || stocks.length === 0) {
+            return res.status(400).json({ error: 'Se requiere un array "stocks" con items {id, stock_real}' });
+        }
+
         await client.query('BEGIN');
 
         const updated = [];
         for (const item of stocks) {
+            if (!item.id || item.stock_real === undefined) continue;
+            const stockVal = parseFloat(item.stock_real);
+            if (isNaN(stockVal) || stockVal < 0) continue;
+
+            // C2: FOR UPDATE lock to prevent race condition
+            await client.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                [item.id, req.restauranteId]
+            );
             const result = await client.query(
                 `UPDATE ingredientes 
          SET stock_real = $1, 
              ultima_actualizacion_stock = CURRENT_TIMESTAMP 
          WHERE id = $2 AND restaurante_id = $3 
          RETURNING *`,
-                [item.stock_real, item.id, req.restauranteId]
+                [stockVal, item.id, req.restauranteId]
             );
             if (result.rows.length > 0) {
                 updated.push(result.rows[0]);
@@ -2264,7 +2291,7 @@ app.put('/api/recipes/:id', authMiddleware, async (req, res) => {
     }
 });
 
-app.delete('/api/recipes/:id', authMiddleware, async (req, res) => {
+app.delete('/api/recipes/:id', authMiddleware, requireAdmin, async (req, res) => {
     try {
         // SOFT DELETE: marca como eliminado sin borrar datos
         const result = await pool.query(
@@ -2455,7 +2482,7 @@ app.put('/api/orders/:id', authMiddleware, async (req, res) => {
     }
 });
 
-app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
+app.delete('/api/orders/:id', authMiddleware, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -2701,7 +2728,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
         // ⚡ NUEVO: Aplicar factor de variante al descuento de stock
         // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
-        const porciones = parseInt(receta.porciones) || 1;
+        const porciones = Math.max(1, parseInt(receta.porciones) || 1);
         for (const ing of ingredientesReceta) {
             // 🔧 FIX: Soportar múltiples formatos de ID de ingrediente
             const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
@@ -2823,7 +2850,7 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
 
 // ========== ENDPOINT: PARSEAR PDF DE TPV CON IA ==========
 // Recibe un PDF del TPV y extrae los datos de ventas usando Claude API
-app.post('/api/parse-pdf', authMiddleware, async (req, res) => {
+app.post('/api/parse-pdf', authMiddleware, costlyApiLimiter, async (req, res) => {
     try {
         const { pdfBase64, filename } = req.body;
 
@@ -2889,7 +2916,7 @@ REGLAS:
         if (!response.ok) {
             const errorData = await response.json();
             log('error', 'Error de Claude API', errorData);
-            return res.status(500).json({ error: 'Error procesando PDF con IA', details: errorData });
+            return res.status(500).json({ error: 'Error procesando PDF con IA' });
         }
 
         const claudeResponse = await response.json();
@@ -3109,7 +3136,7 @@ app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
 
             // Descontar stock (aplicando factor de variante)
             // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
-            const porciones = parseInt(receta.porciones) || 1;
+            const porciones = Math.max(1, parseInt(receta.porciones) || 1);
             if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
                 for (const ing of ingredientesReceta) {
                     // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor
@@ -4651,6 +4678,7 @@ app.get('/api/intelligence/price-check', authMiddleware, async (req, res) => {
 
 // ========== 🗑️ MERMAS - REGISTRO ==========
 app.post('/api/mermas', authMiddleware, async (req, res) => {
+    const client = await pool.connect();
     try {
         const { mermas } = req.body;
         log('info', 'Recibiendo mermas', {
@@ -4663,56 +4691,53 @@ app.post('/api/mermas', authMiddleware, async (req, res) => {
             return res.status(400).json({ error: 'Se requiere array de mermas' });
         }
 
+        await client.query('BEGIN');
+
         let insertados = 0;
         for (const m of mermas) {
-            try {
-                // Validar que ingredienteId existe o usar NULL
-                const ingredienteId = m.ingredienteId ? parseInt(m.ingredienteId) : null;
+            // Validar que ingredienteId existe o usar NULL
+            const ingredienteId = m.ingredienteId ? parseInt(m.ingredienteId) : null;
 
-                // Calcular periodo_id como YYYYMM (ej: 202601 para enero 2026)
-                const now = new Date();
-                const periodoId = now.getFullYear() * 100 + (now.getMonth() + 1);
+            // Calcular periodo_id como YYYYMM (ej: 202601 para enero 2026)
+            const now = new Date();
+            const periodoId = now.getFullYear() * 100 + (now.getMonth() + 1);
 
-                await pool.query(`
-                    INSERT INTO mermas 
-                    (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id, periodo_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                `, [
-                    ingredienteId,
-                    m.ingredienteNombre || 'Sin nombre',
-                    parseFloat(m.cantidad) || 0,
-                    m.unidad || 'ud',
-                    parseFloat(m.valorPerdida) || 0,
-                    m.motivo || 'Otros',
-                    m.nota || '',
-                    m.responsableId ? parseInt(m.responsableId) : null,
-                    req.restauranteId,
-                    periodoId
-                ]);
+            await client.query(`
+                INSERT INTO mermas 
+                (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id, periodo_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `, [
+                ingredienteId,
+                m.ingredienteNombre || 'Sin nombre',
+                parseFloat(m.cantidad) || 0,
+                m.unidad || 'ud',
+                parseFloat(m.valorPerdida) || 0,
+                m.motivo || 'Otros',
+                m.nota || '',
+                m.responsableId ? parseInt(m.responsableId) : null,
+                req.restauranteId,
+                periodoId
+            ]);
 
-                // NOTA: El frontend ya descuenta el stock antes de llamar este endpoint
-                // NO descontar aquí para evitar doble descuento
+            // NOTA: El frontend ya descuenta el stock antes de llamar este endpoint
+            // NO descontar aquí para evitar doble descuento
 
-                insertados++;
-            } catch (insertErr) {
-                log('error', 'Error insertando merma individual', {
-                    merma: JSON.stringify(m),
-                    error: insertErr.message,
-                    stack: insertErr.stack
-                });
-                // Continuar con las demás mermas
-            }
+            insertados++;
         }
 
+        await client.query('COMMIT');
         log('info', `Registradas ${insertados}/${mermas.length} mermas`, { restauranteId: req.restauranteId });
         res.json({ success: true, count: insertados });
     } catch (err) {
+        await client.query('ROLLBACK');
         log('error', 'Error registrando mermas', {
             error: err.message,
             stack: err.stack,
             mermasCount: req.body?.mermas?.length || 0
         });
         res.status(500).json({ error: 'Error interno' });
+    } finally {
+        client.release();
     }
 });
 
