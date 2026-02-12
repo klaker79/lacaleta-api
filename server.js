@@ -65,7 +65,7 @@ const SupplierController = require('./src/interfaces/http/controllers/SupplierCo
 // IngredientController fueron eliminados — sus rutas están inline en este archivo.
 
 // Middleware modularizado
-const { authMiddleware, requireAdmin } = require('./src/middleware/auth');
+const { authMiddleware, requireAdmin, tokenBlacklist } = require('./src/middleware/auth');
 const { globalLimiter, authLimiter, costlyApiLimiter } = require('./src/middleware/rateLimit');
 const { log } = require('./src/utils/logger');
 const { validateNumber, validatePrecio, validateCantidad } = require('./src/utils/validators');
@@ -131,7 +131,8 @@ app.use((req, res, next) => {
             log('warn', 'CORS: Request sin origin bloqueado', { path: req.path, ip: req.ip, method: req.method });
             return res.status(403).json({ error: 'CORS: Header Origin requerido' });
         }
-    } else if (ALLOWED_ORIGINS.includes(origin)) {
+    } else if (ALLOWED_ORIGINS.includes(origin) || /https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1]))/.test(origin)) {
+        // Permitir explícitamente orígenes de red local (LAN)
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
     } else {
@@ -836,6 +837,12 @@ app.get('/api/auth/verify', authMiddleware, (req, res) => {
 
 // Logout - Limpiar cookie de autenticación
 app.post('/api/auth/logout', (req, res) => {
+    // Invalidate the JWT token so it can't be reused
+    const token = req.cookies?.auth_token || req.headers.authorization?.split(' ')[1];
+    if (token) {
+        tokenBlacklist.add(token);
+        log('info', 'Token añadido a blacklist', { blacklistSize: tokenBlacklist.size });
+    }
     res.clearCookie('auth_token', { path: '/' });
     log('info', 'Logout exitoso');
     res.json({ success: true, message: 'Sesión cerrada correctamente' });
@@ -2312,6 +2319,8 @@ app.post('/api/inventory/consolidate', authMiddleware, async (req, res) => {
 
                 const safeReal = isNaN(real) ? 0 : real;
 
+                // Lock ingredient row to prevent race condition during consolidation
+                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
                 const result = await client.query(
                     `UPDATE ingredientes
                      SET stock_actual = $1,
@@ -2877,8 +2886,8 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
         if (varianteId) {
             const varianteResult = await client.query(
-                'SELECT precio_venta, factor FROM recetas_variantes WHERE id = $1 AND receta_id = $2',
-                [varianteId, recetaId]
+                'SELECT precio_venta, factor FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3',
+                [varianteId, recetaId, req.restauranteId]
             );
             if (varianteResult.rows.length > 0) {
                 const variante = varianteResult.rows[0];
@@ -2963,7 +2972,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
     }
 });
 
-app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
+app.delete('/api/sales/:id', authMiddleware, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -2990,7 +2999,7 @@ app.delete('/api/sales/:id', authMiddleware, async (req, res) => {
         if (recetaResult.rows.length > 0) {
             const receta = recetaResult.rows[0];
             const ingredientesReceta = receta.ingredientes || [];
-            const porciones = parseInt(receta.porciones) || 1;
+            const porciones = Math.max(1, parseInt(receta.porciones) || 1);
             // ⚡ FIX Bug #5: Usar el factor guardado en la venta (para variantes COPA/BOTELLA)
             const factorVariante = parseFloat(venta.factor_variante) || 1;
 
@@ -3167,7 +3176,7 @@ REGLAS:
 });
 
 // Endpoint para carga masiva de ventas (n8n compatible)
-app.post('/api/sales/bulk', authMiddleware, async (req, res) => {
+app.post('/api/sales/bulk', authMiddleware, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         const { ventas } = req.body;
@@ -3489,7 +3498,7 @@ app.put('/api/empleados/:id', authMiddleware, async (req, res) => {
 });
 
 // DELETE empleado (soft delete)
-app.delete('/api/empleados/:id', authMiddleware, async (req, res) => {
+app.delete('/api/empleados/:id', authMiddleware, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query(
@@ -4905,8 +4914,16 @@ app.post('/api/mermas', authMiddleware, async (req, res) => {
                 periodoId
             ]);
 
-            // NOTA: El frontend ya descuenta el stock antes de llamar este endpoint
-            // NO descontar aquí para evitar doble descuento
+            // Descontar stock del ingrediente (simétrico con la restauración en DELETE /api/mermas/:id)
+            if (ingredienteId && parseFloat(m.cantidad) > 0) {
+                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
+                await client.query(
+                    `UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW()
+                     WHERE id = $2 AND restaurante_id = $3`,
+                    [parseFloat(m.cantidad), ingredienteId, req.restauranteId]
+                );
+                log('info', 'Stock descontado por merma', { ingredienteId, cantidad: m.cantidad });
+            }
 
             insertados++;
         }

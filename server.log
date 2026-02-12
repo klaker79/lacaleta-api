@@ -3572,3 +3572,15 @@
 {"timestamp":"2026-02-08T10:55:30.043Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
 {"timestamp":"2026-02-08T10:56:30.029Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
 {"timestamp":"2026-02-08T10:57:30.029Z","level":"debug","message":"Heartbeat enviado a Uptime Kuma"}
+{"timestamp":"2026-02-12T12:47:26.368Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.1","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5173","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-12T12:47:26.369Z","level":"warn","message":"UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado"}
+{"timestamp":"2026-02-12T12:47:26.437Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-12T12:47:26.793Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-12T12:47:26.835Z","level":"error","message":"Error DB","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-12T12:48:36.408Z","level":"warn","message":"CORS: Request sin origin bloqueado","path":"/api/auth/login","ip":"127.0.0.1","method":"POST"}
+{"timestamp":"2026-02-12T12:49:10.130Z","level":"info","message":"Login exitoso","userId":3,"email":"laura@lanave5"}
+{"timestamp":"2026-02-12T13:00:25.593Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.1","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5173","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-12T13:00:25.596Z","level":"warn","message":"UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado"}
+{"timestamp":"2026-02-12T13:00:25.684Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-12T13:00:25.727Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-12T13:00:25.872Z","level":"error","message":"Error DB","error":"column \"deleted_at\" does not exist"}

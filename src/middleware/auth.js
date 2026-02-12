@@ -16,6 +16,27 @@ const log = (level, message, data = {}) => {
     console.log(JSON.stringify({ timestamp: new Date().toISOString(), level, message, ...data }));
 };
 
+// ========== 🔒 TOKEN BLACKLIST ==========
+// In-memory blacklist for invalidated tokens (on logout)
+const tokenBlacklist = new Set();
+
+// Auto-cleanup: remove expired tokens every 15 minutes to prevent memory leak
+const cleanupInterval = setInterval(() => {
+    let cleaned = 0;
+    for (const token of tokenBlacklist) {
+        try {
+            jwt.verify(token, JWT_SECRET);
+        } catch {
+            tokenBlacklist.delete(token);
+            cleaned++;
+        }
+    }
+    if (cleaned > 0) {
+        log('info', `Token blacklist cleanup: removed ${cleaned} expired tokens, ${tokenBlacklist.size} remaining`);
+    }
+}, 15 * 60 * 1000);
+cleanupInterval.unref(); // Don't prevent process exit
+
 const authMiddleware = (req, res, next) => {
     let token = req.cookies?.auth_token;
 
@@ -35,6 +56,15 @@ const authMiddleware = (req, res, next) => {
             error: 'Token no proporcionado',
             code: 'NO_TOKEN',
             hint: 'Incluye header: Authorization: Bearer <tu_token> o inicia sesión'
+        });
+    }
+
+    // Check if token has been invalidated (logout)
+    if (tokenBlacklist.has(token)) {
+        log('warn', 'Auth fallido: Token revocado (logout)', { url: req.originalUrl });
+        return res.status(401).json({
+            error: 'Sesión cerrada. Por favor, vuelve a iniciar sesión.',
+            code: 'TOKEN_REVOKED'
         });
     }
 
@@ -85,4 +115,4 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-module.exports = { authMiddleware, requireAdmin };
+module.exports = { authMiddleware, requireAdmin, tokenBlacklist };

@@ -51,6 +51,21 @@ class IngredientController {
             const restaurantId = req.restauranteId;
             const data = req.body;
 
+            // 🔒 SEGURIDAD: Prevenir duplicados (Case Insensitive)
+            const checkQuery = `
+                SELECT id FROM ingredientes 
+                WHERE LOWER(nombre) = LOWER($1) 
+                AND restaurante_id = $2 
+                AND deleted_at IS NULL
+            `;
+            const checkResult = await pool.query(checkQuery, [data.nombre, restaurantId]);
+
+            if (checkResult.rows.length > 0) {
+                return res.status(409).json({
+                    error: `El ingrediente '${data.nombre}' ya existe en tu lista.`
+                });
+            }
+
             const query = `
                 INSERT INTO ingredientes 
                     (nombre, categoria, unidad, precio, stock_actual, stock_minimo, proveedor_id, restaurante_id)

@@ -1,0 +1,9 @@
+.env
+.env.*
+.git
+tests/
+node_modules/
+server.log
+backups/
+_dormant/
+*.md
