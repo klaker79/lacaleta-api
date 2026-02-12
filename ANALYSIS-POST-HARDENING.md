@@ -1,10 +1,8 @@
 # CostOS Post-Hardening Analysis Report
 
 **Date:** 2026-02-11
-**Scope:** Backend API (`lacaleta-api`), Tests, Security, Performance
+**Scope:** Backend API (`lacaleta-api`) + Frontend (`MindLoop-CostOS`), Tests, Security, Performance
 **Baseline:** 10 critical fixes applied + businessHelpers refactoring + composite indexes
-
-> **Note:** The frontend repo (`mindloop-costos`) is not accessible in this environment. Frontend analysis is excluded from this report.
 
 ---
 
@@ -13,10 +11,11 @@
 1. [Critical Issues (data loss, security)](#1-critical-issues)
 2. [Important Issues (performance, UX, maintainability)](#2-important-issues)
 3. [Nice-to-Have (refactoring, DX, consistency)](#3-nice-to-have)
-4. [Quality Review of Applied Fixes (C1-C10)](#4-quality-review-of-applied-fixes)
-5. [Test Coverage Gaps](#5-test-coverage-gaps)
-6. [Performance Post-Indexes](#6-performance-post-indexes)
-7. [Detailed Fix Proposals](#7-detailed-fix-proposals)
+4. [Frontend Analysis (MindLoop-CostOS/src/legacy/app-core.js)](#4-frontend-analysis)
+5. [Quality Review of Applied Fixes (C1-C10)](#5-quality-review-of-applied-fixes)
+6. [Test Coverage Gaps](#6-test-coverage-gaps)
+7. [Performance Post-Indexes](#7-performance-post-indexes)
+8. [Detailed Fix Proposals](#8-detailed-fix-proposals)
 
 ---
 
@@ -362,7 +361,157 @@ Should be configurable via environment variable for different deployment topolog
 
 ---
 
-## 4. Quality Review of Applied Fixes
+## 4. Frontend Analysis
+
+**Repo:** `klaker79/MindLoop-CostOS` — `src/legacy/app-core.js`
+
+### FE-CRIT-01: XSS via `innerHTML` with unescaped data
+
+**Severity:** CRITICAL
+**Locations:**
+- `renderTablaSplits`: `<strong>${nombre}</strong>` — ingredient name from API injected without `escapeHTML()`
+- `renderMenuEngineeringUI` recommendations: `${perros.join(', ')}` — dish names injected raw into HTML
+- Inline `onclick` handlers: `'${ing.unidad}'` — unit value injected into single-quoted JS string. A unit containing `'` breaks the handler and enables XSS.
+
+Note: The codebase HAS an `escapeHTML()` function and uses it in some places (e.g., `actualizarDashboardExpandido` for alerts), but inconsistently.
+
+**Fix:** Apply `escapeHTML()` to ALL user-sourced data injected into HTML. Replace inline `onclick` with `addEventListener` or use `data-*` attributes.
+
+### FE-CRIT-02: `setInterval` stacking on re-login — memory leak
+
+**Severity:** CRITICAL
+**Location:** `init()` function
+
+```javascript
+setInterval(window.actualizarDashboardExpandido, 30000);
+setInterval(cargarDatos, 60000);
+```
+
+Neither interval ID is stored. If `init()` is called again after re-login, new intervals stack on top of old ones. After 3 re-logins, you have 6 intervals firing duplicate API calls.
+
+**Fix:** Store interval IDs and call `clearInterval()` at the start of `init()`:
+```javascript
+if (window._dashboardInterval) clearInterval(window._dashboardInterval);
+if (window._dataInterval) clearInterval(window._dataInterval);
+window._dashboardInterval = setInterval(window.actualizarDashboardExpandido, 30000);
+window._dataInterval = setInterval(cargarDatos, 60000);
+```
+
+### FE-HIGH-01: 4 core GET endpoints missing `res.ok` check
+
+**Severity:** HIGH
+**Methods:** `api.getIngredientes()`, `api.getRecetas()`, `api.getProveedores()`, `api.getPedidos()`
+
+These are the data-loading endpoints called every 60 seconds via `cargarDatos()` → `Promise.all()`. If the server returns a 4xx/5xx, the error response body is silently parsed as valid data, corrupting global arrays.
+
+All other API methods (create/update/delete) DO check `res.ok`. Only these 4 GET methods are missing it.
+
+### FE-HIGH-02: `getSales()` and `getMermas()` use raw `fetch()` instead of `fetchWithCreds()`
+
+**Severity:** HIGH
+
+Every other API method uses `fetchWithCreds()` (which sets `credentials: 'include'`), but these two use bare `fetch()`. This means httpOnly cookies are NOT sent with sales/mermas requests, which can cause auth failures in cookie-based environments.
+
+### FE-HIGH-03: Revenue chart makes 7 sequential API calls (N+1)
+
+**Severity:** HIGH
+**Location:** `renderRevenueChart`
+
+```javascript
+for (let i = 6; i >= 0; i--) {
+    const ventas = await api.getSales();  // Full dataset fetched 7 times!
+    const ventasDia = ventas.filter(v => v.fecha.split('T')[0] === fechaStr);
+}
+```
+
+Fetches the entire sales dataset 7 times (once per day in chart), then filters client-side. Should fetch once and filter in memory.
+
+### FE-HIGH-04: Inline event handler injection via `ing.unidad`
+
+**Severity:** HIGH
+**Location:** Inventory rendering
+
+```javascript
+onclick="window.mostrarCalculadoraFormato(${ing.id}, ${formatoData}, '${ing.unidad}', '${escapeHTML(ing.nombre)}')"
+```
+
+`ing.nombre` is escaped but `ing.unidad` is NOT. A unit value containing `'` would break out of the string and execute arbitrary JavaScript.
+
+### FE-MED-01: No debounce on search inputs
+
+**Location:** All 4 search inputs (ingredients, recipes, suppliers, orders)
+
+```javascript
+document.getElementById('busqueda-inventario')
+    .addEventListener('input', window.renderizarInventario);
+```
+
+`renderizarInventario` is async and makes an API call on every keystroke. Typing "aceite" fires 6 requests. Should use debounce (300ms).
+
+### FE-MED-02: Dead code — duplicated variables in `renderizarAnalisis`
+
+Variables `totalMargen`, `totalCoste`, `datosRecetas` are computed BEFORE the `try` block, then re-declared with identical names INSIDE the `try` block. The outer computation is dead code that wastes CPU on every analytics render.
+
+### FE-MED-03: Badge CSS logic error in profitability table
+
+```javascript
+rec.margenPct > 50 ? 'badge-success' : rec.margenPct > 30 ? 'badge-warning' : 'badge-warning'
+```
+
+Both `30-50%` and `< 30%` get `badge-warning`. The `< 30%` case should be `badge-danger`. Users can't distinguish low-margin from medium-margin dishes.
+
+### FE-MED-04: `chartBebidas` memory leak
+
+When beverages canvas exists but there are no beverages, the code replaces `innerHTML` without first calling `.destroy()` on the existing chart instance. The old chart object holds a reference to a detached canvas — memory leak.
+
+### FE-MED-05: `stockRealCache` grows indefinitely
+
+```javascript
+window.stockRealCache = window.stockRealCache || {};
+```
+
+Populated on every input event, only cleared on successful `confirmarMermasFinal`. If users type values but navigate away without confirming, cache accumulates stale entries forever.
+
+### FE-LOW-01: Hardcoded values that should be configurable
+
+| Value | Location | Issue |
+|---|---|---|
+| `30000` (30s) | `setInterval` dashboard refresh | Should be configurable |
+| `60000` (60s) | `setInterval` data refresh | Should be configurable |
+| `10` / `15` | Pagination page sizes | Inconsistent (10 in BCG, 15 in profitability) |
+| `7` days | Revenue chart range | Hardcoded, should be selectable |
+| Margin thresholds `50`, `30`, `60`, `40` | Chart color functions | Business-critical thresholds in UI code |
+| `'MiRestaurante'` | File export fallback name | Hardcoded |
+
+### FE-LOW-02: `prompt()` dialogs for data entry
+
+`mostrarCalculadoraFormato` uses native `prompt()` requiring comma-separated input. Blocks the main thread, can't be styled, and the format is error-prone.
+
+### FE-LOW-03: Dish name truncated to 10 chars without ellipsis
+
+`platoEstrellaEl.textContent = platoEstrella[0].substring(0, 10)` — "Paella Valenciana" becomes "Paella Val" with no tooltip or ellipsis.
+
+### FE-LOW-04: Empty Authorization header when no token
+
+```javascript
+Authorization: token ? 'Bearer ' + token : '',
+```
+
+Sends `Authorization: ''` when no token exists. Some proxies reject this. Better to omit the header entirely.
+
+### Frontend Summary
+
+| Severity | Count |
+|---|---|
+| Critical | 2 (XSS, interval stacking) |
+| High | 4 (missing res.ok, fetchWithCreds, N+1 chart, unidad injection) |
+| Medium | 5 (debounce, dead code, badge logic, chart leak, cache growth) |
+| Low | 4 (hardcoded values, prompt(), truncation, empty auth header) |
+| **Total** | **15** |
+
+---
+
+## 5. Quality Review of Applied Fixes
 
 ### C1 (FOR UPDATE in inventory/consolidate): PARTIALLY CORRECT
 - `bulk-update-stock` (L2132): correctly uses FOR UPDATE
@@ -400,7 +549,7 @@ Should be configurable via environment variable for different deployment topolog
 
 ---
 
-## 5. Test Coverage Gaps
+## 6. Test Coverage Gaps
 
 ### 5.1 Setup Issues
 
@@ -437,7 +586,7 @@ Based on the 29 test files in `tests/critical/`:
 
 ---
 
-## 6. Performance Post-Indexes
+## 7. Performance Post-Indexes
 
 ### 6.1 Index Coverage Assessment
 
@@ -479,7 +628,7 @@ The existing indexes (migrations 001-004) cover the main query patterns well:
 
 ---
 
-## 7. Detailed Fix Proposals
+## 8. Detailed Fix Proposals
 
 ### Priority Matrix
 
@@ -509,6 +658,22 @@ The existing indexes (migrations 001-004) cover the main query patterns well:
 | C1-FIX | IMPORTANT | consolidate missing FOR UPDATE | `server.js:2227` |
 | C3-FIX | IMPORTANT | DELETE sales missing Math.max on porciones | `server.js:2905` |
 
+#### Frontend Issues
+
+| ID | Severity | Description | File |
+|---|---|---|---|
+| FE-CRIT-01 | CRITICAL | XSS via innerHTML with unescaped data | `app-core.js` (renderTablaSplits, BCG recs, inline handlers) |
+| FE-CRIT-02 | CRITICAL | setInterval stacking on re-login | `app-core.js` (init) |
+| FE-HIGH-01 | HIGH | 4 core GET endpoints missing res.ok check | `app-core.js` (api object) |
+| FE-HIGH-02 | HIGH | getSales/getMermas use raw fetch, not fetchWithCreds | `app-core.js` (api object) |
+| FE-HIGH-03 | HIGH | Revenue chart 7x N+1 API calls | `app-core.js` (renderRevenueChart) |
+| FE-HIGH-04 | HIGH | Inline handler injection via ing.unidad | `app-core.js` (inventory render) |
+| FE-MED-01 | MEDIUM | No debounce on search inputs | `app-core.js` (event listeners) |
+| FE-MED-02 | MEDIUM | Dead code in renderizarAnalisis | `app-core.js` (renderizarAnalisis) |
+| FE-MED-03 | MEDIUM | Badge CSS logic error (warning == warning) | `app-core.js` (renderTablaRentabilidad) |
+| FE-MED-04 | MEDIUM | chartBebidas memory leak on empty | `app-core.js` (chart rendering) |
+| FE-MED-05 | MEDIUM | stockRealCache grows indefinitely | `app-core.js` (inventory input) |
+
 ### Quick Wins (can be fixed in < 5 lines each)
 
 1. **C-NEW-04/05**: Add `requireAdmin` to 2 endpoints
@@ -523,11 +688,31 @@ The existing indexes (migrations 001-004) cover the main query patterns well:
 
 ## Summary
 
+### Backend (lacaleta-api)
+
 | Severity | Count |
 |---|---|
-| CRITICAL (new) | 8 |
-| IMPORTANT (new) | 13 (+2 fix quality issues) |
+| CRITICAL | 8 |
+| IMPORTANT | 13 (+2 fix quality issues) |
 | Nice-to-Have | 7 |
-| **Total** | **30** |
+| **Subtotal** | **30** |
 
-The most urgent items are C-NEW-01 (secrets in git) and C-NEW-02 (weak JWT secret), as they enable complete authentication bypass. These should be addressed before any other changes.
+### Frontend (MindLoop-CostOS)
+
+| Severity | Count |
+|---|---|
+| Critical | 2 |
+| High | 4 |
+| Medium | 5 |
+| Low | 4 |
+| **Subtotal** | **15** |
+
+### **Grand Total: 45 issues**
+
+### Top 5 Priority Actions
+
+1. **Rotate ALL secrets** and remove `.env` from git (C-NEW-01/02) — enables complete auth bypass
+2. **Add `requireAdmin`** to DELETE sales, bulk sales, DELETE empleados (C-NEW-04/05, I-NEW-02) — 3 one-line fixes
+3. **Fix XSS** in frontend `renderTablaSplits` and inline handlers (FE-CRIT-01) — apply `escapeHTML()` consistently
+4. **Fix `setInterval` stacking** on re-login (FE-CRIT-02) — store and clear interval IDs
+5. **Create `.dockerignore`** (C-NEW-08) — prevent secrets in container images
