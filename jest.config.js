@@ -1,5 +1,5 @@
-// Jest config para cargar .env antes de tests
-require('dotenv').config();
+// Jest config — SIEMPRE usa .env.test (nunca .env de producción)
+require('dotenv').config({ path: '.env.test' });
 
 module.exports = {
     testEnvironment: 'node',
