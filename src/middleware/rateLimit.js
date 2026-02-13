@@ -7,7 +7,7 @@ const rateLimit = require('express-rate-limit');
 
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 1000, // 1000 requests por ventana
+    max: 2000, // 2000 requests por ventana (margen de seguridad)
     message: { error: 'Demasiadas peticiones, intenta más tarde' },
     standardHeaders: true,
     legacyHeaders: false
@@ -15,7 +15,7 @@ const globalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 50, // 50 intentos de login
+    max: 100, // 100 intentos de login (margen de seguridad)
     message: { error: 'Demasiados intentos de login, espera 15 minutos' },
     standardHeaders: true,
     legacyHeaders: false
