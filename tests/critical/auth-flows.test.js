@@ -89,4 +89,12 @@ describe('Auth Flows — Registration validation and token management', () => {
         expect(res.status).toBe(200);
         console.log(`✅ Logout → ${res.status}`);
     });
+
+    // ⚠️ CRITICAL: Clear cached token after logout test.
+    // The logout endpoint blacklists the token server-side.
+    // If we don't clear it, all subsequent test suites will reuse
+    // the blacklisted token and get 401 "Token revocado" errors.
+    afterAll(() => {
+        global.cachedAuthToken = null;
+    });
 });

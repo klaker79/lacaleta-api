@@ -3584,3 +3584,810 @@
 {"timestamp":"2026-02-12T13:00:25.684Z","level":"info","message":"Conectado a PostgreSQL"}
 {"timestamp":"2026-02-12T13:00:25.727Z","level":"info","message":"Migración: columna activo verificada"}
 {"timestamp":"2026-02-12T13:00:25.872Z","level":"error","message":"Error DB","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:24.294Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.1","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5173","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-13T18:41:24.302Z","level":"warn","message":"UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado"}
+{"timestamp":"2026-02-13T18:41:24.366Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-13T18:41:24.490Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-13T18:41:24.520Z","level":"error","message":"Error DB","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:40.293Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:40.300Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:40.330Z","level":"error","message":"Error ajustando stock","error":"column \"deleted_at\" does not exist","id":"999999"}
+{"timestamp":"2026-02-13T18:41:40.487Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:40.490Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:40.630Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:40.633Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:40.770Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:40.779Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771008100771"}
+{"timestamp":"2026-02-13T18:41:40.908Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:40.910Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.054Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.057Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.188Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.202Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.228Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"8","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:41:41.232Z","level":"error","message":"Error eliminando ingrediente","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.255Z","level":"error","message":"Error listando compras pendientes","error":"relation \"compras_pendientes\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.269Z","level":"error","message":"Error eliminando ingrediente","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.394Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.397Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.427Z","level":"error","message":"Error en health-check de inventario","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.563Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.566Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.698Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.719Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T18:41:41.719Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T18:41:41.725Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":7}
+{"timestamp":"2026-02-13T18:41:41.725Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":7}
+{"timestamp":"2026-02-13T18:41:41.727Z","level":"info","message":"Venta eliminada con stock restaurado","id":"7"}
+{"timestamp":"2026-02-13T18:41:41.830Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.832Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:41.974Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:41.983Z","level":"info","message":"Variante creada","receta_id":"8","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T18:41:41.988Z","level":"info","message":"Variante actualizada","variant_id":"1"}
+{"timestamp":"2026-02-13T18:41:41.992Z","level":"info","message":"Variante eliminada","variant_id":"1"}
+{"timestamp":"2026-02-13T18:41:41.995Z","level":"info","message":"Receta soft deleted","id":"8"}
+{"timestamp":"2026-02-13T18:41:42.093Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:42.097Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:42.228Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:42.230Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:42.403Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:42.406Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:42.540Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:42.550Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T18:41:42.576Z","level":"error","message":"Error eliminando merma","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:41:42.683Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:41:42.687Z","level":"info","message":"Empleado creado","nombre":"_TEST_HORARIO_ADV_1771008102684"}
+{"timestamp":"2026-02-13T18:41:42.695Z","level":"info","message":"Semana copiada","origen":"2026-05-11","destino":"2026-05-18","turnos":0}
+{"timestamp":"2026-02-13T18:41:42.834Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.220Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.225Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:00.255Z","level":"error","message":"Error ajustando stock","error":"column \"deleted_at\" does not exist","id":"999999"}
+{"timestamp":"2026-02-13T18:42:00.396Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.399Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:00.530Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.533Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:00.658Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.662Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771008120659"}
+{"timestamp":"2026-02-13T18:42:00.777Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.779Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:00.905Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:00.908Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.038Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.047Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.079Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"9","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:42:01.082Z","level":"error","message":"Error eliminando ingrediente","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.098Z","level":"error","message":"Error listando compras pendientes","error":"relation \"compras_pendientes\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.112Z","level":"error","message":"Error eliminando ingrediente","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.226Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.228Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.255Z","level":"error","message":"Error en health-check de inventario","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.381Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.383Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.509Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.518Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T18:42:01.518Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T18:42:01.524Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":8}
+{"timestamp":"2026-02-13T18:42:01.524Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":8}
+{"timestamp":"2026-02-13T18:42:01.525Z","level":"info","message":"Venta eliminada con stock restaurado","id":"8"}
+{"timestamp":"2026-02-13T18:42:01.623Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.626Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:01.759Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.766Z","level":"info","message":"Variante creada","receta_id":"9","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T18:42:01.771Z","level":"info","message":"Variante actualizada","variant_id":"2"}
+{"timestamp":"2026-02-13T18:42:01.775Z","level":"info","message":"Variante eliminada","variant_id":"2"}
+{"timestamp":"2026-02-13T18:42:01.778Z","level":"info","message":"Receta soft deleted","id":"9"}
+{"timestamp":"2026-02-13T18:42:01.871Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:01.877Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:02.005Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.007Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:02.148Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.150Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:02.278Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.287Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T18:42:02.317Z","level":"error","message":"Error eliminando merma","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:02.418Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.421Z","level":"info","message":"Empleado creado","nombre":"_TEST_HORARIO_ADV_1771008122418"}
+{"timestamp":"2026-02-13T18:42:02.429Z","level":"info","message":"Semana copiada","origen":"2026-05-11","destino":"2026-05-18","turnos":0}
+{"timestamp":"2026-02-13T18:42:02.528Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.530Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:02.740Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.855Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:02.878Z","level":"error","message":"Error en intelligence/waste-stats","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:03.016Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.020Z","level":"error","message":"Error inventario completo","error":"column i.deleted_at does not exist"}
+{"timestamp":"2026-02-13T18:42:03.148Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.156Z","level":"info","message":"Gasto fijo creado","id":1,"concepto":"_TEST_ALQUILER_AUTO_1771008123152"}
+{"timestamp":"2026-02-13T18:42:03.161Z","level":"info","message":"Gasto fijo actualizado","id":"1","monto_mensual":1800}
+{"timestamp":"2026-02-13T18:42:03.163Z","level":"info","message":"Gasto fijo eliminado","id":"1"}
+{"timestamp":"2026-02-13T18:42:03.309Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.317Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:03.481Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.487Z","level":"error","message":"Error recibiendo compras pendientes","error":"relation \"compras_pendientes\" does not exist"}
+{"timestamp":"2026-02-13T18:42:03.619Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.736Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.744Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":1,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T18:42:03.750Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":0,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T18:42:03.855Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:03.857Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:04.017Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:04.144Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:04.153Z","level":"info","message":"Token añadido a blacklist","blacklistSize":1}
+{"timestamp":"2026-02-13T18:42:04.153Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T18:42:04.249Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:04.356Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:04.482Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:50.966Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:50.970Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.001Z","level":"error","message":"Error ajustando stock","error":"column \"deleted_at\" does not exist","id":"999999"}
+{"timestamp":"2026-02-13T18:42:51.147Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:51.157Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.187Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:42:51.189Z","level":"error","message":"Error eliminando ingrediente","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.202Z","level":"error","message":"Error listando compras pendientes","error":"relation \"compras_pendientes\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.216Z","level":"error","message":"Error eliminando ingrediente","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.335Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:51.340Z","level":"error","message":"Error recibiendo compras pendientes","error":"relation \"compras_pendientes\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.472Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:51.474Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.630Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:51.658Z","level":"error","message":"Error obteniendo ingredientes","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.789Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:51.809Z","level":"error","message":"Error en intelligence/waste-stats","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:42:51.951Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:52.065Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:52.173Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:52.285Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:42:52.804Z","level":"info","message":"Token añadido a blacklist","blacklistSize":2}
+{"timestamp":"2026-02-13T18:42:52.804Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T18:48:13.533Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.1","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5173","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-13T18:48:13.539Z","level":"warn","message":"UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado"}
+{"timestamp":"2026-02-13T18:48:13.630Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-13T18:48:13.648Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-13T18:48:13.658Z","level":"error","message":"Error DB","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:48:45.476Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:45.496Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":10,"nuevoStock":"25.00","reason":"test_positive_delta"}
+{"timestamp":"2026-02-13T18:48:45.501Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10,"nuevoStock":"15.00","reason":"test_negative_delta"}
+{"timestamp":"2026-02-13T18:48:45.508Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":5,"nuevoStock":"20.00","reason":"test_delta0_plus"}
+{"timestamp":"2026-02-13T18:48:45.510Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-5,"nuevoStock":"15.00","reason":"test_delta0_minus"}
+{"timestamp":"2026-02-13T18:48:45.512Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10014,"nuevoStock":"0.00","reason":"test_floor_zero"}
+{"timestamp":"2026-02-13T18:48:45.515Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":15,"nuevoStock":"15.00","reason":"test_restore"}
+{"timestamp":"2026-02-13T18:48:45.525Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_mixed","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T18:48:45.527Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_restore","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T18:48:45.530Z","level":"info","message":"Bulk stock adjustment","reason":"test_partial_failure","exitosos":1,"fallidos":1}
+{"timestamp":"2026-02-13T18:48:45.632Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:45.647Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"11","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:45.651Z","level":"info","message":"Ingrediente soft deleted","id":"11"}
+{"timestamp":"2026-02-13T18:48:45.847Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:45.860Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:45.998Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.021Z","level":"error","message":"Error en intelligence/waste-stats","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:48:46.165Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.291Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.299Z","level":"info","message":"Compras pendientes recibidas","batchId":"c83d22a9-011f-4581-8033-1f3362fb7715","items":1}
+{"timestamp":"2026-02-13T18:48:46.418Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.626Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.749Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.867Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.981Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:46.987Z","level":"info","message":"Compras pendientes recibidas","batchId":"8357b65f-e59e-44da-b651-8ecd4019519f","items":2}
+{"timestamp":"2026-02-13T18:48:46.995Z","level":"error","message":"Error aprobando compra pendiente","error":"column \"pedido_id\" of relation \"precios_compra_diarios\" does not exist"}
+{"timestamp":"2026-02-13T18:48:47.007Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.107Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.115Z","level":"error","message":"Error creando pedido","error":"column \"pedido_id\" of relation \"precios_compra_diarios\" does not exist"}
+{"timestamp":"2026-02-13T18:48:47.120Z","level":"error","message":"Error creando pedido","error":"column \"pedido_id\" of relation \"precios_compra_diarios\" does not exist"}
+{"timestamp":"2026-02-13T18:48:47.123Z","level":"error","message":"Error obteniendo compras diarias","error":"column p.pedido_id does not exist"}
+{"timestamp":"2026-02-13T18:48:47.270Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.280Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T18:48:47.306Z","level":"error","message":"Error eliminando merma","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:48:47.408Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.517Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.525Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.528Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.529Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.532Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.536Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.538Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.542Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["proveedor_id"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.558Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":50,"nuevoStock":"65.00","reason":"test_race_condition"}
+{"timestamp":"2026-02-13T18:48:47.561Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.563Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-50,"nuevoStock":"15.00","reason":"test_race_restore"}
+{"timestamp":"2026-02-13T18:48:47.566Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","proveedor_id","precio","unidad","stock_actual","stock_minimo","familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:48:47.664Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.679Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T18:48:47.679Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T18:48:47.685Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":9}
+{"timestamp":"2026-02-13T18:48:47.685Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":9}
+{"timestamp":"2026-02-13T18:48:47.686Z","level":"info","message":"Venta eliminada con stock restaurado","id":"9"}
+{"timestamp":"2026-02-13T18:48:47.785Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.791Z","level":"info","message":"Gasto fijo creado","id":2,"concepto":"_TEST_ALQUILER_AUTO_1771008527788"}
+{"timestamp":"2026-02-13T18:48:47.796Z","level":"info","message":"Gasto fijo actualizado","id":"2","monto_mensual":1800}
+{"timestamp":"2026-02-13T18:48:47.799Z","level":"info","message":"Gasto fijo eliminado","id":"2"}
+{"timestamp":"2026-02-13T18:48:47.900Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:47.908Z","level":"info","message":"Token añadido a blacklist","blacklistSize":1}
+{"timestamp":"2026-02-13T18:48:47.908Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T18:48:48.002Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.009Z","level":"error","message":"Error creando pedido","error":"column \"pedido_id\" of relation \"precios_compra_diarios\" does not exist"}
+{"timestamp":"2026-02-13T18:48:48.113Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.120Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":1,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T18:48:48.125Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":0,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T18:48:48.219Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.227Z","level":"error","message":"Error obteniendo compras diarias","error":"column p.pedido_id does not exist"}
+{"timestamp":"2026-02-13T18:48:48.260Z","level":"error","message":"Error actualizando pedido","error":"column \"pedido_id\" of relation \"precios_compra_diarios\" does not exist"}
+{"timestamp":"2026-02-13T18:48:48.264Z","level":"error","message":"Error obteniendo compras diarias","error":"column p.pedido_id does not exist"}
+{"timestamp":"2026-02-13T18:48:48.278Z","level":"error","message":"Error actualizando pedido","error":"column \"pedido_id\" of relation \"precios_compra_diarios\" does not exist"}
+{"timestamp":"2026-02-13T18:48:48.280Z","level":"error","message":"Error obteniendo compras diarias","error":"column p.pedido_id does not exist"}
+{"timestamp":"2026-02-13T18:48:48.295Z","level":"info","message":"Pedido eliminado con cascading delete","id":"21","estado":"pendiente"}
+{"timestamp":"2026-02-13T18:48:48.393Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.402Z","level":"info","message":"Recibiendo mermas","count":1,"restauranteId":1,"body":"[{\"ingredienteId\":1,\"ingredienteNombre\":\"TOMATE\",\"cantidad\":0.5,\"unidad\":\"kg\",\"valorPerdida\":5,\"motivo\":\"Caducado\",\"nota\":\"Test automático — se borrará\"}]"}
+{"timestamp":"2026-02-13T18:48:48.403Z","level":"error","message":"Error registrando mermas","error":"column \"periodo_id\" of relation \"mermas\" does not exist","stack":"error: column \"periodo_id\" of relation \"mermas\" does not exist\n    at /Users/ikerfernandezcaballero/.gemini/antigravity/scratch/lacaleta-api/node_modules/pg/lib/client.js:545:17\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async /Users/ikerfernandezcaballero/.gemini/antigravity/scratch/lacaleta-api/server.js:4900:13","mermasCount":1}
+{"timestamp":"2026-02-13T18:48:48.412Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-13T18:48:48.523Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.535Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":4,"precio":1}
+{"timestamp":"2026-02-13T18:48:48.541Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"4"}
+{"timestamp":"2026-02-13T18:48:48.650Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.653Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771008528651"}
+{"timestamp":"2026-02-13T18:48:48.765Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.774Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T18:48:48.774Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T18:48:48.780Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":10}
+{"timestamp":"2026-02-13T18:48:48.780Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":10}
+{"timestamp":"2026-02-13T18:48:48.781Z","level":"info","message":"Venta eliminada con stock restaurado","id":"10"}
+{"timestamp":"2026-02-13T18:48:48.894Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:48.911Z","level":"info","message":"Receta soft deleted","id":"10"}
+{"timestamp":"2026-02-13T18:48:49.020Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:49.027Z","level":"info","message":"Variante creada","receta_id":"11","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T18:48:49.033Z","level":"info","message":"Variante actualizada","variant_id":"3"}
+{"timestamp":"2026-02-13T18:48:49.035Z","level":"info","message":"Variante eliminada","variant_id":"3"}
+{"timestamp":"2026-02-13T18:48:49.039Z","level":"info","message":"Receta soft deleted","id":"11"}
+{"timestamp":"2026-02-13T18:48:49.142Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:49.254Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:49.264Z","level":"info","message":"Ingrediente desactivado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T18:48:49.266Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T18:48:49.268Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T18:48:49.361Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:49.373Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":1,"precio":12.5}
+{"timestamp":"2026-02-13T18:48:49.380Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"1"}
+{"timestamp":"2026-02-13T18:48:49.479Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:49.592Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:48:49.595Z","level":"info","message":"Empleado creado","nombre":"_TEST_HORARIO_ADV_1771008529593"}
+{"timestamp":"2026-02-13T18:48:49.602Z","level":"info","message":"Semana copiada","origen":"2026-05-11","destino":"2026-05-18","turnos":0}
+{"timestamp":"2026-02-13T18:49:18.961Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:49:19.004Z","level":"error","message":"Error en intelligence/waste-stats","error":"column \"deleted_at\" does not exist"}
+{"timestamp":"2026-02-13T18:56:15.828Z","level":"info","message":"Servidor iniciado","port":"3001","version":"2.3.1","cors":["https://klaker79.github.io","https://app.mindloop.cloud","http://localhost:5173","http://localhost:5500","http://127.0.0.1:5500","http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3003","http://localhost:3004","http://localhost:3005","http://localhost:3006","http://localhost:3007","http://localhost:8080"]}
+{"timestamp":"2026-02-13T18:56:15.829Z","level":"warn","message":"UPTIME_KUMA_PUSH_URL no configurada, heartbeat desactivado"}
+{"timestamp":"2026-02-13T18:56:15.871Z","level":"info","message":"Conectado a PostgreSQL"}
+{"timestamp":"2026-02-13T18:56:15.880Z","level":"info","message":"Migración: columna activo verificada"}
+{"timestamp":"2026-02-13T18:56:15.889Z","level":"info","message":"Ejecutando migraciones de columnas estándar..."}
+{"timestamp":"2026-02-13T18:56:15.890Z","level":"info","message":"Migración columnas auditoría completada"}
+{"timestamp":"2026-02-13T18:56:15.891Z","level":"info","message":"Migración email_verified completada"}
+{"timestamp":"2026-02-13T18:56:15.892Z","level":"info","message":"Migración reset_token completada"}
+{"timestamp":"2026-02-13T18:56:15.892Z","level":"info","message":"Ejecutando migraciones de soft delete..."}
+{"timestamp":"2026-02-13T18:56:15.892Z","level":"info","message":"Migraciones soft delete completadas"}
+{"timestamp":"2026-02-13T18:56:15.892Z","level":"info","message":"Ejecutando migración de variantes en ventas..."}
+{"timestamp":"2026-02-13T18:56:15.892Z","level":"info","message":"Migración variantes en ventas completada"}
+{"timestamp":"2026-02-13T18:56:15.892Z","level":"info","message":"Verificando tablas faltantes..."}
+{"timestamp":"2026-02-13T18:56:15.893Z","level":"info","message":"Tabla ingredientes_alias verificada"}
+{"timestamp":"2026-02-13T18:56:15.893Z","level":"info","message":"Tabla gastos_fijos verificada"}
+{"timestamp":"2026-02-13T18:56:15.893Z","level":"info","message":"Columnas formato_compra/cantidad_por_formato/rendimiento verificadas"}
+{"timestamp":"2026-02-13T18:56:15.894Z","level":"info","message":"Migración UNIQUE constraint precios_compra_diarios completada (ahora incluye pedido_id)"}
+{"timestamp":"2026-02-13T18:56:15.894Z","level":"info","message":"Columna periodo_id en mermas verificada"}
+{"timestamp":"2026-02-13T18:56:15.894Z","level":"info","message":"Limpiando tablas obsoletas..."}
+{"timestamp":"2026-02-13T18:56:15.894Z","level":"info","message":"Tablas obsoletas eliminadas"}
+{"timestamp":"2026-02-13T18:56:15.894Z","level":"info","message":"Tablas y migraciones completadas"}
+{"timestamp":"2026-02-13T18:57:07.997Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.028Z","level":"info","message":"Compras diarias registradas desde pedido","pedidoId":"22","items":1}
+{"timestamp":"2026-02-13T18:57:08.045Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":22}
+{"timestamp":"2026-02-13T18:57:08.046Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"22","ingredientes":1}
+{"timestamp":"2026-02-13T18:57:08.046Z","level":"info","message":"Pedido eliminado con cascading delete","id":"22","estado":"recibido"}
+{"timestamp":"2026-02-13T18:57:08.171Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.381Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.391Z","level":"info","message":"Compras pendientes recibidas","batchId":"60a7b74b-e1ca-489d-bf10-50d23adcd662","items":2}
+{"timestamp":"2026-02-13T18:57:08.401Z","level":"info","message":"Compra pendiente aprobada","id":"4","ingredienteId":10}
+{"timestamp":"2026-02-13T18:57:08.412Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:08.512Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.517Z","level":"info","message":"Recibiendo mermas","count":1,"restauranteId":1,"body":"[{\"ingredienteId\":1,\"ingredienteNombre\":\"TOMATE\",\"cantidad\":0.5,\"unidad\":\"kg\",\"valorPerdida\":5,\"motivo\":\"Caducado\",\"nota\":\"Test automático — se borrará\"}]"}
+{"timestamp":"2026-02-13T18:57:08.519Z","level":"info","message":"Stock descontado por merma","ingredienteId":1,"cantidad":0.5}
+{"timestamp":"2026-02-13T18:57:08.519Z","level":"info","message":"Registradas 1/1 mermas","restauranteId":1}
+{"timestamp":"2026-02-13T18:57:08.521Z","level":"info","message":"GET /api/mermas - Buscando mermas","restauranteId":1,"mes":2,"ano":2026,"limite":100,"queryParams":{}}
+{"timestamp":"2026-02-13T18:57:08.521Z","level":"info","message":"Total mermas en BD para restaurante 1: 1"}
+{"timestamp":"2026-02-13T18:57:08.522Z","level":"debug","message":"Mermas listadas","count":1,"restauranteId":1}
+{"timestamp":"2026-02-13T18:57:08.528Z","level":"info","message":"Stock restaurado por eliminación de merma","ingredienteId":1,"cantidad":"0.500"}
+{"timestamp":"2026-02-13T18:57:08.529Z","level":"info","message":"Merma eliminada (soft delete)","id":"1","ingrediente":"TOMATE"}
+{"timestamp":"2026-02-13T18:57:08.532Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-13T18:57:08.631Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.640Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":23,"items":1}
+{"timestamp":"2026-02-13T18:57:08.644Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":24,"items":1}
+{"timestamp":"2026-02-13T18:57:08.649Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":23}
+{"timestamp":"2026-02-13T18:57:08.650Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"23","ingredientes":1}
+{"timestamp":"2026-02-13T18:57:08.650Z","level":"info","message":"Pedido eliminado con cascading delete","id":"23","estado":"recibido"}
+{"timestamp":"2026-02-13T18:57:08.656Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":24}
+{"timestamp":"2026-02-13T18:57:08.656Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"24","ingredientes":1}
+{"timestamp":"2026-02-13T18:57:08.656Z","level":"info","message":"Pedido eliminado con cascading delete","id":"24","estado":"recibido"}
+{"timestamp":"2026-02-13T18:57:08.753Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.760Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":25,"items":1}
+{"timestamp":"2026-02-13T18:57:08.771Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":25}
+{"timestamp":"2026-02-13T18:57:08.771Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"25","ingredientes":1}
+{"timestamp":"2026-02-13T18:57:08.772Z","level":"info","message":"Pedido eliminado con cascading delete","id":"25","estado":"recibido"}
+{"timestamp":"2026-02-13T18:57:08.871Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:08.878Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":10,"nuevoStock":"25.00","reason":"test_positive_delta"}
+{"timestamp":"2026-02-13T18:57:08.881Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10,"nuevoStock":"15.00","reason":"test_negative_delta"}
+{"timestamp":"2026-02-13T18:57:08.885Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":5,"nuevoStock":"20.00","reason":"test_delta0_plus"}
+{"timestamp":"2026-02-13T18:57:08.887Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-5,"nuevoStock":"15.00","reason":"test_delta0_minus"}
+{"timestamp":"2026-02-13T18:57:08.889Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10014,"nuevoStock":"0.00","reason":"test_floor_zero"}
+{"timestamp":"2026-02-13T18:57:08.891Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":15,"nuevoStock":"15.00","reason":"test_restore"}
+{"timestamp":"2026-02-13T18:57:08.902Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_mixed","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T18:57:08.905Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_restore","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T18:57:08.908Z","level":"info","message":"Bulk stock adjustment","reason":"test_partial_failure","exitosos":1,"fallidos":1}
+{"timestamp":"2026-02-13T18:57:09.003Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.016Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.163Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.269Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.279Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T18:57:09.305Z","level":"error","message":"Error eliminando merma","error":"invalid input syntax for type integer: \"reset\""}
+{"timestamp":"2026-02-13T18:57:09.405Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.534Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.542Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.546Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.548Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.551Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.554Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.556Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.559Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["proveedor_id"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.564Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":50,"nuevoStock":"65.00","reason":"test_race_condition"}
+{"timestamp":"2026-02-13T18:57:09.565Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.568Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-50,"nuevoStock":"15.00","reason":"test_race_restore"}
+{"timestamp":"2026-02-13T18:57:09.569Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","proveedor_id","precio","unidad","stock_actual","stock_minimo","familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:09.668Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.686Z","level":"info","message":"Receta soft deleted","id":"12"}
+{"timestamp":"2026-02-13T18:57:09.820Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.940Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:09.950Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":4,"precio":1}
+{"timestamp":"2026-02-13T18:57:09.955Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"4"}
+{"timestamp":"2026-02-13T18:57:10.053Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.057Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771009030054"}
+{"timestamp":"2026-02-13T18:57:10.175Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.187Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"12","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T18:57:10.189Z","level":"info","message":"Ingrediente soft deleted","id":"12"}
+{"timestamp":"2026-02-13T18:57:10.289Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.304Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T18:57:10.304Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T18:57:10.310Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":11}
+{"timestamp":"2026-02-13T18:57:10.311Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":11}
+{"timestamp":"2026-02-13T18:57:10.314Z","level":"info","message":"Venta eliminada con stock restaurado","id":"11"}
+{"timestamp":"2026-02-13T18:57:10.411Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.526Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.653Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.769Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.775Z","level":"info","message":"Variante creada","receta_id":"13","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T18:57:10.780Z","level":"info","message":"Variante actualizada","variant_id":"4"}
+{"timestamp":"2026-02-13T18:57:10.784Z","level":"info","message":"Variante eliminada","variant_id":"4"}
+{"timestamp":"2026-02-13T18:57:10.787Z","level":"info","message":"Receta soft deleted","id":"13"}
+{"timestamp":"2026-02-13T18:57:10.882Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:10.890Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T18:57:10.890Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T18:57:10.896Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":12}
+{"timestamp":"2026-02-13T18:57:10.896Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":12}
+{"timestamp":"2026-02-13T18:57:10.897Z","level":"info","message":"Venta eliminada con stock restaurado","id":"12"}
+{"timestamp":"2026-02-13T18:57:11.001Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.109Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.123Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":1,"precio":12.5}
+{"timestamp":"2026-02-13T18:57:11.134Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"1"}
+{"timestamp":"2026-02-13T18:57:11.247Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.255Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":1,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T18:57:11.260Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":0,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T18:57:11.366Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.370Z","level":"info","message":"Compras pendientes recibidas","batchId":"1698152d-6799-411c-8c86-8090480f6c8f","items":1}
+{"timestamp":"2026-02-13T18:57:11.493Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.499Z","level":"info","message":"Gasto fijo creado","id":3,"concepto":"_TEST_ALQUILER_AUTO_1771009031497"}
+{"timestamp":"2026-02-13T18:57:11.506Z","level":"info","message":"Gasto fijo actualizado","id":"3","monto_mensual":1800}
+{"timestamp":"2026-02-13T18:57:11.508Z","level":"info","message":"Gasto fijo eliminado","id":"3"}
+{"timestamp":"2026-02-13T18:57:11.628Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.747Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.772Z","level":"info","message":"Ingrediente desactivado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T18:57:11.775Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T18:57:11.777Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T18:57:11.879Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:11.883Z","level":"info","message":"Empleado creado","nombre":"_TEST_HORARIO_ADV_1771009031880"}
+{"timestamp":"2026-02-13T18:57:11.896Z","level":"info","message":"Semana copiada","origen":"2026-05-11","destino":"2026-05-18","turnos":0}
+{"timestamp":"2026-02-13T18:57:12.015Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T18:57:12.029Z","level":"info","message":"Token añadido a blacklist","blacklistSize":1}
+{"timestamp":"2026-02-13T18:57:12.029Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T19:24:59.195Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:24:59.334Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:24:59.453Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:24:59.596Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:24:59.727Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:24:59.933Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:24:59.951Z","level":"info","message":"Compras diarias registradas desde pedido","pedidoId":"26","items":1}
+{"timestamp":"2026-02-13T19:24:59.964Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":26}
+{"timestamp":"2026-02-13T19:24:59.965Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"26","ingredientes":1}
+{"timestamp":"2026-02-13T19:24:59.966Z","level":"info","message":"Pedido eliminado con cascading delete","id":"26","estado":"recibido"}
+{"timestamp":"2026-02-13T19:25:00.073Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.207Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.320Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.329Z","level":"info","message":"Compras pendientes recibidas","batchId":"030a235f-0f06-4faa-b6d7-caa598748fe6","items":2}
+{"timestamp":"2026-02-13T19:25:00.340Z","level":"info","message":"Compra pendiente aprobada","id":"7","ingredienteId":10}
+{"timestamp":"2026-02-13T19:25:00.357Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:00.458Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.471Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:00.612Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.625Z","level":"info","message":"Ingrediente desactivado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T19:25:00.626Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T19:25:00.629Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T19:25:00.732Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.741Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":10,"nuevoStock":"25.00","reason":"test_positive_delta"}
+{"timestamp":"2026-02-13T19:25:00.744Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10,"nuevoStock":"15.00","reason":"test_negative_delta"}
+{"timestamp":"2026-02-13T19:25:00.748Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":5,"nuevoStock":"20.00","reason":"test_delta0_plus"}
+{"timestamp":"2026-02-13T19:25:00.749Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-5,"nuevoStock":"15.00","reason":"test_delta0_minus"}
+{"timestamp":"2026-02-13T19:25:00.751Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10014,"nuevoStock":"0.00","reason":"test_floor_zero"}
+{"timestamp":"2026-02-13T19:25:00.754Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":15,"nuevoStock":"15.00","reason":"test_restore"}
+{"timestamp":"2026-02-13T19:25:00.762Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_mixed","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:25:00.764Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_restore","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:25:00.767Z","level":"info","message":"Bulk stock adjustment","reason":"test_partial_failure","exitosos":1,"fallidos":1}
+{"timestamp":"2026-02-13T19:25:00.867Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:00.879Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T19:25:00.907Z","level":"error","message":"Error eliminando merma","error":"invalid input syntax for type integer: \"reset\""}
+{"timestamp":"2026-02-13T19:25:01.021Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.029Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.033Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.035Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.039Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.043Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.045Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.048Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["proveedor_id"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.051Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":50,"nuevoStock":"65.00","reason":"test_race_condition"}
+{"timestamp":"2026-02-13T19:25:01.053Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.056Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-50,"nuevoStock":"15.00","reason":"test_race_restore"}
+{"timestamp":"2026-02-13T19:25:01.058Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","proveedor_id","precio","unidad","stock_actual","stock_minimo","familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:01.195Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.313Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.455Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.461Z","level":"info","message":"Gasto fijo creado","id":4,"concepto":"_TEST_ALQUILER_AUTO_1771010701459"}
+{"timestamp":"2026-02-13T19:25:01.466Z","level":"info","message":"Gasto fijo actualizado","id":"4","monto_mensual":1800}
+{"timestamp":"2026-02-13T19:25:01.469Z","level":"info","message":"Gasto fijo eliminado","id":"4"}
+{"timestamp":"2026-02-13T19:25:01.664Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.776Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.787Z","level":"info","message":"Token añadido a blacklist","blacklistSize":2}
+{"timestamp":"2026-02-13T19:25:01.787Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T19:25:01.887Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:01.995Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.108Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.123Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":1,"precio":12.5}
+{"timestamp":"2026-02-13T19:25:02.131Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"1"}
+{"timestamp":"2026-02-13T19:25:02.233Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.240Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":27,"items":1}
+{"timestamp":"2026-02-13T19:25:02.248Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":28,"items":1}
+{"timestamp":"2026-02-13T19:25:02.255Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":27}
+{"timestamp":"2026-02-13T19:25:02.255Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"27","ingredientes":1}
+{"timestamp":"2026-02-13T19:25:02.256Z","level":"info","message":"Pedido eliminado con cascading delete","id":"27","estado":"recibido"}
+{"timestamp":"2026-02-13T19:25:02.260Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":28}
+{"timestamp":"2026-02-13T19:25:02.261Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"28","ingredientes":1}
+{"timestamp":"2026-02-13T19:25:02.261Z","level":"info","message":"Pedido eliminado con cascading delete","id":"28","estado":"recibido"}
+{"timestamp":"2026-02-13T19:25:02.359Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.367Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":1,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T19:25:02.373Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":0,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T19:25:02.471Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.596Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.601Z","level":"info","message":"Compras pendientes recibidas","batchId":"81a2ce5b-aea8-46e1-9aba-2086957892f0","items":1}
+{"timestamp":"2026-02-13T19:25:02.714Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.717Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771010702715"}
+{"timestamp":"2026-02-13T19:25:02.838Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.844Z","level":"info","message":"Variante creada","receta_id":"14","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T19:25:02.849Z","level":"info","message":"Variante actualizada","variant_id":"5"}
+{"timestamp":"2026-02-13T19:25:02.852Z","level":"info","message":"Variante eliminada","variant_id":"5"}
+{"timestamp":"2026-02-13T19:25:02.857Z","level":"info","message":"Receta soft deleted","id":"14"}
+{"timestamp":"2026-02-13T19:25:02.954Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:02.971Z","level":"info","message":"Receta soft deleted","id":"15"}
+{"timestamp":"2026-02-13T19:25:03.159Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.164Z","level":"info","message":"Recibiendo mermas","count":1,"restauranteId":1,"body":"[{\"ingredienteId\":1,\"ingredienteNombre\":\"TOMATE\",\"cantidad\":0.5,\"unidad\":\"kg\",\"valorPerdida\":5,\"motivo\":\"Caducado\",\"nota\":\"Test automático — se borrará\"}]"}
+{"timestamp":"2026-02-13T19:25:03.166Z","level":"info","message":"Stock descontado por merma","ingredienteId":1,"cantidad":0.5}
+{"timestamp":"2026-02-13T19:25:03.166Z","level":"info","message":"Registradas 1/1 mermas","restauranteId":1}
+{"timestamp":"2026-02-13T19:25:03.168Z","level":"info","message":"GET /api/mermas - Buscando mermas","restauranteId":1,"mes":2,"ano":2026,"limite":100,"queryParams":{}}
+{"timestamp":"2026-02-13T19:25:03.169Z","level":"info","message":"Total mermas en BD para restaurante 1: 1"}
+{"timestamp":"2026-02-13T19:25:03.169Z","level":"debug","message":"Mermas listadas","count":1,"restauranteId":1}
+{"timestamp":"2026-02-13T19:25:03.176Z","level":"info","message":"Stock restaurado por eliminación de merma","ingredienteId":1,"cantidad":"0.500"}
+{"timestamp":"2026-02-13T19:25:03.176Z","level":"info","message":"Merma eliminada (soft delete)","id":"2","ingrediente":"TOMATE"}
+{"timestamp":"2026-02-13T19:25:03.182Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-13T19:25:03.280Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.395Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.400Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":29,"items":1}
+{"timestamp":"2026-02-13T19:25:03.411Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":29}
+{"timestamp":"2026-02-13T19:25:03.411Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"29","ingredientes":1}
+{"timestamp":"2026-02-13T19:25:03.412Z","level":"info","message":"Pedido eliminado con cascading delete","id":"29","estado":"recibido"}
+{"timestamp":"2026-02-13T19:25:03.512Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.638Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.649Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"13","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:25:03.651Z","level":"info","message":"Ingrediente soft deleted","id":"13"}
+{"timestamp":"2026-02-13T19:25:03.754Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.762Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":4,"precio":1}
+{"timestamp":"2026-02-13T19:25:03.768Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"4"}
+{"timestamp":"2026-02-13T19:25:03.876Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:25:03.885Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T19:25:03.885Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T19:25:03.891Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":13}
+{"timestamp":"2026-02-13T19:25:03.892Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":13}
+{"timestamp":"2026-02-13T19:25:03.893Z","level":"info","message":"Venta eliminada con stock restaurado","id":"13"}
+{"timestamp":"2026-02-13T19:25:03.991Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:29.680Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:29.807Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:29.810Z","level":"info","message":"Empleado creado","nombre":"_TEST_HORARIO_ADV_1771010789807"}
+{"timestamp":"2026-02-13T19:26:29.821Z","level":"info","message":"Semana copiada","origen":"2026-05-11","destino":"2026-05-18","turnos":0}
+{"timestamp":"2026-02-13T19:26:29.928Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.037Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.051Z","level":"info","message":"Compras diarias registradas desde pedido","pedidoId":"30","items":1}
+{"timestamp":"2026-02-13T19:26:30.063Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":30}
+{"timestamp":"2026-02-13T19:26:30.064Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"30","ingredientes":1}
+{"timestamp":"2026-02-13T19:26:30.064Z","level":"info","message":"Pedido eliminado con cascading delete","id":"30","estado":"recibido"}
+{"timestamp":"2026-02-13T19:26:30.164Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.169Z","level":"info","message":"Recibiendo mermas","count":1,"restauranteId":1,"body":"[{\"ingredienteId\":1,\"ingredienteNombre\":\"TOMATE\",\"cantidad\":0.5,\"unidad\":\"kg\",\"valorPerdida\":5,\"motivo\":\"Caducado\",\"nota\":\"Test automático — se borrará\"}]"}
+{"timestamp":"2026-02-13T19:26:30.171Z","level":"info","message":"Stock descontado por merma","ingredienteId":1,"cantidad":0.5}
+{"timestamp":"2026-02-13T19:26:30.171Z","level":"info","message":"Registradas 1/1 mermas","restauranteId":1}
+{"timestamp":"2026-02-13T19:26:30.173Z","level":"info","message":"GET /api/mermas - Buscando mermas","restauranteId":1,"mes":2,"ano":2026,"limite":100,"queryParams":{}}
+{"timestamp":"2026-02-13T19:26:30.174Z","level":"info","message":"Total mermas en BD para restaurante 1: 1"}
+{"timestamp":"2026-02-13T19:26:30.174Z","level":"debug","message":"Mermas listadas","count":1,"restauranteId":1}
+{"timestamp":"2026-02-13T19:26:30.184Z","level":"info","message":"Stock restaurado por eliminación de merma","ingredienteId":1,"cantidad":"0.500"}
+{"timestamp":"2026-02-13T19:26:30.184Z","level":"info","message":"Merma eliminada (soft delete)","id":"3","ingrediente":"TOMATE"}
+{"timestamp":"2026-02-13T19:26:30.191Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-13T19:26:30.286Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.409Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.518Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.649Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.660Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.787Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.795Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.797Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.799Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.801Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.805Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.807Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.810Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["proveedor_id"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.815Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":50,"nuevoStock":"65.00","reason":"test_race_condition"}
+{"timestamp":"2026-02-13T19:26:30.816Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.819Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-50,"nuevoStock":"15.00","reason":"test_race_restore"}
+{"timestamp":"2026-02-13T19:26:30.821Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","proveedor_id","precio","unidad","stock_actual","stock_minimo","familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:30.934Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:30.944Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T19:26:30.972Z","level":"error","message":"Error eliminando merma","error":"invalid input syntax for type integer: \"reset\""}
+{"timestamp":"2026-02-13T19:26:31.072Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.081Z","level":"info","message":"Compras pendientes recibidas","batchId":"04e5c1bf-8b96-43c3-b004-4507d22015bd","items":2}
+{"timestamp":"2026-02-13T19:26:31.093Z","level":"info","message":"Compra pendiente aprobada","id":"10","ingredienteId":10}
+{"timestamp":"2026-02-13T19:26:31.102Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:31.199Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.412Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.421Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":10,"nuevoStock":"25.00","reason":"test_positive_delta"}
+{"timestamp":"2026-02-13T19:26:31.423Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10,"nuevoStock":"15.00","reason":"test_negative_delta"}
+{"timestamp":"2026-02-13T19:26:31.443Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":5,"nuevoStock":"20.00","reason":"test_delta0_plus"}
+{"timestamp":"2026-02-13T19:26:31.447Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-5,"nuevoStock":"15.00","reason":"test_delta0_minus"}
+{"timestamp":"2026-02-13T19:26:31.449Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10014,"nuevoStock":"0.00","reason":"test_floor_zero"}
+{"timestamp":"2026-02-13T19:26:31.451Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":15,"nuevoStock":"15.00","reason":"test_restore"}
+{"timestamp":"2026-02-13T19:26:31.459Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_mixed","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:26:31.462Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_restore","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:26:31.466Z","level":"info","message":"Bulk stock adjustment","reason":"test_partial_failure","exitosos":1,"fallidos":1}
+{"timestamp":"2026-02-13T19:26:31.560Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.573Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":1,"precio":12.5}
+{"timestamp":"2026-02-13T19:26:31.581Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"1"}
+{"timestamp":"2026-02-13T19:26:31.680Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.797Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.807Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"14","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:26:31.809Z","level":"info","message":"Ingrediente soft deleted","id":"14"}
+{"timestamp":"2026-02-13T19:26:31.919Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:31.926Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":31,"items":1}
+{"timestamp":"2026-02-13T19:26:31.929Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":32,"items":1}
+{"timestamp":"2026-02-13T19:26:31.934Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":31}
+{"timestamp":"2026-02-13T19:26:31.935Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"31","ingredientes":1}
+{"timestamp":"2026-02-13T19:26:31.936Z","level":"info","message":"Pedido eliminado con cascading delete","id":"31","estado":"recibido"}
+{"timestamp":"2026-02-13T19:26:31.940Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":32}
+{"timestamp":"2026-02-13T19:26:31.940Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"32","ingredientes":1}
+{"timestamp":"2026-02-13T19:26:31.941Z","level":"info","message":"Pedido eliminado con cascading delete","id":"32","estado":"recibido"}
+{"timestamp":"2026-02-13T19:26:32.036Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:32.040Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771010792037"}
+{"timestamp":"2026-02-13T19:26:32.149Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:32.258Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:32.392Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:32.399Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T19:26:32.400Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T19:26:32.404Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":14}
+{"timestamp":"2026-02-13T19:26:32.405Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":14}
+{"timestamp":"2026-02-13T19:26:32.406Z","level":"info","message":"Venta eliminada con stock restaurado","id":"14"}
+{"timestamp":"2026-02-13T19:26:32.501Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:26:32.507Z","level":"info","message":"Variante creada","receta_id":"16","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T19:26:32.513Z","level":"info","message":"Variante actualizada","variant_id":"6"}
+{"timestamp":"2026-02-13T19:26:32.517Z","level":"info","message":"Variante eliminada","variant_id":"6"}
+{"timestamp":"2026-02-13T19:26:32.521Z","level":"info","message":"Receta soft deleted","id":"16"}
+{"timestamp":"2026-02-13T19:26:32.855Z","level":"info","message":"Token añadido a blacklist","blacklistSize":3}
+{"timestamp":"2026-02-13T19:26:32.855Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T19:30:31.298Z","level":"info","message":"Token añadido a blacklist","blacklistSize":3}
+{"timestamp":"2026-02-13T19:30:31.298Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T19:40:10.063Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:10.210Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:10.342Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:10.464Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:10.476Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T19:40:10.506Z","level":"error","message":"Error eliminando merma","error":"invalid input syntax for type integer: \"reset\""}
+{"timestamp":"2026-02-13T19:40:10.607Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:10.616Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":33,"items":1}
+{"timestamp":"2026-02-13T19:40:10.620Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":34,"items":1}
+{"timestamp":"2026-02-13T19:40:10.628Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":33}
+{"timestamp":"2026-02-13T19:40:10.629Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"33","ingredientes":1}
+{"timestamp":"2026-02-13T19:40:10.629Z","level":"info","message":"Pedido eliminado con cascading delete","id":"33","estado":"recibido"}
+{"timestamp":"2026-02-13T19:40:10.636Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":34}
+{"timestamp":"2026-02-13T19:40:10.636Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"34","ingredientes":1}
+{"timestamp":"2026-02-13T19:40:10.636Z","level":"info","message":"Pedido eliminado con cascading delete","id":"34","estado":"recibido"}
+{"timestamp":"2026-02-13T19:40:10.738Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:10.875Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.031Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.139Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.267Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.275Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":10,"nuevoStock":"25.00","reason":"test_positive_delta"}
+{"timestamp":"2026-02-13T19:40:11.277Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10,"nuevoStock":"15.00","reason":"test_negative_delta"}
+{"timestamp":"2026-02-13T19:40:11.283Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":5,"nuevoStock":"20.00","reason":"test_delta0_plus"}
+{"timestamp":"2026-02-13T19:40:11.284Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-5,"nuevoStock":"15.00","reason":"test_delta0_minus"}
+{"timestamp":"2026-02-13T19:40:11.286Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10014,"nuevoStock":"0.00","reason":"test_floor_zero"}
+{"timestamp":"2026-02-13T19:40:11.288Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":15,"nuevoStock":"15.00","reason":"test_restore"}
+{"timestamp":"2026-02-13T19:40:11.297Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_mixed","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:40:11.299Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_restore","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:40:11.302Z","level":"info","message":"Bulk stock adjustment","reason":"test_partial_failure","exitosos":1,"fallidos":1}
+{"timestamp":"2026-02-13T19:40:11.398Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.405Z","level":"info","message":"Variante creada","receta_id":"17","nombre":"Botella","precio_venta":25}
+{"timestamp":"2026-02-13T19:40:11.410Z","level":"info","message":"Variante actualizada","variant_id":"7"}
+{"timestamp":"2026-02-13T19:40:11.415Z","level":"info","message":"Variante eliminada","variant_id":"7"}
+{"timestamp":"2026-02-13T19:40:11.419Z","level":"info","message":"Receta soft deleted","id":"17"}
+{"timestamp":"2026-02-13T19:40:11.620Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.628Z","level":"info","message":"Token añadido a blacklist","blacklistSize":4}
+{"timestamp":"2026-02-13T19:40:11.628Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T19:40:11.728Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.858Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:11.955Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.063Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.069Z","level":"info","message":"Gasto fijo creado","id":5,"concepto":"_TEST_ALQUILER_AUTO_1771011612067"}
+{"timestamp":"2026-02-13T19:40:12.074Z","level":"info","message":"Gasto fijo actualizado","id":"5","monto_mensual":1800}
+{"timestamp":"2026-02-13T19:40:12.076Z","level":"info","message":"Gasto fijo eliminado","id":"5"}
+{"timestamp":"2026-02-13T19:40:12.188Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.195Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T19:40:12.195Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T19:40:12.199Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":15}
+{"timestamp":"2026-02-13T19:40:12.200Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":15}
+{"timestamp":"2026-02-13T19:40:12.200Z","level":"info","message":"Venta eliminada con stock restaurado","id":"15"}
+{"timestamp":"2026-02-13T19:40:12.304Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.359Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":4,"precio":1}
+{"timestamp":"2026-02-13T19:40:12.364Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"4"}
+{"timestamp":"2026-02-13T19:40:12.462Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.471Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.473Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.475Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.477Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.494Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.497Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.500Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["proveedor_id"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.504Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":50,"nuevoStock":"65.00","reason":"test_race_condition"}
+{"timestamp":"2026-02-13T19:40:12.506Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.509Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-50,"nuevoStock":"15.00","reason":"test_race_restore"}
+{"timestamp":"2026-02-13T19:40:12.510Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","proveedor_id","precio","unidad","stock_actual","stock_minimo","familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.605Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.613Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T19:40:12.614Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T19:40:12.619Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":16}
+{"timestamp":"2026-02-13T19:40:12.619Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":16}
+{"timestamp":"2026-02-13T19:40:12.620Z","level":"info","message":"Venta eliminada con stock restaurado","id":"16"}
+{"timestamp":"2026-02-13T19:40:12.726Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.739Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"15","cambios":["nombre","unidad","precio","stock_actual","stock_minimo","categoria"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:40:12.741Z","level":"info","message":"Ingrediente soft deleted","id":"15"}
+{"timestamp":"2026-02-13T19:40:12.840Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.951Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:12.961Z","level":"info","message":"Compras diarias registradas desde pedido","pedidoId":"35","items":1}
+{"timestamp":"2026-02-13T19:40:12.972Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":35}
+{"timestamp":"2026-02-13T19:40:12.973Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"35","ingredientes":1}
+{"timestamp":"2026-02-13T19:40:12.973Z","level":"info","message":"Pedido eliminado con cascading delete","id":"35","estado":"recibido"}
+{"timestamp":"2026-02-13T19:40:13.069Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:13.074Z","level":"info","message":"Recibiendo mermas","count":1,"restauranteId":1,"body":"[{\"ingredienteId\":1,\"ingredienteNombre\":\"TOMATE\",\"cantidad\":0.5,\"unidad\":\"kg\",\"valorPerdida\":5,\"motivo\":\"Caducado\",\"nota\":\"Test automático — se borrará\"}]"}
+{"timestamp":"2026-02-13T19:40:13.076Z","level":"info","message":"Stock descontado por merma","ingredienteId":1,"cantidad":0.5}
+{"timestamp":"2026-02-13T19:40:13.076Z","level":"info","message":"Registradas 1/1 mermas","restauranteId":1}
+{"timestamp":"2026-02-13T19:40:13.078Z","level":"info","message":"GET /api/mermas - Buscando mermas","restauranteId":1,"mes":2,"ano":2026,"limite":100,"queryParams":{}}
+{"timestamp":"2026-02-13T19:40:13.079Z","level":"info","message":"Total mermas en BD para restaurante 1: 1"}
+{"timestamp":"2026-02-13T19:40:13.080Z","level":"debug","message":"Mermas listadas","count":1,"restauranteId":1}
+{"timestamp":"2026-02-13T19:40:13.102Z","level":"info","message":"Stock restaurado por eliminación de merma","ingredienteId":1,"cantidad":"0.500"}
+{"timestamp":"2026-02-13T19:40:13.102Z","level":"info","message":"Merma eliminada (soft delete)","id":"4","ingrediente":"TOMATE"}
+{"timestamp":"2026-02-13T19:40:13.109Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-13T19:40:13.252Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:13.266Z","level":"info","message":"Proveedor asociado a ingrediente","ingrediente_id":"1","proveedor_id":1,"precio":12.5}
+{"timestamp":"2026-02-13T19:40:13.274Z","level":"info","message":"Eliminada asociación proveedor-ingrediente","ingrediente_id":"1","proveedor_id":"1"}
+{"timestamp":"2026-02-13T19:40:13.391Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:13.526Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:13.529Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771011613527"}
+{"timestamp":"2026-02-13T19:40:13.831Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:13.989Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.011Z","level":"info","message":"Receta soft deleted","id":"18"}
+{"timestamp":"2026-02-13T19:40:14.108Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.229Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.247Z","level":"info","message":"Ingrediente desactivado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T19:40:14.250Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T19:40:14.252Z","level":"info","message":"Ingrediente activado","id":"1","nombre":"TOMATE"}
+{"timestamp":"2026-02-13T19:40:14.348Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.351Z","level":"info","message":"Empleado creado","nombre":"_TEST_HORARIO_ADV_1771011614349"}
+{"timestamp":"2026-02-13T19:40:14.358Z","level":"info","message":"Semana copiada","origen":"2026-05-11","destino":"2026-05-18","turnos":0}
+{"timestamp":"2026-02-13T19:40:14.481Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.593Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.599Z","level":"info","message":"Compras pendientes recibidas","batchId":"5ac38dc4-7b87-4aa5-b867-a9cec7e64de5","items":1}
+{"timestamp":"2026-02-13T19:40:14.705Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.812Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:14.942Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:15.056Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:40:15.062Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":1,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T19:40:15.068Z","level":"info","message":"Carga masiva ventas","procesados":0,"fallidos":0,"resumenesActualizados":0}
+{"timestamp":"2026-02-13T19:41:31.966Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.085Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.099Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:32.260Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.396Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.399Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771011692397"}
+{"timestamp":"2026-02-13T19:41:32.514Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.524Z","level":"info","message":"Token añadido a blacklist","blacklistSize":4}
+{"timestamp":"2026-02-13T19:41:32.525Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-13T19:41:32.627Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.740Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.843Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:32.947Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.152Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.162Z","level":"error","message":"Error eliminando turno","error":"invalid input syntax for type integer: \"all\""}
+{"timestamp":"2026-02-13T19:41:33.189Z","level":"error","message":"Error eliminando merma","error":"invalid input syntax for type integer: \"reset\""}
+{"timestamp":"2026-02-13T19:41:33.295Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.306Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":10,"nuevoStock":"25.00","reason":"test_positive_delta"}
+{"timestamp":"2026-02-13T19:41:33.309Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10,"nuevoStock":"15.00","reason":"test_negative_delta"}
+{"timestamp":"2026-02-13T19:41:33.313Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":5,"nuevoStock":"20.00","reason":"test_delta0_plus"}
+{"timestamp":"2026-02-13T19:41:33.314Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-5,"nuevoStock":"15.00","reason":"test_delta0_minus"}
+{"timestamp":"2026-02-13T19:41:33.316Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-10014,"nuevoStock":"0.00","reason":"test_floor_zero"}
+{"timestamp":"2026-02-13T19:41:33.318Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":15,"nuevoStock":"15.00","reason":"test_restore"}
+{"timestamp":"2026-02-13T19:41:33.327Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_mixed","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:41:33.329Z","level":"info","message":"Bulk stock adjustment","reason":"test_bulk_restore","exitosos":2,"fallidos":0}
+{"timestamp":"2026-02-13T19:41:33.334Z","level":"info","message":"Bulk stock adjustment","reason":"test_partial_failure","exitosos":1,"fallidos":1}
+{"timestamp":"2026-02-13T19:41:33.430Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.539Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.557Z","level":"info","message":"Receta soft deleted","id":"19"}
+{"timestamp":"2026-02-13T19:41:33.656Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.664Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.666Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.677Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.682Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["stock_actual"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.690Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.692Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.703Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["proveedor_id"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.708Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":50,"nuevoStock":"65.00","reason":"test_race_condition"}
+{"timestamp":"2026-02-13T19:41:33.710Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.711Z","level":"info","message":"Stock ajustado atómicamente","id":"10","delta":-50,"nuevoStock":"15.00","reason":"test_race_restore"}
+{"timestamp":"2026-02-13T19:41:33.712Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"10","cambios":["nombre","proveedor_id","precio","unidad","stock_actual","stock_minimo","familia"],"cantidadPorFormato":{"antes":null,"despues":null}}
+{"timestamp":"2026-02-13T19:41:33.806Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:33.811Z","level":"info","message":"Recibiendo mermas","count":1,"restauranteId":1,"body":"[{\"ingredienteId\":1,\"ingredienteNombre\":\"TOMATE\",\"cantidad\":0.5,\"unidad\":\"kg\",\"valorPerdida\":5,\"motivo\":\"Caducado\",\"nota\":\"Test automático — se borrará\"}]"}
+{"timestamp":"2026-02-13T19:41:33.812Z","level":"info","message":"Stock descontado por merma","ingredienteId":1,"cantidad":0.5}
+{"timestamp":"2026-02-13T19:41:33.813Z","level":"info","message":"Registradas 1/1 mermas","restauranteId":1}
+{"timestamp":"2026-02-13T19:41:33.814Z","level":"info","message":"GET /api/mermas - Buscando mermas","restauranteId":1,"mes":2,"ano":2026,"limite":100,"queryParams":{}}
+{"timestamp":"2026-02-13T19:41:33.815Z","level":"info","message":"Total mermas en BD para restaurante 1: 1"}
+{"timestamp":"2026-02-13T19:41:33.816Z","level":"debug","message":"Mermas listadas","count":1,"restauranteId":1}
+{"timestamp":"2026-02-13T19:41:33.822Z","level":"info","message":"Stock restaurado por eliminación de merma","ingredienteId":1,"cantidad":"0.500"}
+{"timestamp":"2026-02-13T19:41:33.823Z","level":"info","message":"Merma eliminada (soft delete)","id":"5","ingrediente":"TOMATE"}
+{"timestamp":"2026-02-13T19:41:33.827Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"1","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-13T19:41:33.924Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:34.045Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:34.172Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:34.178Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":36,"items":1}
+{"timestamp":"2026-02-13T19:41:34.191Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":36}
+{"timestamp":"2026-02-13T19:41:34.191Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"36","ingredientes":1}
+{"timestamp":"2026-02-13T19:41:34.193Z","level":"info","message":"Pedido eliminado con cascading delete","id":"36","estado":"recibido"}
+{"timestamp":"2026-02-13T19:41:34.287Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:34.396Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:34.401Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":37,"items":1}
+{"timestamp":"2026-02-13T19:41:34.405Z","level":"info","message":"Compras diarias registradas desde compra mercado","pedidoId":38,"items":1}
+{"timestamp":"2026-02-13T19:41:34.414Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":37}
+{"timestamp":"2026-02-13T19:41:34.415Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"37","ingredientes":1}
+{"timestamp":"2026-02-13T19:41:34.416Z","level":"info","message":"Pedido eliminado con cascading delete","id":"37","estado":"recibido"}
+{"timestamp":"2026-02-13T19:41:34.423Z","level":"info","message":"Compras diarias borradas por pedido_id","pedidoId":38}
+{"timestamp":"2026-02-13T19:41:34.424Z","level":"info","message":"Compras diarias y stock revertidos por borrado de pedido","pedidoId":"38","ingredientes":1}
+{"timestamp":"2026-02-13T19:41:34.424Z","level":"info","message":"Pedido eliminado con cascading delete","id":"38","estado":"recibido"}
+{"timestamp":"2026-02-13T19:41:34.523Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:34.540Z","level":"debug","message":"Stock descontado","ingredienteId":1,"cantidad":0.2}
+{"timestamp":"2026-02-13T19:41:34.540Z","level":"debug","message":"Stock descontado","ingredienteId":2,"cantidad":0.1}
+{"timestamp":"2026-02-13T19:41:34.545Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":1,"cantidad":0.2,"ventaId":17}
+{"timestamp":"2026-02-13T19:41:34.545Z","level":"info","message":"Stock restaurado por eliminación de venta","ingredienteId":2,"cantidad":0.1,"ventaId":17}
+{"timestamp":"2026-02-13T19:41:34.546Z","level":"info","message":"Venta eliminada con stock restaurado","id":"17"}
+{"timestamp":"2026-02-13T19:41:34.649Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-13T19:41:52.154Z","level":"info","message":"Token añadido a blacklist","blacklistSize":5}
+{"timestamp":"2026-02-13T19:41:52.156Z","level":"info","message":"Logout exitoso"}

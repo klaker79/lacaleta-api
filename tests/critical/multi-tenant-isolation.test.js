@@ -30,7 +30,7 @@ describe('Multi-Tenant Isolation — Data cannot leak across restaurants', () =>
             .get('/api/ingredients')
             .set('Origin', 'http://localhost:3001')
             .set('Authorization', `Bearer ${authToken}`);
-        myIngredients = ingRes.body || [];
+        myIngredients = Array.isArray(ingRes.body) ? ingRes.body : [];
 
         const ordersRes = await request(API_URL)
             .get('/api/orders')
