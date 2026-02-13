@@ -24,19 +24,16 @@ class SupplierRepository {
 
     /**
      * Busca todos los proveedores activos
-     * ⚡ FIX: Usa ingredientes_proveedores como fuente de verdad para la lista de ingredientes
+     * ⚡ PERF: LEFT JOIN + GROUP BY en vez de subconsulta correlacionada
      */
     async findActive(restaurantId) {
         const query = `
             SELECT p.*, 
-                   COALESCE(
-                       (SELECT array_agg(ip.ingrediente_id) 
-                        FROM ingredientes_proveedores ip 
-                        WHERE ip.proveedor_id = p.id), 
-                       ARRAY[]::int[]
-                   ) as ingredientes_reales
+                   COALESCE(array_agg(ip.ingrediente_id) FILTER (WHERE ip.ingrediente_id IS NOT NULL), ARRAY[]::int[]) as ingredientes_reales
             FROM proveedores p
+            LEFT JOIN ingredientes_proveedores ip ON ip.proveedor_id = p.id
             WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL
+            GROUP BY p.id
             ORDER BY p.nombre
         `;
         const result = await this.pool.query(query, [restaurantId]);
