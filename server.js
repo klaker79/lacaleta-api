@@ -5329,6 +5329,69 @@ app.use((req, res) => {
 
 
 
+// ========== BACKUP ENDPOINT ==========
+app.get('/api/backup', authMiddleware, requireAdmin, async (req, res) => {
+    try {
+        const restauranteId = req.restauranteId;
+        log('info', 'Backup solicitado', { restauranteId, usuario: req.user?.email });
+
+        // Tablas a exportar (solo datos del restaurante autenticado)
+        const tables = [
+            { name: 'ingredientes', query: 'SELECT * FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL' },
+            { name: 'recetas', query: 'SELECT * FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL' },
+            { name: 'recetas_variantes', query: 'SELECT rv.* FROM recetas_variantes rv JOIN recetas r ON rv.receta_id = r.id WHERE r.restaurante_id = $1 AND r.deleted_at IS NULL' },
+            { name: 'proveedores', query: 'SELECT * FROM proveedores WHERE restaurante_id = $1' },
+            { name: 'ingredientes_proveedores', query: 'SELECT ip.* FROM ingredientes_proveedores ip JOIN ingredientes i ON ip.ingrediente_id = i.id WHERE i.restaurante_id = $1' },
+            { name: 'pedidos', query: 'SELECT * FROM pedidos WHERE restaurante_id = $1 AND deleted_at IS NULL ORDER BY fecha DESC LIMIT 500' },
+            { name: 'ventas', query: 'SELECT * FROM ventas WHERE restaurante_id = $1 AND deleted_at IS NULL ORDER BY fecha DESC LIMIT 1000' },
+            { name: 'inventario', query: 'SELECT * FROM inventario WHERE restaurante_id = $1 ORDER BY fecha DESC LIMIT 500' },
+            { name: 'empleados', query: 'SELECT id, nombre, puesto, salario_hora, activo, restaurante_id FROM empleados WHERE restaurante_id = $1' },
+            { name: 'horarios', query: 'SELECT * FROM horarios WHERE restaurante_id = $1 ORDER BY fecha DESC LIMIT 200' },
+            { name: 'gastos_fijos', query: 'SELECT * FROM gastos_fijos WHERE restaurante_id = $1' },
+            { name: 'mermas', query: 'SELECT * FROM mermas WHERE restaurante_id = $1 AND deleted_at IS NULL ORDER BY fecha DESC LIMIT 500' },
+        ];
+
+        const backup = {
+            metadata: {
+                version: '1.0',
+                restauranteId,
+                fecha: new Date().toISOString(),
+                app: 'MindLoop CostOS',
+            },
+            data: {}
+        };
+
+        for (const table of tables) {
+            try {
+                const result = await pool.query(table.query, [restauranteId]);
+                backup.data[table.name] = result.rows;
+            } catch (tableErr) {
+                // Si una tabla no existe o falla, continuar con las demás
+                log('warn', `Backup: tabla ${table.name} falló`, { error: tableErr.message });
+                backup.data[table.name] = [];
+            }
+        }
+
+        // Conteo de registros
+        backup.metadata.registros = {};
+        for (const [tableName, rows] of Object.entries(backup.data)) {
+            backup.metadata.registros[tableName] = rows.length;
+        }
+        backup.metadata.totalRegistros = Object.values(backup.metadata.registros).reduce((a, b) => a + b, 0);
+
+        // Enviar como JSON descargable
+        const filename = `backup-costos-${restauranteId}-${new Date().toISOString().split('T')[0]}.json`;
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/json');
+        res.json(backup);
+
+        log('info', 'Backup completado', { restauranteId, registros: backup.metadata.totalRegistros });
+    } catch (err) {
+        log('error', 'Error generando backup', { error: err.message });
+        res.status(500).json({ error: 'Error generando backup' });
+    }
+});
+
 // ========== SENTRY ERROR HANDLER ==========
 // Debe ir ANTES del error handler custom para capturar errores no manejados
 Sentry.setupExpressErrorHandler(app);
