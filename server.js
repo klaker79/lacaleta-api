@@ -757,6 +757,11 @@ app.get('/api/health', async (req, res) => {
 const mountRoutes = require("./src/routes");
 mountRoutes(app, pool, { resend });
 
+// ========== 404 CATCH-ALL ==========
+app.use((req, res) => {
+    res.status(404).json({ error: 'Ruta no encontrada' });
+});
+
 // ========== SENTRY ERROR HANDLER ==========
 // Debe ir ANTES del error handler custom para capturar errores no manejados
 Sentry.setupExpressErrorHandler(app);
