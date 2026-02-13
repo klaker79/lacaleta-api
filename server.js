@@ -755,7 +755,12 @@ app.get('/api/health', async (req, res) => {
 
 // ========== MONTAR RUTAS (extraídas a src/routes/) ==========
 const mountRoutes = require("./src/routes");
-mountRoutes(app, pool, { resend });
+try {
+    mountRoutes(app, pool, { resend });
+} catch (err) {
+    console.error('[FATAL] Route mounting failed:', err.message);
+    console.error(err.stack);
+}
 
 // ========== 404 CATCH-ALL ==========
 app.use((req, res) => {
