@@ -9,6 +9,7 @@
  * does not prevent the rest from loading.
  */
 module.exports = function mountRoutes(app, pool, { resend }) {
+    const errors = [];
     const config = {
         resend,
         JWT_SECRET: process.env.JWT_SECRET,
@@ -23,6 +24,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
         } catch (err) {
             console.error(`[ROUTES] ❌ ${name} FAILED:`, err.message);
             console.error(err.stack);
+            errors.push({ module: name, error: err.message });
         }
     }
 
@@ -55,7 +57,9 @@ module.exports = function mountRoutes(app, pool, { resend }) {
         console.log('[ROUTES] ✅ suppliers mounted');
     } catch (err) {
         console.error('[ROUTES] ❌ suppliers FAILED:', err.message);
+        errors.push({ module: 'suppliers', error: err.message });
     }
 
     console.log('[ROUTES] Route mounting complete');
+    return errors;
 };

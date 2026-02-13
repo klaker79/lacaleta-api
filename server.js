@@ -755,12 +755,37 @@ app.get('/api/health', async (req, res) => {
 
 // ========== MONTAR RUTAS (extraídas a src/routes/) ==========
 const mountRoutes = require("./src/routes");
+let routeMountErrors = [];
 try {
-    mountRoutes(app, pool, { resend });
+    routeMountErrors = mountRoutes(app, pool, { resend }) || [];
 } catch (err) {
     console.error('[FATAL] Route mounting failed:', err.message);
     console.error(err.stack);
+    routeMountErrors.push({ module: 'FATAL', error: err.message });
 }
+
+// Debug endpoint — muestra qué rutas están montadas (temporal)
+app.get('/api/debug/routes', (req, res) => {
+    const routes = [];
+    app._router.stack.forEach(layer => {
+        if (layer.route) {
+            routes.push({ method: Object.keys(layer.route.methods).join(','), path: layer.route.path });
+        } else if (layer.name === 'router' && layer.handle.stack) {
+            layer.handle.stack.forEach(r => {
+                if (r.route) {
+                    const prefix = layer.regexp.toString().includes('api') ? '/api' : '';
+                    routes.push({ method: Object.keys(r.route.methods).join(','), path: prefix + r.route.path });
+                }
+            });
+        }
+    });
+    res.json({
+        totalRoutes: routes.length,
+        mountErrors: routeMountErrors,
+        hasVariantsRoute: routes.some(r => r.path.includes('recipes-variants')),
+        routes: routes.filter(r => r.path.includes('recipe'))
+    });
+});
 
 // ========== 404 CATCH-ALL ==========
 app.use((req, res) => {
