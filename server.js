@@ -3325,6 +3325,18 @@ app.post('/api/sales/bulk', authMiddleware, requireAdmin, async (req, res) => {
             const fecha = venta.fecha || new Date().toISOString();
             const fechaDate = fecha.split('T')[0]; // Solo la fecha sin hora
 
+            // ⚠️ Warning para ventas con total ≤ 0 (posible anulación TPV o precio faltante)
+            if (total <= 0) {
+                log('warn', 'Venta con total ≤ 0 detectada', {
+                    receta: receta.nombre || receta.id,
+                    cantidad,
+                    precioVenta,
+                    totalRecibido: venta.total,
+                    totalCalculado: total,
+                    fecha: fechaDate
+                });
+            }
+
             // Calcular coste de ingredientes para esta venta (aplicando factor de variante)
             let costeIngredientes = 0;
             const ingredientesReceta = receta.ingredientes || [];
