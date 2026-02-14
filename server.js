@@ -603,6 +603,14 @@ pool.on('error', (err) => {
             log('info', 'Migraciones soft delete completadas');
         } catch (e) { log('warn', 'Migración soft delete', { error: e.message }); }
 
+        // ========== MIGRACIÓN: stock_deductions para rastrear descuentos reales ==========
+        try {
+            await pool.query(`
+                ALTER TABLE ventas ADD COLUMN IF NOT EXISTS stock_deductions JSONB;
+            `);
+            log('info', 'Migración stock_deductions completada');
+        } catch (e) { log('warn', 'Migración stock_deductions', { error: e.message }); }
+
         // ========== MIGRACIÓN VARIANTES EN VENTAS ==========
         log('info', 'Ejecutando migración de variantes en ventas...');
         try {
