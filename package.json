@@ -8,7 +8,7 @@
     "start:modular": "node server.modular.js",
     "dev": "node server.js",
     "dev:modular": "node server.modular.js",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
     "test:critical": "jest tests/critical --runInBand --verbose",

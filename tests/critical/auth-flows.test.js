@@ -80,21 +80,26 @@ describe('Auth Flows — Registration validation and token management', () => {
     });
 
     it('5. POST /api/auth/logout → 200', async () => {
-        // Logout should always return 200 (stateless JWT)
+        // ⚠️ FIX RACE CONDITION: Create a SEPARATE token for the logout test.
+        // Using the shared cachedAuthToken would blacklist it server-side,
+        // causing 401 "Token revocado" errors in parallel test suites.
+        const loginRes = await request(API_URL)
+            .post('/api/auth/login')
+            .set('Origin', 'http://localhost:3001')
+            .set('Content-Type', 'application/json')
+            .send({
+                email: process.env.TEST_USER_EMAIL || 'test@test.com',
+                password: process.env.TEST_USER_PASSWORD || 'test123'
+            });
+
+        const logoutToken = loginRes.body.token || 'fake';
+
         const res = await request(API_URL)
             .post('/api/auth/logout')
             .set('Origin', 'http://localhost:3001')
-            .set('Authorization', `Bearer ${authToken || 'fake'}`);
+            .set('Authorization', `Bearer ${logoutToken}`);
 
         expect(res.status).toBe(200);
-        console.log(`✅ Logout → ${res.status}`);
-    });
-
-    // ⚠️ CRITICAL: Clear cached token after logout test.
-    // The logout endpoint blacklists the token server-side.
-    // If we don't clear it, all subsequent test suites will reuse
-    // the blacklisted token and get 401 "Token revocado" errors.
-    afterAll(() => {
-        global.cachedAuthToken = null;
+        console.log(`✅ Logout → ${res.status} (used separate token, shared token preserved)`);
     });
 });
