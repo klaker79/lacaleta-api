@@ -21,13 +21,18 @@ class AnalyticsService extends BaseService {
      * Balance mensual completo
      */
     async getMonthlyBalance(mes, ano, restauranteId) {
+        const m = parseInt(mes), y = parseInt(ano);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const nm = m === 12 ? 1 : m + 1, ny = m === 12 ? y + 1 : y;
+        const endDate = `${ny}-${String(nm).padStart(2, '0')}-01`;
+
         // Ingresos
         const ingresos = await this.query(
             `SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as num_ventas
              FROM ventas
-             WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2
+             WHERE fecha >= $1 AND fecha < $2
                AND restaurante_id = $3 AND deleted_at IS NULL`,
-            [mes, ano, restauranteId]
+            [startDate, endDate, restauranteId]
         );
 
         // Precios de ingredientes
@@ -45,9 +50,9 @@ class AnalyticsService extends BaseService {
         const ventasDetalle = await this.query(
             `SELECT v.cantidad, r.ingredientes
              FROM ventas v JOIN recetas r ON v.receta_id = r.id
-             WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
+             WHERE v.fecha >= $1 AND v.fecha < $2
                AND v.restaurante_id = $3 AND v.deleted_at IS NULL`,
-            [mes, ano, restauranteId]
+            [startDate, endDate, restauranteId]
         );
 
         let costos = 0;
