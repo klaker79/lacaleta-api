@@ -5476,3 +5476,39 @@
 {"timestamp":"2026-02-14T19:12:40.409Z","level":"info","message":"Compras pendientes recibidas","batchId":"c5fa7387-621a-443e-88e2-1e64a0d916ef","items":2}
 {"timestamp":"2026-02-14T19:12:40.430Z","level":"info","message":"Compra pendiente aprobada","id":"41","ingredienteId":255}
 {"timestamp":"2026-02-14T19:12:40.458Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"255","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-14T19:18:21.876Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:18:21.905Z","level":"info","message":"Compras pendientes recibidas","batchId":"4e949a37-7b4e-4d1e-9631-321e1a7768a0","items":2}
+{"timestamp":"2026-02-14T19:18:21.946Z","level":"info","message":"Compra pendiente aprobada","id":"43","ingredienteId":255}
+{"timestamp":"2026-02-14T19:18:21.974Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"255","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-14T19:18:22.089Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:08.835Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:08.857Z","level":"info","message":"Compras pendientes recibidas","batchId":"55f9d3e3-c965-4ad7-b36c-871b8049ac07","items":2}
+{"timestamp":"2026-02-14T19:20:08.871Z","level":"info","message":"Compra pendiente aprobada","id":"45","ingredienteId":255}
+{"timestamp":"2026-02-14T19:20:08.886Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"255","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-14T19:20:08.987Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:48.740Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:48.758Z","level":"info","message":"Compras pendientes recibidas","batchId":"a0abc60a-f00c-4ff4-a84b-e0ee5ce2c5b7","items":2}
+{"timestamp":"2026-02-14T19:20:48.770Z","level":"info","message":"Compra pendiente aprobada","id":"47","ingredienteId":255}
+{"timestamp":"2026-02-14T19:20:48.786Z","level":"info","message":"Actualizando ingrediente con preservación de datos","id":"255","cambios":["stock_actual"],"cantidadPorFormato":{"antes":"1.00","despues":"1.00"}}
+{"timestamp":"2026-02-14T19:20:48.901Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.025Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.106Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.108Z","level":"info","message":"Token añadido a blacklist","blacklistSize":13}
+{"timestamp":"2026-02-14T19:20:49.109Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-14T19:20:49.208Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.323Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.429Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.537Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.644Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.757Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:49.870Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-14T19:20:50.846Z","level":"warn","message":"CORS: Request sin origin bloqueado","path":"/api/auth/login","ip":"127.0.0.1","method":"POST"}
+{"timestamp":"2026-02-14T19:21:13.300Z","level":"info","message":"Token añadido a blacklist","blacklistSize":14}
+{"timestamp":"2026-02-14T19:21:13.301Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-14T19:21:13.991Z","level":"warn","message":"CORS: Request sin origin bloqueado","path":"/api/auth/login","ip":"127.0.0.1","method":"POST"}
+{"timestamp":"2026-02-14T19:21:43.126Z","level":"info","message":"Token añadido a blacklist","blacklistSize":14}
+{"timestamp":"2026-02-14T19:21:43.127Z","level":"info","message":"Logout exitoso"}
+{"timestamp":"2026-02-14T19:21:43.239Z","level":"warn","message":"CORS: Request sin origin bloqueado","path":"/api/auth/login","ip":"127.0.0.1","method":"POST"}
+{"timestamp":"2026-02-14T19:21:59.084Z","level":"warn","message":"CORS: Request sin origin bloqueado","path":"/api/auth/login","ip":"127.0.0.1","method":"POST"}
+{"timestamp":"2026-02-14T19:21:59.274Z","level":"info","message":"Token añadido a blacklist","blacklistSize":14}
+{"timestamp":"2026-02-14T19:21:59.274Z","level":"info","message":"Logout exitoso"}
