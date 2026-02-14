@@ -20,6 +20,30 @@ class Sale {
         this.deletedAt = data.deleted_at || data.deletedAt;
     }
 
+    /**
+     * Validates the sale data. Returns array of error messages (empty = valid)
+     */
+    validate() {
+        const errors = [];
+
+        if (!this.recipeId) {
+            errors.push('receta_id es obligatorio');
+        }
+
+        if (this.quantity <= 0) {
+            errors.push('cantidad debe ser mayor que 0');
+        }
+
+        if (this.unitPrice < 0) {
+            errors.push('precio_unitario no puede ser negativo');
+        }
+
+        if (this.quantity > 0 && this.total <= 0) {
+            errors.push('total debe ser positivo cuando cantidad > 0');
+        }
+
+        return errors;
+    }
 
     /**
      * Verifica si la venta está activa (no eliminada)

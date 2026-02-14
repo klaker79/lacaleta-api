@@ -4,6 +4,7 @@
  */
 
 const SaleRepository = require('../../../infrastructure/repositories/SaleRepository');
+const Sale = require('../../../domain/entities/Sale');
 const pool = require('../../../infrastructure/database/connection');
 
 class SaleController {
@@ -91,13 +92,23 @@ class SaleController {
     static async create(req, res, next) {
         try {
             const restaurantId = req.restauranteId || req.user?.restaurante_id;
-            const repo = new SaleRepository(pool);
 
-            const sale = await repo.create(req.body, restaurantId);
+            // Validate input before persisting
+            const sale = new Sale({ ...req.body, restaurante_id: restaurantId });
+            const errors = sale.validate();
+            if (errors.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'VALIDATION_ERROR', message: errors.join(', ') }
+                });
+            }
+
+            const repo = new SaleRepository(pool);
+            const created = await repo.create(req.body, restaurantId);
 
             res.status(201).json({
                 success: true,
-                data: sale.toDTO()
+                data: created.toDTO()
             });
         } catch (error) {
             next(error);
@@ -112,7 +123,6 @@ class SaleController {
         try {
             const { sales: salesData } = req.body;
             const restaurantId = req.restauranteId || req.user?.restaurante_id;
-            const repo = new SaleRepository(pool);
 
             if (!salesData || !Array.isArray(salesData)) {
                 return res.status(400).json({
@@ -121,6 +131,28 @@ class SaleController {
                 });
             }
 
+            // Validate each sale before persisting
+            const validationErrors = [];
+            salesData.forEach((s, i) => {
+                const sale = new Sale({ ...s, restaurante_id: restaurantId });
+                const errors = sale.validate();
+                if (errors.length > 0) {
+                    validationErrors.push(`Venta ${i + 1}: ${errors.join(', ')}`);
+                }
+            });
+
+            if (validationErrors.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: `${validationErrors.length} ventas con errores`,
+                        details: validationErrors
+                    }
+                });
+            }
+
+            const repo = new SaleRepository(pool);
             const sales = await repo.createBulk(salesData, restaurantId);
 
             res.status(201).json({
