@@ -69,6 +69,11 @@ module.exports = function (pool) {
             const recetaId = recetaIdCamel || receta_id;
             const varianteId = varianteIdCamel || variante_id;
 
+            // 🔒 Validar recetaId requerido
+            if (!recetaId) {
+                return res.status(400).json({ error: 'recetaId es requerido' });
+            }
+
             // Validar cantidad
             const cantidadValidada = validateCantidad(cantidad);
             if (cantidadValidada === 0) {
