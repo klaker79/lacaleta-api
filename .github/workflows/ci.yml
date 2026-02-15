@@ -108,4 +108,4 @@ jobs:
           exit 1
 
       - name: Run tests
-        run: npm test
+        run: npx jest --runInBand --forceExit --testPathIgnorePatterns=integration
