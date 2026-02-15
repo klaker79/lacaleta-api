@@ -748,7 +748,7 @@ module.exports = function (pool) {
             const mesActual = parseInt(mes) || new Date().getMonth() + 1;
             const anoActual = parseInt(ano) || new Date().getFullYear();
 
-            // Obtener días del mes con compras
+            // Obtener días del mes con compras (incluye proveedor)
             const comprasDiarias = await pool.query(`
             SELECT 
                 p.fecha,
@@ -756,9 +756,12 @@ module.exports = function (pool) {
                 i.nombre as ingrediente,
                 p.precio_unitario,
                 p.cantidad_comprada,
-                p.total_compra
+                p.total_compra,
+                pr.nombre as proveedor_nombre,
+                p.proveedor_id
             FROM precios_compra_diarios p
             JOIN ingredientes i ON p.ingrediente_id = i.id
+            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
             WHERE p.restaurante_id = $1
               AND p.fecha >= $2 AND p.fecha < $3
             ORDER BY p.fecha, i.nombre
@@ -838,6 +841,23 @@ module.exports = function (pool) {
                 ingredientesData[row.ingrediente].totalCantidad += parseFloat(row.cantidad_comprada);
             });
 
+            // Agrupar compras por proveedor
+            const proveedoresData = {};
+            comprasDiarias.rows.forEach(row => {
+                const fechaStr = row.fecha.toISOString().split('T')[0];
+                const provNombre = row.proveedor_nombre || 'Sin proveedor';
+
+                if (!proveedoresData[provNombre]) {
+                    proveedoresData[provNombre] = { id: row.proveedor_id, dias: {}, total: 0 };
+                }
+
+                if (!proveedoresData[provNombre].dias[fechaStr]) {
+                    proveedoresData[provNombre].dias[fechaStr] = 0;
+                }
+                proveedoresData[provNombre].dias[fechaStr] += parseFloat(row.total_compra);
+                proveedoresData[provNombre].total += parseFloat(row.total_compra);
+            });
+
             // Procesar ventas CON CÁLCULO DE COSTES
             ventasDiarias.rows.forEach(row => {
                 const fechaStr = row.fecha.toISOString().split('T')[0];
@@ -883,6 +903,7 @@ module.exports = function (pool) {
                 dias,
                 compras: {
                     ingredientes: ingredientesData,
+                    porProveedor: proveedoresData,
                     total: totalesCompras
                 },
                 ventas: {
