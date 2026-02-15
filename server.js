@@ -296,8 +296,8 @@ try {
     routeMountErrors.push({ module: 'FATAL', error: err.message });
 }
 
-// Debug endpoint — muestra qué rutas están montadas (temporal)
-app.get('/api/debug/routes', (req, res) => {
+// Debug endpoint — muestra qué rutas están montadas (solo admin)
+app.get('/api/debug/routes', authMiddleware, requireAdmin, (req, res) => {
     const routes = [];
     app._router.stack.forEach(layer => {
         if (layer.route) {
