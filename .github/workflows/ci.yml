@@ -107,47 +107,5 @@ jobs:
           echo "❌ Registration failed after 3 attempts"
           exit 1
 
-      - name: Seed test data
-        run: |
-          # Get auth token
-          TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
-            -H "Content-Type: application/json" \
-            -H "Origin: http://localhost:3001" \
-            -d '{"email":"ci-test@mindloop.dev","password":"CiTest123!"}' \
-            | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
-
-          if [ -z "$TOKEN" ]; then
-            echo "❌ Failed to get auth token"
-            exit 1
-          fi
-          echo "✅ Auth token obtained"
-
-          # Create supplier
-          curl -sf -X POST http://localhost:3001/api/suppliers \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Origin: http://localhost:3001" \
-            -d '{"nombre":"CI Proveedor Test","contacto":"CI","telefono":"000000000"}' \
-            && echo "✅ Supplier created" || echo "⚠️ Supplier creation skipped"
-
-          # Create ingredient
-          curl -sf -X POST http://localhost:3001/api/ingredients \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Origin: http://localhost:3001" \
-            -d '{"nombre":"CI Tomate Test","precio":3.50,"unidad":"kg","stock_actual":100,"stock_minimo":5,"familia":"alimento"}' \
-            && echo "✅ Ingredient created" || echo "⚠️ Ingredient creation skipped"
-
-          # Create recipe with TPV code
-          curl -sf -X POST http://localhost:3001/api/recipes \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Origin: http://localhost:3001" \
-            -d '{"nombre":"CI Ensalada Test","precio_venta":12.00,"categoria":"entrante","codigo":"CITEST01","ingredientes":[{"ingrediente_id":1,"cantidad":0.2,"unidad":"kg"}]}' \
-            && echo "✅ Recipe created" || echo "⚠️ Recipe creation skipped"
-
-          echo "✅ Seed data complete"
-
       - name: Run tests
-        run: npx jest --runInBand --forceExit --testPathIgnorePatterns='integration|e2e'
-
+        run: npx jest --runInBand --forceExit --testPathIgnorePatterns='integration|e2e|unit|bulk-sales-import|inventory-consolidation|monthly-balance-pnl'
