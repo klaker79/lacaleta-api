@@ -5956,3 +5956,4 @@
 {"timestamp":"2026-02-14T23:05:41.913Z","level":"info","message":"Empleado creado","nombre":"_TEST_EMPLEADO_1771110341909"}
 {"timestamp":"2026-02-14T23:05:42.044Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
 {"timestamp":"2026-02-14T23:05:42.217Z","level":"info","message":"Login exitoso","userId":1,"email":"test@test.com"}
+{"timestamp":"2026-02-15T14:14:16.503Z","level":"warn","message":"CORS: Request sin origin bloqueado","path":"/api/auth/login","ip":"127.0.0.1","method":"GET"}
