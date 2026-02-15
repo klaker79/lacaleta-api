@@ -748,7 +748,7 @@ module.exports = function (pool) {
             const mesActual = parseInt(mes) || new Date().getMonth() + 1;
             const anoActual = parseInt(ano) || new Date().getFullYear();
 
-            // Obtener días del mes con compras (incluye proveedor)
+            // Obtener días del mes con compras (incluye proveedor con fallback a proveedor principal del ingrediente)
             const comprasDiarias = await pool.query(`
             SELECT 
                 p.fecha,
@@ -757,11 +757,13 @@ module.exports = function (pool) {
                 p.precio_unitario,
                 p.cantidad_comprada,
                 p.total_compra,
-                pr.nombre as proveedor_nombre,
-                p.proveedor_id
+                COALESCE(pr.nombre, pr_fallback.nombre) as proveedor_nombre,
+                COALESCE(p.proveedor_id, ip.proveedor_id) as proveedor_id
             FROM precios_compra_diarios p
             JOIN ingredientes i ON p.ingrediente_id = i.id
             LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+            LEFT JOIN ingredientes_proveedores ip ON ip.ingrediente_id = p.ingrediente_id AND ip.es_proveedor_principal = true
+            LEFT JOIN proveedores pr_fallback ON ip.proveedor_id = pr_fallback.id AND p.proveedor_id IS NULL
             WHERE p.restaurante_id = $1
               AND p.fecha >= $2 AND p.fecha < $3
             ORDER BY p.fecha, i.nombre
