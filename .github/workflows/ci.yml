@@ -63,12 +63,12 @@ jobs:
       - name: Start server (background)
         run: node server.js &
 
-      - name: Wait for server to be ready
+      - name: Wait for server and DB to be ready
         run: |
           echo "Waiting for server to start..."
           for i in $(seq 1 30); do
             if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
-              echo "✅ Server is ready"
+              echo "✅ Server is responding"
               break
             fi
             if [ $i -eq 30 ]; then
@@ -77,25 +77,35 @@ jobs:
             fi
             sleep 1
           done
+          echo "Waiting for DB tables..."
+          sleep 5
 
       - name: Register test user
         run: |
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST http://localhost:3001/api/auth/register \
-            -H "Content-Type: application/json" \
-            -H "Origin: http://localhost:3001" \
-            -d '{
-              "nombre": "CI Test User",
-              "email": "ci-test@mindloop.dev",
-              "password": "CiTest123!",
-              "codigoInvitacion": "CI_TEST_INVITE_2026"
-            }')
-          echo "Register response: $RESPONSE"
-          if [ "$RESPONSE" != "201" ] && [ "$RESPONSE" != "400" ]; then
-            echo "❌ Registration failed with status $RESPONSE"
-            exit 1
-          fi
-          echo "✅ Test user ready"
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt to register test user..."
+            BODY=$(curl -s -w "\n%{http_code}" \
+              -X POST http://localhost:3001/api/auth/register \
+              -H "Content-Type: application/json" \
+              -H "Origin: http://localhost:3001" \
+              -d '{
+                "nombre": "CI Test User",
+                "email": "ci-test@mindloop.dev",
+                "password": "CiTest123!",
+                "codigoInvitacion": "CI_TEST_INVITE_2026"
+              }')
+            HTTP_CODE=$(echo "$BODY" | tail -1)
+            RESPONSE=$(echo "$BODY" | sed '$d')
+            echo "Status: $HTTP_CODE | Body: $RESPONSE"
+            if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "400" ]; then
+              echo "✅ Test user ready"
+              exit 0
+            fi
+            echo "Retrying in 3s..."
+            sleep 3
+          done
+          echo "❌ Registration failed after 3 attempts"
+          exit 1
 
       - name: Run tests
         run: npm test
