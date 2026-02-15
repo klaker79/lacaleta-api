@@ -1,0 +1,101 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password_123
+          POSTGRES_DB: lacaleta_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Database
+      DATABASE_URL: postgresql://ci_user:ci_password_123@localhost:5432/lacaleta_ci
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: lacaleta_ci
+      DB_USER: ci_user
+      DB_PASSWORD: ci_password_123
+
+      # Auth
+      JWT_SECRET: ci-test-secret-key-minimum-32-characters-long!!
+      INVITATION_CODE: CI_TEST_INVITE_2026
+
+      # Server
+      PORT: 3001
+      NODE_ENV: test
+      API_URL: http://localhost:3001
+
+      # Test user (used by tests/setup.js)
+      TEST_USER_EMAIL: ci-test@mindloop.dev
+      TEST_USER_PASSWORD: CiTest123!
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start server (background)
+        run: node server.js &
+
+      - name: Wait for server to be ready
+        run: |
+          echo "Waiting for server to start..."
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+              echo "✅ Server is ready"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Server failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Register test user
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:3001/api/auth/register \
+            -H "Content-Type: application/json" \
+            -H "Origin: http://localhost:3001" \
+            -d '{
+              "nombre": "CI Test User",
+              "email": "ci-test@mindloop.dev",
+              "password": "CiTest123!",
+              "codigoInvitacion": "CI_TEST_INVITE_2026"
+            }')
+          echo "Register response: $RESPONSE"
+          if [ "$RESPONSE" != "201" ] && [ "$RESPONSE" != "400" ]; then
+            echo "❌ Registration failed with status $RESPONSE"
+            exit 1
+          fi
+          echo "✅ Test user ready"
+
+      - name: Run tests
+        run: npm test
