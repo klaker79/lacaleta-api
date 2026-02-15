@@ -396,6 +396,37 @@ async function initializeDatabase(pool) {
     log('info', 'Performance indexes (soft delete) creados');
   } catch (e) { log('warn', 'Migración performance indexes', { error: e.message }); }
 
+  // ========== COMPOSITE & MISSING INDEXES (Mes 2 optimization) ==========
+  try {
+    await pool.query(`
+            -- Menu engineering: ventas por restaurante+receta+fecha
+            CREATE INDEX IF NOT EXISTS idx_ventas_restaurante_receta_fecha
+              ON ventas (restaurante_id, receta_id, fecha) WHERE deleted_at IS NULL;
+            -- Proveedores: lookup por proveedor_id
+            CREATE INDEX IF NOT EXISTS idx_ingredientes_proveedores_proveedor
+              ON ingredientes_proveedores (proveedor_id);
+            -- Compras pendientes: cola de revisión
+            CREATE INDEX IF NOT EXISTS idx_compras_pendientes_cola
+              ON compras_pendientes (restaurante_id, created_at) WHERE estado = 'pendiente';
+            -- Ventas diarias resumen: P&L mensual
+            CREATE INDEX IF NOT EXISTS idx_ventas_diarias_resumen_rest_fecha
+              ON ventas_diarias_resumen (restaurante_id, fecha);
+            -- Gastos fijos: listado activos
+            CREATE INDEX IF NOT EXISTS idx_gastos_fijos_activos
+              ON gastos_fijos (restaurante_id) WHERE activo = true;
+            -- API tokens: lookup por restaurante
+            CREATE INDEX IF NOT EXISTS idx_api_tokens_restaurante
+              ON api_tokens (restaurante_id);
+            -- Precios compra: rollback por pedido_id (usado en DELETE orden)
+            CREATE INDEX IF NOT EXISTS idx_precios_compra_pedido
+              ON precios_compra_diarios (pedido_id) WHERE pedido_id IS NOT NULL;
+            -- Alias ingredientes: match rápido
+            CREATE INDEX IF NOT EXISTS idx_ingredientes_alias_rest
+              ON ingredientes_alias (restaurante_id, alias);
+        `);
+    log('info', 'Composite & missing indexes (Mes 2) creados');
+  } catch (e) { log('warn', 'Migración composite indexes', { error: e.message }); }
+
   // ========== MIGRACIÓN: stock_deductions para rastrear descuentos reales ==========
   try {
     await pool.query(`
