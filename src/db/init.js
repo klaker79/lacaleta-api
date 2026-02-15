@@ -14,8 +14,8 @@ const { log } = require('../utils/logger');
  * @param {Pool} pool - PostgreSQL connection pool
  */
 async function initializeDatabase(pool) {
-    // ========== CREAR TABLAS ==========
-    await pool.query(`
+  // ========== CREAR TABLAS ==========
+  await pool.query(`
       CREATE TABLE IF NOT EXISTS restaurantes (
         id SERIAL PRIMARY KEY,
         nombre VARCHAR(255) NOT NULL,
@@ -47,9 +47,9 @@ async function initializeDatabase(pool) {
       );
     `);
 
-    // MIGRACIÓN: Añadir columna familia si no existe
-    try {
-        await pool.query(`
+  // MIGRACIÓN: Añadir columna familia si no existe
+  try {
+    await pool.query(`
         DO $$ 
         BEGIN 
           IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ingredientes' AND column_name = 'familia') THEN 
@@ -57,13 +57,13 @@ async function initializeDatabase(pool) {
           END IF; 
         END $$;
     `);
-    } catch (e) {
-        log('warn', 'Error en migración de columna familia', { error: e.message });
-    }
+  } catch (e) {
+    log('warn', 'Error en migración de columna familia', { error: e.message });
+  }
 
-    // MIGRACIÓN: Añadir columna activo si no existe (para toggle activar/desactivar)
-    try {
-        await pool.query(`
+  // MIGRACIÓN: Añadir columna activo si no existe (para toggle activar/desactivar)
+  try {
+    await pool.query(`
         DO $$ 
         BEGIN 
           IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'ingredientes' AND column_name = 'activo') THEN 
@@ -71,12 +71,12 @@ async function initializeDatabase(pool) {
           END IF; 
         END $$;
     `);
-        log('info', 'Migración: columna activo verificada');
-    } catch (e) {
-        log('warn', 'Error en migración de columna activo', { error: e.message });
-    }
+    log('info', 'Migración: columna activo verificada');
+  } catch (e) {
+    log('warn', 'Error en migración de columna activo', { error: e.message });
+  }
 
-    await pool.query(`
+  await pool.query(`
       CREATE TABLE IF NOT EXISTS recetas (
         id SERIAL PRIMARY KEY,
         nombre VARCHAR(255) NOT NULL,
@@ -302,30 +302,25 @@ async function initializeDatabase(pool) {
       CREATE INDEX IF NOT EXISTS idx_compras_pendientes_estado ON compras_pendientes(estado, restaurante_id);
       CREATE INDEX IF NOT EXISTS idx_compras_pendientes_batch ON compras_pendientes(batch_id);
 
-      -- Performance indexes (added from analysis report)
+      -- Performance indexes (non-dependent on deleted_at)
       CREATE INDEX IF NOT EXISTS idx_mermas_rest_fecha ON mermas(restaurante_id, fecha);
-      CREATE INDEX IF NOT EXISTS idx_mermas_deleted ON mermas(deleted_at) WHERE deleted_at IS NULL;
-      CREATE INDEX IF NOT EXISTS idx_ingredientes_rest_active ON ingredientes(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
-      CREATE INDEX IF NOT EXISTS idx_ventas_rest_fecha ON ventas(restaurante_id, fecha) WHERE deleted_at IS NULL;
-      CREATE INDEX IF NOT EXISTS idx_pedidos_rest_deleted ON pedidos(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
-      CREATE INDEX IF NOT EXISTS idx_recetas_rest_deleted ON recetas(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_precios_compra_rest_fecha ON precios_compra_diarios(restaurante_id, fecha);
     `);
 
-    // ========== MIGRACIONES DE COLUMNAS ESTÁNDAR ==========
-    log('info', 'Ejecutando migraciones de columnas estándar...');
+  // ========== MIGRACIONES DE COLUMNAS ESTÁNDAR ==========
+  log('info', 'Ejecutando migraciones de columnas estándar...');
 
-    // Añadir columna 'codigo' a ingredientes
-    try {
-        await pool.query(`
+  // Añadir columna 'codigo' a ingredientes
+  try {
+    await pool.query(`
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
         `);
-    } catch (e) { log('warn', 'Migración ingredientes.codigo', { error: e.message }); }
+  } catch (e) { log('warn', 'Migración ingredientes.codigo', { error: e.message }); }
 
-    // ⚡ FIX: Columnas faltantes detectadas en auditoría
-    try {
-        await pool.query(`
+  // ⚡ FIX: Columnas faltantes detectadas en auditoría
+  try {
+    await pool.query(`
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento NUMERIC(5,2) DEFAULT 100;
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(10,3);
@@ -335,84 +330,96 @@ async function initializeDatabase(pool) {
             
             ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
         `);
-        log('info', 'Migración columnas auditoría completada');
-    } catch (e) { log('warn', 'Migración columnas auditoría', { error: e.message }); }
+    log('info', 'Migración columnas auditoría completada');
+  } catch (e) { log('warn', 'Migración columnas auditoría', { error: e.message }); }
 
-    // Añadir columna 'codigo' a recetas
-    try {
-        await pool.query(`
+  // Añadir columna 'codigo' a recetas
+  try {
+    await pool.query(`
             ALTER TABLE recetas ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
             ALTER TABLE recetas ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
         `);
-    } catch (e) { log('warn', 'Migración recetas.codigo', { error: e.message }); }
+  } catch (e) { log('warn', 'Migración recetas.codigo', { error: e.message }); }
 
-    // Añadir columnas a proveedores
-    try {
-        await pool.query(`
+  // Añadir columnas a proveedores
+  try {
+    await pool.query(`
             ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
             ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS cif VARCHAR(20);
             ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
         `);
-    } catch (e) { log('warn', 'Migración proveedores.codigo', { error: e.message }); }
+  } catch (e) { log('warn', 'Migración proveedores.codigo', { error: e.message }); }
 
-    // Añadir columnas para verificación de email
-    try {
-        await pool.query(`
+  // Añadir columnas para verificación de email
+  try {
+    await pool.query(`
             ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
             ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS verification_token VARCHAR(64);
             ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP;
         `);
-        // Marcar usuarios existentes como verificados (para tu cuenta)
-        await pool.query(`UPDATE usuarios SET email_verified = TRUE WHERE email_verified IS NULL`);
-        log('info', 'Migración email_verified completada');
-    } catch (e) { log('warn', 'Migración usuarios.email_verified', { error: e.message }); }
+    // Marcar usuarios existentes como verificados (para tu cuenta)
+    await pool.query(`UPDATE usuarios SET email_verified = TRUE WHERE email_verified IS NULL`);
+    log('info', 'Migración email_verified completada');
+  } catch (e) { log('warn', 'Migración usuarios.email_verified', { error: e.message }); }
 
-    // Añadir columnas para reset de contraseña
-    try {
-        await pool.query(`
+  // Añadir columnas para reset de contraseña
+  try {
+    await pool.query(`
             ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token VARCHAR(64);
             ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_expires TIMESTAMP;
         `);
-        log('info', 'Migración reset_token completada');
-    } catch (e) { log('warn', 'Migración usuarios.reset_token', { error: e.message }); }
+    log('info', 'Migración reset_token completada');
+  } catch (e) { log('warn', 'Migración usuarios.reset_token', { error: e.message }); }
 
-    // ========== MIGRACIONES SOFT DELETE ==========
-    log('info', 'Ejecutando migraciones de soft delete...');
-    try {
-        await pool.query(`
+  // ========== MIGRACIONES SOFT DELETE ==========
+  log('info', 'Ejecutando migraciones de soft delete...');
+  try {
+    await pool.query(`
             ALTER TABLE ventas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
             ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
             ALTER TABLE recetas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
             ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
         `);
-        log('info', 'Migraciones soft delete completadas');
-    } catch (e) { log('warn', 'Migración soft delete', { error: e.message }); }
+    log('info', 'Migraciones soft delete completadas');
+  } catch (e) { log('warn', 'Migración soft delete', { error: e.message }); }
 
-    // ========== MIGRACIÓN: stock_deductions para rastrear descuentos reales ==========
-    try {
-        await pool.query(`
+  // ========== PERFORMANCE INDEXES (depend on deleted_at columns above) ==========
+  try {
+    await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_mermas_deleted ON mermas(deleted_at) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_ingredientes_rest_active ON ingredientes(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_ventas_rest_fecha ON ventas(restaurante_id, fecha) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_pedidos_rest_deleted ON pedidos(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_recetas_rest_deleted ON recetas(restaurante_id, deleted_at) WHERE deleted_at IS NULL;
+        `);
+    log('info', 'Performance indexes (soft delete) creados');
+  } catch (e) { log('warn', 'Migración performance indexes', { error: e.message }); }
+
+  // ========== MIGRACIÓN: stock_deductions para rastrear descuentos reales ==========
+  try {
+    await pool.query(`
             ALTER TABLE ventas ADD COLUMN IF NOT EXISTS stock_deductions JSONB;
         `);
-        log('info', 'Migración stock_deductions completada');
-    } catch (e) { log('warn', 'Migración stock_deductions', { error: e.message }); }
+    log('info', 'Migración stock_deductions completada');
+  } catch (e) { log('warn', 'Migración stock_deductions', { error: e.message }); }
 
-    // ========== MIGRACIÓN VARIANTES EN VENTAS ==========
-    log('info', 'Ejecutando migración de variantes en ventas...');
-    try {
-        await pool.query(`
+  // ========== MIGRACIÓN VARIANTES EN VENTAS ==========
+  log('info', 'Ejecutando migración de variantes en ventas...');
+  try {
+    await pool.query(`
             ALTER TABLE ventas_diarias_resumen ADD COLUMN IF NOT EXISTS variante_id INTEGER REFERENCES recetas_variantes(id) ON DELETE SET NULL;
             ALTER TABLE ventas_diarias_resumen ADD COLUMN IF NOT EXISTS factor_aplicado DECIMAL(5, 3) DEFAULT 1;
         `);
-        log('info', 'Migración variantes en ventas completada');
-    } catch (e) { log('warn', 'Migración variante_id', { error: e.message }); }
+    log('info', 'Migración variantes en ventas completada');
+  } catch (e) { log('warn', 'Migración variante_id', { error: e.message }); }
 
-    // ========== MIGRACIÓN: Tablas faltantes ==========
-    log('info', 'Verificando tablas faltantes...');
+  // ========== MIGRACIÓN: Tablas faltantes ==========
+  log('info', 'Verificando tablas faltantes...');
 
-    // Tabla ingredientes_alias (requerida por match y delete de ingredientes)
-    try {
-        await pool.query(`
+  // Tabla ingredientes_alias (requerida por match y delete de ingredientes)
+  try {
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS ingredientes_alias (
                 id SERIAL PRIMARY KEY,
                 ingrediente_id INTEGER NOT NULL REFERENCES ingredientes(id) ON DELETE CASCADE,
@@ -422,12 +429,12 @@ async function initializeDatabase(pool) {
                 UNIQUE(alias, restaurante_id)
             );
         `);
-        log('info', 'Tabla ingredientes_alias verificada');
-    } catch (e) { log('warn', 'Migración ingredientes_alias', { error: e.message }); }
+    log('info', 'Tabla ingredientes_alias verificada');
+  } catch (e) { log('warn', 'Migración ingredientes_alias', { error: e.message }); }
 
-    // Tabla gastos_fijos (requerida por expense routes)
-    try {
-        await pool.query(`
+  // Tabla gastos_fijos (requerida por expense routes)
+  try {
+    await pool.query(`
             CREATE TABLE IF NOT EXISTS gastos_fijos (
                 id SERIAL PRIMARY KEY,
                 concepto VARCHAR(255) NOT NULL,
@@ -438,61 +445,61 @@ async function initializeDatabase(pool) {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        log('info', 'Tabla gastos_fijos verificada');
-    } catch (e) { log('warn', 'Migración gastos_fijos', { error: e.message }); }
+    log('info', 'Tabla gastos_fijos verificada');
+  } catch (e) { log('warn', 'Migración gastos_fijos', { error: e.message }); }
 
-    // Columnas faltantes en ingredientes
-    try {
-        await pool.query(`
+  // Columnas faltantes en ingredientes
+  try {
+    await pool.query(`
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato DECIMAL(10, 3);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento INTEGER DEFAULT 100;
         `);
-        log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
-    } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
+    log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
+  } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
 
-    // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
-    // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
-    try {
-        await pool.query(`
+  // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
+  // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
+  try {
+    await pool.query(`
             ALTER TABLE precios_compra_diarios ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
         `);
-        // Migrar constraint: de UNIQUE(ingrediente_id, fecha, restaurante_id) 
-        // a UNIQUE INDEX que incluye pedido_id (COALESCE para NULLs)
-        await pool.query(`
+    // Migrar constraint: de UNIQUE(ingrediente_id, fecha, restaurante_id) 
+    // a UNIQUE INDEX que incluye pedido_id (COALESCE para NULLs)
+    await pool.query(`
             ALTER TABLE precios_compra_diarios 
                 DROP CONSTRAINT IF EXISTS precios_compra_diarios_ingrediente_id_fecha_restaurante_id_key;
         `);
-        await pool.query(`
+    await pool.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_pcd_ing_fecha_rest_pedido
                 ON precios_compra_diarios (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)));
         `);
-        log('info', 'Migración UNIQUE constraint precios_compra_diarios completada (ahora incluye pedido_id)');
-    } catch (e) { log('warn', 'Migración pedido_id / UNIQUE constraint', { error: e.message }); }
+    log('info', 'Migración UNIQUE constraint precios_compra_diarios completada (ahora incluye pedido_id)');
+  } catch (e) { log('warn', 'Migración pedido_id / UNIQUE constraint', { error: e.message }); }
 
-    // Columna periodo_id en mermas
-    try {
-        await pool.query(`
+  // Columna periodo_id en mermas
+  try {
+    await pool.query(`
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
         `);
-        log('info', 'Columna periodo_id en mermas verificada');
-    } catch (e) { log('warn', 'Migración periodo_id mermas', { error: e.message }); }
+    log('info', 'Columna periodo_id en mermas verificada');
+  } catch (e) { log('warn', 'Migración periodo_id mermas', { error: e.message }); }
 
-    // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
-    log('info', 'Limpiando tablas obsoletas...');
+  // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
+  log('info', 'Limpiando tablas obsoletas...');
 
-    try {
-        await pool.query(`
+  try {
+    await pool.query(`
             DROP TABLE IF EXISTS daily_records CASCADE;
             DROP TABLE IF EXISTS lanave_ventas_tpv CASCADE;
             DROP TABLE IF EXISTS producto_id_tpv CASCADE;
             DROP TABLE IF EXISTS snapshots_diarios CASCADE;
             DROP TABLE IF EXISTS inventory_counts CASCADE;
         `);
-        log('info', 'Tablas obsoletas eliminadas');
-    } catch (e) { log('warn', 'Error eliminando tablas obsoletas', { error: e.message }); }
+    log('info', 'Tablas obsoletas eliminadas');
+  } catch (e) { log('warn', 'Error eliminando tablas obsoletas', { error: e.message }); }
 
-    log('info', 'Tablas y migraciones completadas');
+  log('info', 'Tablas y migraciones completadas');
 }
 
 module.exports = { initializeDatabase };
