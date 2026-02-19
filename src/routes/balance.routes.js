@@ -284,6 +284,11 @@ module.exports = function (pool) {
                     if (year < 100) year += 2000;
                     fecha = `${year}-${pts[1]}-${pts[0]}`;
                 }
+                // ⚡ FIX: Handle DD-MM-YYYY format (e.g. "19-02-2026" -> "2026-02-19") from n8n
+                if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(fecha)) {
+                    const pts = fecha.split('-');
+                    fecha = `${pts[2]}-${pts[1]}-${pts[0]}`;
+                }
                 // Smart date correction: detect DD/MM vs MM/DD swap
                 try {
                     const pd = new Date(fecha + 'T00:00:00');
