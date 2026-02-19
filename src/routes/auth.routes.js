@@ -9,6 +9,11 @@ const crypto = require('crypto');
 const { authMiddleware, requireAdmin, tokenBlacklist } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
+const { sanitizeString } = require('../utils/validators');
+
+// URLs parametrizadas (env vars con fallback para backwards-compat)
+const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
+const API_URL = process.env.API_URL || 'https://lacaleta-api.mindloop.cloud';
 
 // Helper: Escape HTML to prevent XSS
 function escapeHtml(str) {
@@ -39,7 +44,7 @@ function verifyPageHTML(title, message, success) {
 <div class="icon">${success ? '🎉' : '⚠️'}</div>
 <h1 class="title">${safeTitle}</h1>
 <p class="msg">${safeMessage}</p>
-<a href="https://app.mindloop.cloud" class="btn">Ir a MindLoop CostOS</a>
+<a href="${APP_URL}" class="btn">Ir a MindLoop CostOS</a>
 </div></body></html>`;
 }
 
@@ -211,7 +216,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             const restauranteResult = await client.query(
                 'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
-                [nombre, email]
+                [sanitizeString(nombre), email]
             );
             const restauranteId = restauranteResult.rows[0].id;
 
@@ -224,13 +229,13 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             const userResult = await client.query(
                 `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified, verification_token, verification_expires) 
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [restauranteId, email, passwordHash, nombre, 'admin', !canSendEmail, verificationToken, verificationExpires]
+                [restauranteId, email, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
             );
 
             await client.query('COMMIT');
 
             if (canSendEmail) {
-                const verifyUrl = `https://lacaleta-api.mindloop.cloud/api/auth/verify-email?token=${verificationToken}`;
+                const verifyUrl = `${API_URL}/api/auth/verify-email?token=${verificationToken}`;
                 try {
                     await resend.emails.send({
                         from: process.env.RESEND_FROM || 'MindLoop CostOS <onboarding@resend.dev>',
@@ -342,7 +347,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                     [resetToken, resetExpires, user.id]
                 );
 
-                const resetUrl = `https://app.mindloop.cloud/#/reset-password?token=${resetToken}`;
+                const resetUrl = `${APP_URL}/#/reset-password?token=${resetToken}`;
 
                 try {
                     await resend.emails.send({
@@ -455,7 +460,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [verificationToken, verificationExpires, user.id]
             );
 
-            const verifyUrl = `https://lacaleta-api.mindloop.cloud/api/auth/verify-email?token=${verificationToken}`;
+            const verifyUrl = `${API_URL}/api/auth/verify-email?token=${verificationToken}`;
 
             await resend.emails.send({
                 from: process.env.RESEND_FROM || 'MindLoop CostOS <onboarding@resend.dev>',
@@ -517,7 +522,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             const nuevoRol = rol || 'usuario';
             const result = await pool.query(
                 'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
-                [req.restauranteId, nombre, email, passwordHash, nuevoRol]
+                [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
             );
 
             log('info', 'Nuevo usuario de equipo creado', { admin: req.user.email, newUser: email });

@@ -306,6 +306,12 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'Se requiere pdfBase64' });
             }
 
+            // Límite de tamaño: 10MB en base64 (~7.5MB archivo real)
+            const MAX_PDF_SIZE = 10 * 1024 * 1024;
+            if (pdfBase64.length > MAX_PDF_SIZE) {
+                return res.status(413).json({ error: 'PDF demasiado grande. Máximo 10MB.' });
+            }
+
             // API Key de Anthropic (configurar en variables de entorno)
             const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
             if (!ANTHROPIC_API_KEY) {
