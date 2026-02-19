@@ -275,6 +275,15 @@ module.exports = function (pool) {
                 const precio = Math.abs(parseFloat(compra.precio)) || 0;
                 const cantidad = Math.abs(parseFloat(compra.cantidad)) || 0;
                 let fecha = compra.fecha || new Date().toISOString().split('T')[0];
+
+                // ⚡ FIX: Handle DD-MM-YY format (e.g. "19-02-26" -> "2026-02-19") from n8n
+                if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{2}$/.test(fecha)) {
+                    const pts = fecha.split('-');
+                    // Assume DD-MM-YY (Euro format with 2-digit year)
+                    let year = parseInt(pts[2]);
+                    if (year < 100) year += 2000;
+                    fecha = `${year}-${pts[1]}-${pts[0]}`;
+                }
                 // Smart date correction: detect DD/MM vs MM/DD swap
                 try {
                     const pd = new Date(fecha + 'T00:00:00');
