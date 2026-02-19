@@ -563,7 +563,7 @@ module.exports = function (pool) {
     router.delete('/purchases/pending/:id', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(
-                "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente' RETURNING id",
+                "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado IN ('pendiente', 'aprobado') RETURNING id",
                 [req.params.id, req.restauranteId]
             );
 
