@@ -320,6 +320,67 @@ module.exports = function (pool) {
                 );
             }
 
+            // ⚡ AUTO-APPROVE: Para items con ingrediente_id, aprobar automáticamente y sumar al stock
+            // Esto evita el paso manual de aprobación en Diario
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+
+                const itemsResult = await client.query(
+                    `SELECT id, ingrediente_id, precio, cantidad, fecha 
+                     FROM compras_pendientes 
+                     WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'pendiente' AND ingrediente_id IS NOT NULL`,
+                    [batchId, req.restauranteId]
+                );
+
+                let autoAprobados = 0;
+                for (const item of itemsResult.rows) {
+                    const total = item.precio * item.cantidad;
+
+                    // Registrar en precios_compra_diarios
+                    await upsertCompraDiaria(client, {
+                        ingredienteId: item.ingrediente_id,
+                        fecha: item.fecha,
+                        precioUnitario: item.precio,
+                        cantidad: item.cantidad,
+                        total,
+                        restauranteId: req.restauranteId
+                    });
+
+                    // Actualizar stock (respetando cantidad_por_formato)
+                    const ingResult = await client.query(
+                        'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                        [item.ingrediente_id, req.restauranteId]
+                    );
+                    const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
+                    const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+
+                    await client.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                        [stockASumar, item.ingrediente_id, req.restauranteId]
+                    );
+
+                    // Marcar como aprobado
+                    await client.query(
+                        "UPDATE compras_pendientes SET estado = 'aprobado', aprobado_at = NOW() WHERE id = $1 AND restaurante_id = $2",
+                        [item.id, req.restauranteId]
+                    );
+
+                    autoAprobados++;
+                }
+
+                await client.query('COMMIT');
+                resultados.autoAprobados = autoAprobados;
+                log('info', 'Compras auto-aprobadas con stock actualizado', { batchId, autoAprobados });
+            } catch (autoErr) {
+                await client.query('ROLLBACK');
+                log('error', 'Error en auto-aprobación (compras sí guardadas)', { error: autoErr.message, batchId });
+                // Las compras se guardaron pero no se auto-aprobaron — quedan como pendientes
+                resultados.autoApproveError = autoErr.message;
+            } finally {
+                client.release();
+            }
+
             log('info', 'Compras pendientes recibidas', { batchId, items: resultados.recibidos });
             res.json(resultados);
         } catch (err) {
