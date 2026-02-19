@@ -578,6 +578,31 @@ module.exports = function (pool) {
         }
     });
 
+    // Admin: Corregir registro de compra diaria (precios_compra_diarios)
+    router.put('/daily/purchases/correct', authMiddleware, async (req, res) => {
+        try {
+            const { ingredienteId, fecha, cantidad, total } = req.body;
+            if (!ingredienteId || !fecha) {
+                return res.status(400).json({ error: 'ingredienteId y fecha son obligatorios' });
+            }
+            const result = await pool.query(
+                `UPDATE precios_compra_diarios 
+                 SET cantidad_comprada = $1, total_compra = $2
+                 WHERE ingrediente_id = $3 AND fecha = $4 AND restaurante_id = $5
+                 RETURNING *`,
+                [cantidad, total, ingredienteId, fecha, req.restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Registro no encontrado' });
+            }
+            log('info', 'Compra diaria corregida', { ingredienteId, fecha, cantidad, total });
+            res.json({ success: true, updated: result.rows[0] });
+        } catch (err) {
+            log('error', 'Error corrigiendo compra diaria', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     // Registrar compras diarias (bulk - para n8n, LEGACY — mantenido por compatibilidad)
     router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
         const client = await pool.connect();
