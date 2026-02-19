@@ -327,11 +327,17 @@ async function initializeDatabase(pool) {
             
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
-            
+        `);
+    log('info', 'Migración columnas ingredientes/mermas completada');
+  } catch (e) { log('warn', 'Migración columnas ingredientes/mermas', { error: e.message }); }
+
+  // Alerts en bloque separado (puede no existir la tabla si no se ha creado aún)
+  try {
+    await pool.query(`
             ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
         `);
-    log('info', 'Migración columnas auditoría completada');
-  } catch (e) { log('warn', 'Migración columnas auditoría', { error: e.message }); }
+    log('info', 'Migración columna alerts.severity completada');
+  } catch (e) { log('warn', 'Migración alerts.severity (tabla puede no existir)', { error: e.message }); }
 
   // Añadir columna 'codigo' a recetas
   try {
@@ -516,19 +522,9 @@ async function initializeDatabase(pool) {
     log('info', 'Columna periodo_id en mermas verificada');
   } catch (e) { log('warn', 'Migración periodo_id mermas', { error: e.message }); }
 
-  // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
-  log('info', 'Limpiando tablas obsoletas...');
-
-  try {
-    await pool.query(`
-            DROP TABLE IF EXISTS daily_records CASCADE;
-            DROP TABLE IF EXISTS lanave_ventas_tpv CASCADE;
-            DROP TABLE IF EXISTS producto_id_tpv CASCADE;
-            DROP TABLE IF EXISTS snapshots_diarios CASCADE;
-            DROP TABLE IF EXISTS inventory_counts CASCADE;
-        `);
-    log('info', 'Tablas obsoletas eliminadas');
-  } catch (e) { log('warn', 'Error eliminando tablas obsoletas', { error: e.message }); }
+  // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
+  // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
+  // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
 
   log('info', 'Tablas y migraciones completadas');
 }
