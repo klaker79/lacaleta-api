@@ -392,17 +392,16 @@ module.exports = function (pool) {
                 restauranteId: req.restauranteId
             });
 
-            // Actualizar stock
-            const ingResult = await client.query(
-                'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+            // Actualizar stock — la cantidad de la foto ya viene en unidad base (botellas, kg, etc.)
+            // NO multiplicar por cantidad_por_formato (eso es solo para pedidos manuales por formato/caja)
+            await client.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                 [item.ingrediente_id, req.restauranteId]
             );
-            const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
-            const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
 
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
-                [stockASumar, item.ingrediente_id, req.restauranteId]
+                [item.cantidad, item.ingrediente_id, req.restauranteId]
             );
 
             // Marcar como aprobado
@@ -465,17 +464,16 @@ module.exports = function (pool) {
                     restauranteId: req.restauranteId
                 });
 
-                // Actualizar stock
-                const ingResult = await client.query(
-                    'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                // Actualizar stock — la cantidad de la foto ya viene en unidad base (botellas, kg, etc.)
+                // NO multiplicar por cantidad_por_formato (eso es solo para pedidos manuales por formato/caja)
+                await client.query(
+                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                     [item.ingrediente_id, req.restauranteId]
                 );
-                const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
-                const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
 
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
-                    [stockASumar, item.ingrediente_id, req.restauranteId]
+                    [item.cantidad, item.ingrediente_id, req.restauranteId]
                 );
 
                 // Marcar como aprobado
