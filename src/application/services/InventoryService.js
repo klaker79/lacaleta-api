@@ -12,6 +12,11 @@ class InventoryService {
     }
 
     /**
+     * @deprecated NO USAR — Divide por 1000 (g→kg) pero sales.routes.js NO divide.
+     * Fórmula aquí:  (ing.cantidad / 1000) * item.quantity
+     * Fórmula real:  (ingCantidad / porciones) * cantidadVendida * factorVariante
+     * Usar las rutas inline de sales.routes.js en su lugar.
+     *
      * Descuenta stock basado en una venta
      * @param {number} restaurantId
      * @param {Array} items - [{ recipeId, quantity, saleId }]
@@ -126,6 +131,11 @@ class InventoryService {
             const movements = [];
 
             for (const item of items) {
+                // Lock row to prevent race condition with concurrent purchases
+                await client.query(
+                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                    [item.ingredientId, restaurantId]
+                );
                 const updateQuery = `
                     UPDATE ingredientes
                     SET stock_actual = stock_actual + $1,
