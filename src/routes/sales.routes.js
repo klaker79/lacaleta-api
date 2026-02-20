@@ -595,30 +595,34 @@ REGLAS:
 
                 // Registrar venta individual
                 // ⚡ FIX Bug #5: Guardar factor_variante para restaurar stock correctamente al borrar
-                await client.query(
-                    'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante, variante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+                const ventaBulkResult = await client.query(
+                    'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante, variante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
                     [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId, factorAplicado, varianteEncontrada ? varianteEncontrada.variante_id : null]
                 );
 
                 // Descontar stock (aplicando factor de variante)
                 // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
                 const porciones = Math.max(1, parseInt(receta.porciones) || 1);
+                const bulkDeductions = []; // ⚡ FIX: Rastrear descuentos reales para restauración correcta
                 if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
                     for (const ing of ingredientesReceta) {
                         // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor
                         const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad * factorAplicado;
                         if (cantidadADescontar > 0 && ing.ingredienteId) {
                             // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
-                            await client.query(
-                                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            const lockRes = await client.query(
+                                'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                                 [ing.ingredienteId, req.restauranteId]
                             );
+                            const stockAntes = parseFloat(lockRes.rows[0]?.stock_actual) || 0;
                             // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
                             const updateResult = await client.query(
                                 'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
                                 [cantidadADescontar, ing.ingredienteId, req.restauranteId]
                             );
                             if (updateResult.rows.length > 0) {
+                                const stockDespues = parseFloat(updateResult.rows[0].stock_actual) || 0;
+                                bulkDeductions.push({ ingredienteId: ing.ingredienteId, real: stockAntes - stockDespues, calculado: cantidadADescontar });
                                 log('info', 'Stock descontado', {
                                     ingrediente: updateResult.rows[0].nombre,
                                     cantidad: cantidadADescontar,
@@ -627,6 +631,14 @@ REGLAS:
                             }
                         }
                     }
+                }
+
+                // ⚡ FIX: Guardar stock_deductions para restauración correcta al borrar
+                if (bulkDeductions.length > 0 && ventaBulkResult.rows[0]?.id) {
+                    await client.query(
+                        'UPDATE ventas SET stock_deductions = $1 WHERE id = $2',
+                        [JSON.stringify(bulkDeductions), ventaBulkResult.rows[0].id]
+                    );
                 }
 
                 // Acumular para resumen diario
