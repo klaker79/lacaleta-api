@@ -398,8 +398,8 @@ module.exports = function (pool) {
                 'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                 [item.ingrediente_id, req.restauranteId]
             );
-            const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
-            const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+            const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 1;
+            const stockASumar = item.cantidad * cantidadPorFormato;
 
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -471,8 +471,8 @@ module.exports = function (pool) {
                     'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                     [item.ingrediente_id, req.restauranteId]
                 );
-                const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
-                const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+                const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 1;
+                const stockASumar = item.cantidad * cantidadPorFormato;
 
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
