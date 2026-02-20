@@ -261,14 +261,16 @@ module.exports = function (pool) {
                     const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
                     if (cantidadRecibida > 0) {
-                        // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                        await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
+                        // ⚡ FIX: Multiplicar por cantidad_por_formato al revertir (consistente con recepción)
+                        const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
+                        const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                        const stockARevertir = cantidadRecibida * cantPorFormato;
                         await client.query(
                             `UPDATE ingredientes
                          SET stock_actual = GREATEST(0, stock_actual - $1),
                              ultima_actualizacion_stock = NOW()
                          WHERE id = $2 AND restaurante_id = $3`,
-                            [cantidadRecibida, ingId, req.restauranteId]
+                            [stockARevertir, ingId, req.restauranteId]
                         );
                     }
                 }
