@@ -54,7 +54,7 @@ module.exports = function (pool) {
                 c.fecha_recepcion
             FROM compras_recientes c
             JOIN ingredientes i ON i.id = c.ingrediente_id::int
-            WHERE i.stock_actual > 0
+            WHERE i.stock_actual > 0 AND i.deleted_at IS NULL
             ORDER BY c.dias_desde_compra DESC
         `, [req.restauranteId]);
 
@@ -121,7 +121,7 @@ module.exports = function (pool) {
                 i.stock_actual - (COALESCE(c.consumo_total / NULLIF(c.dias_distintos, 0), 0) * 1.2) as diferencia
             FROM ingredientes i
             LEFT JOIN consumo_por_dia c ON c.ingrediente_id = i.id AND c.dia_semana = $2
-            WHERE i.restaurante_id = $1
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
               AND c.consumo_total > 0
             ORDER BY diferencia ASC
         `, [req.restauranteId, targetDay]);
@@ -192,7 +192,7 @@ module.exports = function (pool) {
                     THEN i.stock_actual / c.consumo_dia ELSE 999 END as dias_stock
             FROM ingredientes i
             LEFT JOIN consumo_dia_actual c ON c.ingrediente_id = i.id
-            WHERE i.restaurante_id = $1 AND i.stock_actual > 0
+            WHERE i.restaurante_id = $1 AND i.stock_actual > 0 AND i.deleted_at IS NULL
               AND COALESCE(c.consumo_dia, 0) > 0
             ORDER BY dias_stock DESC
         `, [req.restauranteId, diaActual]);
@@ -235,7 +235,7 @@ module.exports = function (pool) {
             const ingredientes = await pool.query(`
             SELECT id, nombre, precio, cantidad_por_formato
             FROM ingredientes 
-            WHERE restaurante_id = $1
+            WHERE restaurante_id = $1 AND deleted_at IS NULL
         `, [req.restauranteId]);
 
             const ingMap = buildIngredientPriceMap(ingredientes.rows);

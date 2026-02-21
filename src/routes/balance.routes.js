@@ -90,8 +90,8 @@ module.exports = function (pool) {
             );
 
             const valorInventario = await pool.query(
-                `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
-       FROM ingredientes WHERE restaurante_id = $1`,
+                `SELECT COALESCE(SUM(stock_actual * (precio / COALESCE(NULLIF(cantidad_por_formato, 0), 1))), 0) as valor
+       FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL`,
                 [req.restauranteId]
             );
 
