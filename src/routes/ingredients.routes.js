@@ -390,7 +390,7 @@ module.exports = function (pool) {
             const { activo } = req.body;
 
             const result = await pool.query(
-                'UPDATE ingredientes SET activo = $1 WHERE id = $2 AND restaurante_id = $3 RETURNING *',
+                'UPDATE ingredientes SET activo = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL RETURNING *',
                 [activo, id, req.restauranteId]
             );
 

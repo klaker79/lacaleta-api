@@ -274,14 +274,26 @@ module.exports = function (pool) {
 
             // 5. Actualizar ventas_diarias_resumen (restar la venta eliminada)
             const fechaVenta = new Date(venta.fecha).toISOString().split('T')[0];
+
+            // Calcular coste proporcional de la venta a borrar
+            let costeVentaBorrada = 0;
+            const resumenActual = await client.query(
+                'SELECT coste_ingredientes, cantidad_vendida FROM ventas_diarias_resumen WHERE receta_id = $1 AND fecha = $2 AND restaurante_id = $3',
+                [venta.receta_id, fechaVenta, req.restauranteId]
+            );
+            if (resumenActual.rows.length > 0 && resumenActual.rows[0].cantidad_vendida > 0) {
+                const costePorUnidad = parseFloat(resumenActual.rows[0].coste_ingredientes) / resumenActual.rows[0].cantidad_vendida;
+                costeVentaBorrada = costePorUnidad * venta.cantidad;
+            }
+
             await client.query(`
             UPDATE ventas_diarias_resumen 
             SET cantidad_vendida = GREATEST(0, cantidad_vendida - $1),
                 total_ingresos = GREATEST(0, total_ingresos - $2),
                 coste_ingredientes = GREATEST(0, coste_ingredientes - $3),
-                beneficio_bruto = GREATEST(0, total_ingresos - $2) - GREATEST(0, coste_ingredientes - $3)
+                beneficio_bruto = GREATEST(0, (total_ingresos - $2) - (coste_ingredientes - $3))
             WHERE receta_id = $4 AND fecha = $5 AND restaurante_id = $6
-        `, [venta.cantidad, parseFloat(venta.total) || 0, 0, venta.receta_id, fechaVenta, req.restauranteId]);
+        `, [venta.cantidad, parseFloat(venta.total) || 0, costeVentaBorrada, venta.receta_id, fechaVenta, req.restauranteId]);
 
             await client.query('COMMIT');
             log('info', 'Venta eliminada con stock restaurado', { id: req.params.id });
