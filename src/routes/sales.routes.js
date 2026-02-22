@@ -521,7 +521,7 @@ REGLAS:
             });
 
             // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
-            const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]);
+            const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
             const ingredientesPrecios = new Map();
             ingredientesResult.rows.forEach(i => {
                 const precio = parseFloat(i.precio) || 0;

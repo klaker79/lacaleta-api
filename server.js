@@ -54,6 +54,7 @@ const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
 // ========== ARQUITECTURA LIMPIA V2 ==========
 const { setupEventHandlers } = require('./src/application/bootstrap');
@@ -91,18 +92,9 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'https://app.mindloop.cloud',
-    'http://localhost:5173',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
-    'http://localhost:3003',
-    'http://localhost:3004',
-    'http://localhost:3005',
-    'http://localhost:3006',
-    'http://localhost:3007',
-    'http://localhost:8080'
+    'http://localhost:5173',    // Vite dev
+    'http://localhost:5500',    // Live Server
+    'http://127.0.0.1:5500'
 ];
 const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
@@ -158,17 +150,15 @@ app.use(express.json({ limit: '10mb' }));
 // Parser de cookies para auth segura
 app.use(cookieParser());
 
-// ========== SECURITY HEADERS (C5) ==========
-app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '0');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    if (process.env.NODE_ENV === 'production') {
-        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    }
-    next();
-});
+// ========== SECURITY HEADERS (Helmet) ==========
+app.use(helmet({
+    contentSecurityPolicy: false,           // API no sirve HTML
+    crossOriginEmbedderPolicy: false,       // Permite cargas cross-origin
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+if (process.env.NODE_ENV === 'production') {
+    app.use(helmet.hsts({ maxAge: 31536000, includeSubDomains: true }));
+}
 
 app.use(globalLimiter);
 // ========== GLOBAL ERROR HANDLERS ==========
@@ -194,11 +184,15 @@ process.on('uncaughtException', (error) => {
     }, 100);
 });
 
-// Graceful shutdown - close pool before exit
-process.on('SIGTERM', async () => {
+// Graceful shutdown - stop accepting connections, then close pool
+let server;
+process.on('SIGTERM', () => {
     log('info', 'SIGTERM received, shutting down gracefully');
-    try { await pool.end(); } catch (e) { /* ignore */ }
-    process.exit(0);
+    if (server) server.close();
+    setTimeout(async () => {
+        try { await pool.end(); } catch (e) { /* ignore */ }
+        process.exit(0);
+    }, 10000);
 });
 
 // ========== BASE DE DATOS ==========
@@ -348,7 +342,7 @@ setupEventHandlers();
 // Exportar app para tests E2E
 module.exports = app;
 
-app.listen(PORT, '0.0.0.0', () => {
+server = app.listen(PORT, '0.0.0.0', () => {
     log('info', 'Servidor iniciado', { port: PORT, version: require('./package.json').version, cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
     console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL (con arquitectura limpia v2)`);

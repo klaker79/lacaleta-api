@@ -5,7 +5,7 @@
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { validateNumber } = require('../utils/validators');
+const { validateNumber, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -59,6 +59,9 @@ module.exports = function (pool) {
     router.put('/inventory/:id/stock-real', authMiddleware, async (req, res) => {
         try {
             const { id } = req.params;
+            const idCheck = validateId(id);
+            if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+
             const { stock_real } = req.body;
 
             const stockValidado = validateNumber(stock_real, 0, 0);

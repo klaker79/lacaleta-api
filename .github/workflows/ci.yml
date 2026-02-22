@@ -42,6 +42,7 @@ jobs:
       PORT: 3001
       NODE_ENV: test
       API_URL: http://localhost:3001
+      ALLOWED_ORIGINS: http://localhost:3001
 
       # Test user (used by tests/setup.js)
       TEST_USER_EMAIL: ci-test@mindloop.dev

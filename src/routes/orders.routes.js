@@ -118,6 +118,9 @@ module.exports = function (pool) {
     });
 
     router.put('/orders/:id', authMiddleware, async (req, res) => {
+        const idCheck = validateId(req.params.id);
+        if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+
         const client = await pool.connect();
         try {
             const { id } = req.params;
@@ -179,6 +182,9 @@ module.exports = function (pool) {
     });
 
     router.delete('/orders/:id', authMiddleware, requireAdmin, async (req, res) => {
+        const idCheck = validateId(req.params.id);
+        if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
