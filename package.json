@@ -13,7 +13,8 @@
     "test:integration": "jest tests/integration",
     "test:critical": "jest tests/critical --runInBand --verbose",
     "test:e2e": "jest tests/e2e --runInBand",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@sentry/node": "^10.38.0",
@@ -33,6 +34,9 @@
     "node": ">=16.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.1",
+    "globals": "^17.3.0",
     "jest": "^30.2.0",
     "supertest": "^7.2.2"
   }
