@@ -115,4 +115,15 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-module.exports = { authMiddleware, requireAdmin, tokenBlacklist };
+const requireSuperAdmin = (req, res, next) => {
+    if (!req.user || !req.user.isSuperAdmin) {
+        log('warn', 'Acceso denegado: requiere superadmin', {
+            user: req.user ? req.user.email : 'anon',
+            url: req.originalUrl
+        });
+        return res.status(403).json({ error: 'Acceso denegado: Requiere Super Admin' });
+    }
+    next();
+};
+
+module.exports = { authMiddleware, requireAdmin, requireSuperAdmin, tokenBlacklist };

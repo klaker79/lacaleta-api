@@ -92,7 +92,9 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'https://app.mindloop.cloud',
+    'https://admin.mindloop.cloud',
     'http://localhost:5173',    // Vite dev
+    'http://localhost:5174',    // Admin panel dev
     'http://localhost:5500',    // Live Server
     'http://127.0.0.1:5500'
 ];

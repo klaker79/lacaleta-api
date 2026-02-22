@@ -45,6 +45,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('mermas', require('./mermas.routes'), pool);
     mount('system', require('./system.routes'), pool);
     mount('stripe', require('./stripe.routes'), pool);
+    mount('superadmin', require('./superadmin.routes'), pool);
 
     // Suppliers — already controller-based (Fase 4B)
     try {
