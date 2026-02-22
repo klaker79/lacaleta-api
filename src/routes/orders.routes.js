@@ -81,19 +81,20 @@ module.exports = function (pool) {
                 [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId]
             );
 
-            // 📊 Registrar en Diario si pedido se crea como 'recibido' (compra mercado)
+            // 📊 Registrar en Diario y sumar stock si pedido se crea como 'recibido' (compra mercado)
             // NOTA: El frontend NO llama a /daily/purchases/bulk. Esta es la ÚNICA fuente.
             if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
                 const fechaCompra = fecha ? new Date(fecha) : new Date();
 
                 for (const item of ingredientes) {
+                    const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                     const totalItem = precioReal * cantidad;
 
                     // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                     await upsertCompraDiaria(client, {
-                        ingredienteId: item.ingredienteId || item.ingrediente_id,
+                        ingredienteId: ingId,
                         fecha: fechaCompra,
                         precioUnitario: precioReal,
                         cantidad, total: totalItem,
@@ -101,9 +102,23 @@ module.exports = function (pool) {
                         proveedorId: proveedorId || null,
                         pedidoId: result.rows[0].id
                     });
+
+                    // ⚡ FIX: Sumar stock al crear pedido como recibido (simétrico con DELETE que resta)
+                    if (cantidad > 0) {
+                        const ingRow = await client.query(
+                            'SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            [ingId, req.restauranteId]
+                        );
+                        const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                        const stockASumar = cantidad * cantPorFormato;
+                        await client.query(
+                            `UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3`,
+                            [stockASumar, ingId, req.restauranteId]
+                        );
+                    }
                 }
 
-                log('info', 'Compras diarias registradas desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
+                log('info', 'Compras diarias y stock registrados desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
             }
 
             await client.query('COMMIT');
@@ -145,11 +160,12 @@ module.exports = function (pool) {
                 [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinal || new Date(), id, req.restauranteId]
             );
 
-            // Si el pedido se marca como recibido Y no estaba ya recibido, registrar los precios de compra diarios
+            // Si el pedido se marca como recibido Y no estaba ya recibido, registrar precios y sumar stock
             if (estado === 'recibido' && !wasAlreadyReceived && ingredientes && Array.isArray(ingredientes)) {
                 const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
 
                 for (const item of ingredientes) {
+                    const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                     const total = precioReal * cantidad;
@@ -157,7 +173,7 @@ module.exports = function (pool) {
                     // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
                     // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                     await upsertCompraDiaria(client, {
-                        ingredienteId: item.ingredienteId || item.ingrediente_id,
+                        ingredienteId: ingId,
                         fecha: fechaCompra,
                         precioUnitario: precioReal,
                         cantidad, total,
@@ -165,9 +181,23 @@ module.exports = function (pool) {
                         proveedorId: result.rows[0]?.proveedor_id || null,
                         pedidoId: id
                     });
+
+                    // ⚡ FIX: Sumar stock al recibir pedido (simétrico con DELETE que resta)
+                    if (cantidad > 0) {
+                        const ingRow = await client.query(
+                            'SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            [ingId, req.restauranteId]
+                        );
+                        const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                        const stockASumar = cantidad * cantPorFormato;
+                        await client.query(
+                            `UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3`,
+                            [stockASumar, ingId, req.restauranteId]
+                        );
+                    }
                 }
 
-                log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
+                log('info', 'Compras diarias y stock registrados desde pedido', { pedidoId: id, items: ingredientes.length });
             }
 
             await client.query('COMMIT');
