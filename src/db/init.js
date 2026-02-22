@@ -540,6 +540,12 @@ async function initializeDatabase(pool) {
     log('info', 'Migración Stripe fields completada');
   } catch (e) { log('warn', 'Migración Stripe fields', { error: e.message }); }
 
+  // ========== MIGRACION: Super Admin flag ==========
+  try {
+    await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN DEFAULT FALSE;`);
+    log('info', 'Migración is_superadmin completada');
+  } catch (e) { log('warn', 'Migración is_superadmin', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).

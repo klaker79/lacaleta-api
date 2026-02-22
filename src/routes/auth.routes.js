@@ -82,7 +82,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             }
 
             const token = jwt.sign(
-                { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
+                { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol, isSuperAdmin: user.is_superadmin || false },
                 JWT_SECRET,
                 { expiresIn: '7d' }
             );
@@ -106,7 +106,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                     nombre: user.nombre,
                     rol: user.rol,
                     restaurante: user.restaurante_nombre,
-                    restauranteId: user.restaurante_id
+                    restauranteId: user.restaurante_id,
+                    isSuperAdmin: user.is_superadmin || false
                 }
             });
         } catch (err) {
@@ -123,7 +124,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 id: req.user.userId,
                 email: req.user.email,
                 rol: req.user.rol,
-                restauranteId: req.restauranteId
+                restauranteId: req.restauranteId,
+                isSuperAdmin: req.user.isSuperAdmin || false
             },
             tokenInfo: {
                 issuedAt: new Date(req.user.iat * 1000).toISOString(),
