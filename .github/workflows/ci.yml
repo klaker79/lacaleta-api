@@ -95,8 +95,7 @@ jobs:
               -d '{
                 "nombre": "CI Test User",
                 "email": "ci-test@mindloop.dev",
-                "password": "CiTest123!",
-                "codigoInvitacion": "CI_TEST_INVITE_2026"
+                "password": "CiTest123!"
               }')
             HTTP_CODE=$(echo "$BODY" | tail -1)
             RESPONSE=$(echo "$BODY" | sed '$d')
