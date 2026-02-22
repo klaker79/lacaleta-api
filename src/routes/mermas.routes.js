@@ -257,6 +257,63 @@ module.exports = function (pool) {
         }
     });
 
+    // ========== 🗑️ MERMAS - RESET MENSUAL ==========
+    router.delete('/mermas/reset', authMiddleware, requireAdmin, async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const { motivo } = req.body || {};
+            await client.query('BEGIN');
+
+            // Obtener mermas a resetear para restaurar stock
+            const mermasToReset = await client.query(`
+            SELECT id, ingrediente_id, cantidad 
+            FROM mermas 
+            WHERE restaurante_id = $1 
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
+        `, [req.restauranteId]);
+
+            // Restaurar stock de cada merma (con lock para evitar race condition)
+            for (const merma of mermasToReset.rows) {
+                if (merma.ingrediente_id && parseFloat(merma.cantidad) > 0) {
+                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
+                    await client.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                        [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
+                    );
+                }
+            }
+
+            // Soft delete en vez de hard delete
+            const deleted = await client.query(`
+            UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP
+            WHERE restaurante_id = $1 
+              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
+              AND deleted_at IS NULL
+            RETURNING id
+        `, [req.restauranteId]);
+
+            await client.query('COMMIT');
+
+            log('info', `Reset mermas: ${deleted.rowCount} registros soft-deleted + stock restaurado`, {
+                restauranteId: req.restauranteId,
+                motivo: motivo || 'manual'
+            });
+
+            res.json({
+                success: true,
+                eliminados: deleted.rowCount,
+                motivo: motivo || 'manual'
+            });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            log('error', 'Error en mermas/reset', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        } finally {
+            client.release();
+        }
+    });
+
     // ========== 🗑️ MERMAS - BORRAR INDIVIDUAL ==========
     router.delete('/mermas/:id', authMiddleware, async (req, res) => {
         const client = await pool.connect();
@@ -311,63 +368,6 @@ module.exports = function (pool) {
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error eliminando merma', { error: err.message });
-            res.status(500).json({ error: 'Error interno' });
-        } finally {
-            client.release();
-        }
-    });
-
-    // ========== 🗑️ MERMAS - RESET MENSUAL ==========
-    router.delete('/mermas/reset', authMiddleware, requireAdmin, async (req, res) => {
-        const client = await pool.connect();
-        try {
-            const { motivo } = req.body || {};
-            await client.query('BEGIN');
-
-            // Obtener mermas a resetear para restaurar stock
-            const mermasToReset = await client.query(`
-            SELECT id, ingrediente_id, cantidad 
-            FROM mermas 
-            WHERE restaurante_id = $1 
-              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
-              AND deleted_at IS NULL
-        `, [req.restauranteId]);
-
-            // Restaurar stock de cada merma (con lock para evitar race condition)
-            for (const merma of mermasToReset.rows) {
-                if (merma.ingrediente_id && parseFloat(merma.cantidad) > 0) {
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
-                    await client.query(
-                        'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
-                        [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
-                    );
-                }
-            }
-
-            // Soft delete en vez de hard delete
-            const deleted = await client.query(`
-            UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP
-            WHERE restaurante_id = $1 
-              AND fecha >= DATE_TRUNC('month', CURRENT_DATE)
-              AND deleted_at IS NULL
-            RETURNING id
-        `, [req.restauranteId]);
-
-            await client.query('COMMIT');
-
-            log('info', `Reset mermas: ${deleted.rowCount} registros soft-deleted + stock restaurado`, {
-                restauranteId: req.restauranteId,
-                motivo: motivo || 'manual'
-            });
-
-            res.json({
-                success: true,
-                eliminados: deleted.rowCount,
-                motivo: motivo || 'manual'
-            });
-        } catch (err) {
-            await client.query('ROLLBACK');
-            log('error', 'Error en mermas/reset', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         } finally {
             client.release();
