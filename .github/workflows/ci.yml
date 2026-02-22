@@ -108,4 +108,8 @@ jobs:
           exit 1
 
       - name: Run tests
-        run: npx jest --runInBand --forceExit
+        run: npx jest --runInBand --forceExit --testPathIgnorePatterns='rate-limiting'
+
+      - name: Run rate-limiting tests (last — triggers brute-force protection)
+        run: npx jest tests/critical/rate-limiting-auth.test.js --runInBand --forceExit
+
