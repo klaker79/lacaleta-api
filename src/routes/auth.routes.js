@@ -203,8 +203,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Código de invitación inválido' });
             }
 
-            if (password.length < 6) {
-                return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+            if (password.length < 8) {
+                return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
             }
 
             const existingUser = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);

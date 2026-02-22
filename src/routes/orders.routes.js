@@ -204,9 +204,15 @@ module.exports = function (pool) {
 
             // 2. Si el pedido estaba recibido, borrar las compras diarias asociadas
             if (pedido.estado === 'recibido' && pedido.ingredientes) {
-                const ingredientes = typeof pedido.ingredientes === 'string'
-                    ? JSON.parse(pedido.ingredientes)
-                    : pedido.ingredientes;
+                let ingredientes;
+                try {
+                    ingredientes = typeof pedido.ingredientes === 'string'
+                        ? JSON.parse(pedido.ingredientes)
+                        : pedido.ingredientes;
+                } catch (parseErr) {
+                    log('error', 'Error parseando ingredientes de pedido', { id: pedido.id, error: parseErr.message });
+                    ingredientes = [];
+                }
 
                 const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
 

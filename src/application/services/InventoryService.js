@@ -41,7 +41,12 @@ class InventoryService {
 
                 let ingredientes = recipeResult.rows[0].ingredientes;
                 if (typeof ingredientes === 'string') {
-                    ingredientes = JSON.parse(ingredientes);
+                    try {
+                        ingredientes = JSON.parse(ingredientes);
+                    } catch (parseErr) {
+                        console.error(`Error parsing ingredientes for recipe ${item.recipeId}:`, parseErr.message);
+                        continue;
+                    }
                 }
 
                 // Descontar cada ingrediente
