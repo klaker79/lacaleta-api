@@ -108,4 +108,4 @@ jobs:
           exit 1
 
       - name: Run tests
-        run: npx jest --runInBand --forceExit --testPathIgnorePatterns='integration|e2e|unit|bulk-sales-import|inventory-consolidation|monthly-balance-pnl|rate-limiting-auth|average-cost-calculation|intelligence-endpoints|auth-flows'
+        run: npx jest --runInBand --forceExit
