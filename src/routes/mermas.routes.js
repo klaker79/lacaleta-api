@@ -5,7 +5,7 @@
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { sanitizeString } = require('../utils/validators');
+const { sanitizeString, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -261,12 +261,17 @@ module.exports = function (pool) {
     router.delete('/mermas/:id', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                client.release();
+                return res.status(400).json({ error: 'ID inválido' });
+            }
             await client.query('BEGIN');
 
             // 1. Obtener la merma antes de borrarla
             const mermaResult = await client.query(
                 'SELECT * FROM mermas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
-                [req.params.id, req.restauranteId]
+                [idCheck.value, req.restauranteId]
             );
 
             if (mermaResult.rows.length === 0) {

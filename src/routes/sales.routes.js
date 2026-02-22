@@ -6,7 +6,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
-const { validateCantidad } = require('../utils/validators');
+const { validateCantidad, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -201,12 +201,17 @@ module.exports = function (pool) {
     router.delete('/sales/:id', authMiddleware, requireAdmin, async (req, res) => {
         const client = await pool.connect();
         try {
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'ID inválido' });
+            }
             await client.query('BEGIN');
 
             // 1. Obtener la venta antes de borrarla
             const ventaResult = await client.query(
                 'SELECT * FROM ventas WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL',
-                [req.params.id, req.restauranteId]
+                [idCheck.value, req.restauranteId]
             );
 
             if (ventaResult.rows.length === 0) {
