@@ -5,7 +5,7 @@
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { validatePrecio, sanitizeString } = require('../utils/validators');
+const { validatePrecio, sanitizeString, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -56,7 +56,9 @@ module.exports = function (pool) {
     // PUT update gasto fijo
     router.put('/gastos-fijos/:id', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
             const { concepto, monto_mensual } = req.body;
 
             const montoValidado = monto_mensual !== undefined ? validatePrecio(monto_mensual) : undefined;
@@ -81,7 +83,9 @@ module.exports = function (pool) {
     // DELETE gasto fijo (soft delete)
     router.delete('/gastos-fijos/:id', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
 
             await pool.query(
                 'UPDATE gastos_fijos SET activo = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND restaurante_id = $2',

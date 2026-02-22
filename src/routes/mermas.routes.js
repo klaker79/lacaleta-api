@@ -5,7 +5,7 @@
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { sanitizeString } = require('../utils/validators');
+const { sanitizeString, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -257,61 +257,6 @@ module.exports = function (pool) {
         }
     });
 
-    // ========== 🗑️ MERMAS - BORRAR INDIVIDUAL ==========
-    router.delete('/mermas/:id', authMiddleware, async (req, res) => {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // 1. Obtener la merma antes de borrarla
-            const mermaResult = await client.query(
-                'SELECT * FROM mermas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
-                [req.params.id, req.restauranteId]
-            );
-
-            if (mermaResult.rows.length === 0) {
-                await client.query('ROLLBACK');
-                return res.status(404).json({ error: 'Merma no encontrada' });
-            }
-
-            const merma = mermaResult.rows[0];
-
-            // 2. Restaurar stock del ingrediente (sumar la cantidad que se había restado)
-            if (merma.ingrediente_id && merma.cantidad > 0) {
-                // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
-                await client.query(
-                    `UPDATE ingredientes
-                 SET stock_actual = stock_actual + $1,
-                     ultima_actualizacion_stock = NOW()
-                 WHERE id = $2 AND restaurante_id = $3`,
-                    [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
-                );
-                log('info', 'Stock restaurado por eliminación de merma', {
-                    ingredienteId: merma.ingrediente_id,
-                    cantidad: merma.cantidad
-                });
-            }
-
-            // 3. SOFT DELETE de la merma (no borrar físicamente para tener historial)
-            // ⚡ FIX Bug #6: Cambiar de HARD DELETE a SOFT DELETE
-            await client.query(
-                'UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
-                [req.params.id]
-            );
-
-            await client.query('COMMIT');
-            log('info', 'Merma eliminada (soft delete)', { id: req.params.id, ingrediente: merma.ingrediente_nombre });
-            res.json({ success: true, message: 'Merma eliminada y stock restaurado' });
-        } catch (err) {
-            await client.query('ROLLBACK');
-            log('error', 'Error eliminando merma', { error: err.message });
-            res.status(500).json({ error: 'Error interno' });
-        } finally {
-            client.release();
-        }
-    });
-
     // ========== 🗑️ MERMAS - RESET MENSUAL ==========
     router.delete('/mermas/reset', authMiddleware, requireAdmin, async (req, res) => {
         const client = await pool.connect();
@@ -363,6 +308,66 @@ module.exports = function (pool) {
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error en mermas/reset', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        } finally {
+            client.release();
+        }
+    });
+
+    // ========== 🗑️ MERMAS - BORRAR INDIVIDUAL ==========
+    router.delete('/mermas/:id', authMiddleware, async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                client.release();
+                return res.status(400).json({ error: 'ID inválido' });
+            }
+            await client.query('BEGIN');
+
+            // 1. Obtener la merma antes de borrarla
+            const mermaResult = await client.query(
+                'SELECT * FROM mermas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                [idCheck.value, req.restauranteId]
+            );
+
+            if (mermaResult.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Merma no encontrada' });
+            }
+
+            const merma = mermaResult.rows[0];
+
+            // 2. Restaurar stock del ingrediente (sumar la cantidad que se había restado)
+            if (merma.ingrediente_id && merma.cantidad > 0) {
+                // ⚡ FIX Bug #7: Lock row before update to prevent race condition
+                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
+                await client.query(
+                    `UPDATE ingredientes
+                 SET stock_actual = stock_actual + $1,
+                     ultima_actualizacion_stock = NOW()
+                 WHERE id = $2 AND restaurante_id = $3`,
+                    [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
+                );
+                log('info', 'Stock restaurado por eliminación de merma', {
+                    ingredienteId: merma.ingrediente_id,
+                    cantidad: merma.cantidad
+                });
+            }
+
+            // 3. SOFT DELETE de la merma (no borrar físicamente para tener historial)
+            // ⚡ FIX Bug #6: Cambiar de HARD DELETE a SOFT DELETE
+            await client.query(
+                'UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
+                [req.params.id]
+            );
+
+            await client.query('COMMIT');
+            log('info', 'Merma eliminada (soft delete)', { id: req.params.id, ingrediente: merma.ingrediente_nombre });
+            res.json({ success: true, message: 'Merma eliminada y stock restaurado' });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            log('error', 'Error eliminando merma', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         } finally {
             client.release();

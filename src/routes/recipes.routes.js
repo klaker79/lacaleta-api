@@ -5,7 +5,7 @@
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { sanitizeString, validatePrecio, validateNumber } = require('../utils/validators');
+const { sanitizeString, validatePrecio, validateNumber, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -86,7 +86,10 @@ module.exports = function (pool) {
     // PUT /api/recipes/:id/variants/:variantId - Actualizar variante
     router.put('/recipes/:id/variants/:variantId', authMiddleware, async (req, res) => {
         try {
-            const { id, variantId } = req.params;
+            const idCheck = validateId(req.params.id);
+            const variantCheck = validateId(req.params.variantId);
+            if (!idCheck.valid || !variantCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const { id, variantId } = { id: idCheck.value, variantId: variantCheck.value };
             const { nombre, factor, precio_venta, codigo, activo } = req.body;
 
             const result = await pool.query(
@@ -116,7 +119,10 @@ module.exports = function (pool) {
     // DELETE /api/recipes/:id/variants/:variantId - Eliminar variante
     router.delete('/recipes/:id/variants/:variantId', authMiddleware, async (req, res) => {
         try {
-            const { id, variantId } = req.params;
+            const idCheck = validateId(req.params.id);
+            const variantCheck = validateId(req.params.variantId);
+            if (!idCheck.valid || !variantCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const { id, variantId } = { id: idCheck.value, variantId: variantCheck.value };
 
             const result = await pool.query(
                 'DELETE FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3 RETURNING id',
@@ -168,7 +174,9 @@ module.exports = function (pool) {
 
     router.put('/recipes/:id', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
             const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
             const result = await pool.query(
                 'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6 WHERE id=$7 AND restaurante_id=$8 RETURNING *',
@@ -184,9 +192,11 @@ module.exports = function (pool) {
     router.delete('/recipes/:id', authMiddleware, requireAdmin, async (req, res) => {
         try {
             // SOFT DELETE: marca como eliminado sin borrar datos
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
             const result = await pool.query(
                 'UPDATE recetas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
-                [req.params.id, req.restauranteId]
+                [idCheck.value, req.restauranteId]
             );
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Receta no encontrada o ya eliminada' });

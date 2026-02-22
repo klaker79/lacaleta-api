@@ -5,7 +5,7 @@
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { sanitizeString, validateNumber } = require('../utils/validators');
+const { sanitizeString, validateNumber, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -55,7 +55,9 @@ module.exports = function (pool) {
     // PUT actualizar empleado
     router.put('/empleados/:id', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
             const { nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto } = req.body;
 
             const result = await pool.query(
@@ -80,7 +82,9 @@ module.exports = function (pool) {
     // DELETE empleado (soft delete)
     router.delete('/empleados/:id', authMiddleware, requireAdmin, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
             await pool.query(
                 'UPDATE empleados SET activo = false WHERE id = $1 AND restaurante_id = $2',
                 [id, req.restauranteId]
