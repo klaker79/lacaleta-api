@@ -103,6 +103,9 @@ const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
 
 const app = express();
 
+// Make pool accessible to middleware (planGate)
+app.locals.pool = null; // Set after pool is created
+
 // Trust proxy for express-rate-limit behind Traefik
 app.set('trust proxy', 1);
 
@@ -144,8 +147,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// Parser JSON
-app.use(express.json({ limit: '10mb' }));
+// Parser JSON (skip for Stripe webhook which needs raw body)
+app.use((req, res, next) => {
+    if (req.originalUrl === '/api/stripe/webhook') return next();
+    express.json({ limit: '10mb' })(req, res, next);
+});
 
 // Parser de cookies para auth segura
 app.use(cookieParser());
@@ -209,6 +215,9 @@ const pool = new Pool({
     keepAlive: true,                  // Mantener conexiones vivas
     keepAliveInitialDelayMillis: 10000 // Enviar keepalive cada 10s
 });
+
+// Make pool available to middleware (planGate)
+app.locals.pool = pool;
 
 // Manejar errores del pool (evita crash por conexiones muertas)
 pool.on('error', (err) => {

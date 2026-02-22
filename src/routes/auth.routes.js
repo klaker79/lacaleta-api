@@ -193,14 +193,10 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     router.post('/auth/register', async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, email, password, codigoInvitacion } = req.body;
+            const { nombre, email, password } = req.body;
 
             if (!nombre || !email || !password) {
                 return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
-            }
-
-            if (!codigoInvitacion || codigoInvitacion !== INVITATION_CODE) {
-                return res.status(403).json({ error: 'Código de invitación inválido' });
             }
 
             if (password.length < 8) {
@@ -214,9 +210,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             await client.query('BEGIN');
 
+            // Create restaurant with 14-day trial
+            const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
             const restauranteResult = await client.query(
-                'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
-                [sanitizeString(nombre), email]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users) 
+                 VALUES ($1, $2, 'trial', 'trialing', $3, 5) RETURNING id`,
+                [sanitizeString(nombre), email, trialEndsAt]
             );
             const restauranteId = restauranteResult.rows[0].id;
 
@@ -231,6 +230,25 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
                 [restauranteId, email, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
             );
+
+            // Create Stripe customer if configured
+            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+            if (STRIPE_SECRET_KEY) {
+                try {
+                    const stripe = require('stripe')(STRIPE_SECRET_KEY);
+                    const customer = await stripe.customers.create({
+                        email,
+                        name: sanitizeString(nombre),
+                        metadata: { restaurante_id: String(restauranteId) }
+                    });
+                    await client.query(
+                        'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
+                        [customer.id, restauranteId]
+                    );
+                } catch (stripeErr) {
+                    log('warn', 'Error creando Stripe customer (registro continúa)', { error: stripeErr.message });
+                }
+            }
 
             await client.query('COMMIT');
 
