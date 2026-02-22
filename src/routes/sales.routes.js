@@ -203,7 +203,7 @@ module.exports = function (pool) {
         try {
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) {
-                await client.query('ROLLBACK');
+                client.release();
                 return res.status(400).json({ error: 'ID inválido' });
             }
             await client.query('BEGIN');
