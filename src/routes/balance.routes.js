@@ -44,7 +44,7 @@ module.exports = function (pool) {
 
             // Precargar todos los precios de ingredientes en UNA query
             const ingredientesResult = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const preciosMap = new Map();
@@ -216,7 +216,7 @@ module.exports = function (pool) {
 
             // Obtener ingredientes y alias para matching
             const ingredientesResult = await pool.query(
-                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const ingredientesMap = new Map();
@@ -635,7 +635,7 @@ module.exports = function (pool) {
 
             // Obtener todos los ingredientes para búsqueda flexible (incluyendo cantidad_por_formato)
             const ingredientesResult = await client.query(
-                'SELECT id, nombre, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, nombre, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const ingredientesMap = new Map();
@@ -830,7 +830,7 @@ module.exports = function (pool) {
             // Obtener precios de todos los ingredientes para calcular costes
             // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
             const ingredientesPrecios = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const preciosMap = {};

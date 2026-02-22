@@ -35,7 +35,7 @@ router.get('/analysis/menu-engineering', authMiddleware, async (req, res) => {
         // Query 2: Todos los precios de ingredientes en UNA query
         // 🔧 FIX: Incluir cantidad_por_formato para calcular precio UNITARIO
         const ingredientesResult = await pool.query(
-            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+            'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
             [req.restauranteId]
         );
         const preciosMap = new Map();
