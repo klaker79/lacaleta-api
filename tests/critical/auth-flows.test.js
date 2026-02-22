@@ -12,6 +12,7 @@
 
 const request = require('supertest');
 const API_URL = process.env.API_URL || 'http://localhost:3001';
+const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL || 'ci-test@mindloop.dev';
 
 describe('Auth Flows — Registration validation and token management', () => {
     let authToken;
