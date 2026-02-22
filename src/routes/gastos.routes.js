@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { validatePrecio, sanitizeString, validateId } = require('../utils/validators');
 
@@ -15,7 +16,7 @@ module.exports = function (pool) {
 
     // ========== GASTOS FIJOS (Fixed Expenses) ==========
     // GET all gastos fijos
-    router.get('/gastos-fijos', authMiddleware, async (req, res) => {
+    router.get('/gastos-fijos', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const result = await pool.query(
                 'SELECT * FROM gastos_fijos WHERE activo = true AND restaurante_id = $1 ORDER BY id',
@@ -29,7 +30,7 @@ module.exports = function (pool) {
     });
 
     // POST create gasto fijo
-    router.post('/gastos-fijos', authMiddleware, async (req, res) => {
+    router.post('/gastos-fijos', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { concepto, monto_mensual } = req.body;
 

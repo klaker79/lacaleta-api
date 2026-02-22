@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const crypto = require('crypto');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
@@ -15,7 +16,7 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== BALANCE Y ESTADÍSTICAS ==========
-    router.get('/balance/mes', authMiddleware, async (req, res) => {
+    router.get('/balance/mes', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { mes, ano } = req.query;
             const mesActual = parseInt(mes) || new Date().getMonth() + 1;
@@ -111,7 +112,7 @@ module.exports = function (pool) {
         }
     });
 
-    router.get('/balance/comparativa', authMiddleware, async (req, res) => {
+    router.get('/balance/comparativa', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const meses = await pool.query(
                 `SELECT 

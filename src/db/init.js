@@ -522,6 +522,24 @@ async function initializeDatabase(pool) {
     log('info', 'Columna periodo_id en mermas verificada');
   } catch (e) { log('warn', 'Migración periodo_id mermas', { error: e.message }); }
 
+  // ========== MIGRACIÓN: Stripe subscription fields ==========
+  try {
+    await pool.query(`
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT UNIQUE;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'trial';
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS plan_status TEXT DEFAULT 'trialing';
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 2;
+        `);
+    // Promote existing restaurants (pre-Stripe) to premium
+    await pool.query(`
+            UPDATE restaurantes SET plan = 'premium', plan_status = 'active', max_users = 999
+            WHERE plan = 'trial';
+        `);
+    log('info', 'Migración Stripe fields completada');
+  } catch (e) { log('warn', 'Migración Stripe fields', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).

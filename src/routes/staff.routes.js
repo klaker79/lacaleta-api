@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { sanitizeString, validateNumber, validateId } = require('../utils/validators');
 
@@ -16,7 +17,7 @@ module.exports = function (pool) {
     // ========== EMPLEADOS (Staff Management) ==========
 
     // GET all empleados
-    router.get('/empleados', authMiddleware, async (req, res) => {
+    router.get('/empleados', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const result = await pool.query(
                 'SELECT * FROM empleados WHERE activo = true AND restaurante_id = $1 ORDER BY nombre',
@@ -30,7 +31,7 @@ module.exports = function (pool) {
     });
 
     // POST crear empleado
-    router.post('/empleados', authMiddleware, async (req, res) => {
+    router.post('/empleados', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto } = req.body;
 
@@ -99,7 +100,7 @@ module.exports = function (pool) {
     // ========== HORARIOS (Staff Scheduling) ==========
 
     // GET horarios por rango de fechas
-    router.get('/horarios', authMiddleware, async (req, res) => {
+    router.get('/horarios', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { desde, hasta } = req.query;
 
@@ -123,7 +124,7 @@ module.exports = function (pool) {
     });
 
     // POST asignar turno
-    router.post('/horarios', authMiddleware, async (req, res) => {
+    router.post('/horarios', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { empleado_id, fecha, turno, hora_inicio, hora_fin, es_extra, notas } = req.body;
 

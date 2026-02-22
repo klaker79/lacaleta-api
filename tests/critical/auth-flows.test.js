@@ -12,6 +12,7 @@
 
 const request = require('supertest');
 const API_URL = process.env.API_URL || 'http://localhost:3001';
+const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL || 'ci-test@mindloop.dev';
 
 describe('Auth Flows — Registration validation and token management', () => {
     let authToken;
@@ -38,30 +39,27 @@ describe('Auth Flows — Registration validation and token management', () => {
             .send({
                 nombre: 'Test',
                 email: 'test@test.com',
-                password: '123', // Too short
-                codigoInvitacion: 'wrong'
+                password: '123' // Too short
             });
 
-        // Will fail on invitation code first (403) or password (400)
-        expect([400, 403]).toContain(res.status);
+        expect(res.status).toBe(400);
         expect(res.body.error).toBeDefined();
-        console.log(`✅ Short password/bad code → ${res.status}: ${res.body.error}`);
+        console.log(`✅ Short password → ${res.status}: ${res.body.error}`);
     });
 
-    it('3. POST /api/auth/register with invalid invitation code → 403', async () => {
+    it('3. POST /api/auth/register with duplicate email → 400', async () => {
         const res = await request(API_URL)
             .post('/api/auth/register')
             .set('Origin', 'http://localhost:3001')
             .send({
-                nombre: 'Hacker',
-                email: 'hacker@evil.com',
-                password: 'password123',
-                codigoInvitacion: 'INVALID_CODE_12345'
+                nombre: 'Duplicate User',
+                email: TEST_USER_EMAIL,  // Already registered in CI setup
+                password: 'password123'
             });
 
-        expect(res.status).toBe(403);
-        expect(res.body.error).toContain('invitación');
-        console.log(`✅ Invalid invitation code → ${res.status}: ${res.body.error}`);
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('registrado');
+        console.log(`✅ Duplicate email → ${res.status}: ${res.body.error}`);
     });
 
     it('4. GET /api/auth/verify with valid token → 200', async () => {
