@@ -10,6 +10,9 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
     throw new Error('❌ FATAL: JWT_SECRET environment variable is required. Server cannot start without it.');
 }
+if (JWT_SECRET.length < 32) {
+    throw new Error('❌ FATAL: JWT_SECRET must be at least 32 characters long for security.');
+}
 
 // Logger simple (importar el real después)
 const log = (level, message, data = {}) => {

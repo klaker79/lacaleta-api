@@ -1,5 +1,8 @@
 FROM node:18-alpine
 
+# 🔒 FIX B2: Ensure production mode by default (Dokploy env vars take precedence)
+ENV NODE_ENV=production
+
 WORKDIR /app
 
 COPY package*.json ./
