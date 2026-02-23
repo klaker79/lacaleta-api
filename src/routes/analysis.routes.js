@@ -17,14 +17,14 @@ module.exports = function (pool) {
         try {
             // Query 1: Ventas agrupadas por receta
             const ventas = await pool.query(
-                `SELECT r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes,
+                `SELECT r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones,
                     SUM(v.cantidad) as cantidad_vendida,
                     SUM(v.total) as total_ventas
              FROM ventas v
              JOIN recetas r ON v.receta_id = r.id
              WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
                AND LOWER(COALESCE(r.categoria, '')) NOT IN ('bebidas', 'bebida', 'suministros', 'suministro', 'preparaciones base', 'preparacion base')
-             GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes`,
+             GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones`,
                 [req.restauranteId]
             );
 
@@ -60,9 +60,17 @@ module.exports = function (pool) {
                 if (ingredientes && Array.isArray(ingredientes)) {
                     for (const ing of ingredientes) {
                         const precioIng = preciosMap.get(ing.ingredienteId) || 0;
-                        costePlato += precioIng * (ing.cantidad || 0);
+                        // 🔧 FIX: Aplicar rendimiento (aprovechamiento) al coste
+                        const rendimiento = parseFloat(ing.rendimiento) || 100;
+                        const factorRendimiento = rendimiento / 100;
+                        const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
+                        costePlato += costeReal * (ing.cantidad || 0);
                     }
                 }
+
+                // 🔧 FIX: Dividir por porciones para obtener coste POR PORCIÓN
+                const porciones = parseInt(plato.porciones) || 1;
+                costePlato = costePlato / porciones;
 
                 const margenContribucion = parseFloat(plato.precio_venta) - costePlato;
                 sumaMargenes += margenContribucion * parseFloat(plato.cantidad_vendida);

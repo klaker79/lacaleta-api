@@ -606,7 +606,11 @@ REGLAS:
                 if (Array.isArray(ingredientesReceta)) {
                     for (const ing of ingredientesReceta) {
                         const precioIng = ingredientesPrecios.get(ing.ingredienteId) || 0;
-                        costeIngredientes += precioIng * (ing.cantidad || 0) * cantidad * factorAplicado;
+                        // 🔧 FIX: Aplicar rendimiento al coste
+                        const rendimiento = parseFloat(ing.rendimiento) || 100;
+                        const factorRendimiento = rendimiento / 100;
+                        const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
+                        costeIngredientes += costeReal * (ing.cantidad || 0) * cantidad * factorAplicado;
                     }
                 }
 

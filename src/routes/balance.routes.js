@@ -61,7 +61,11 @@ module.exports = function (pool) {
                 const ingredientes = venta.ingredientes || [];
                 for (const ing of ingredientes) {
                     const precio = preciosMap.get(ing.ingredienteId) || 0;
-                    costos += precio * (ing.cantidad || 0) * venta.cantidad;
+                    // 🔧 FIX: Aplicar rendimiento al coste
+                    const rendimiento = parseFloat(ing.rendimiento) || 100;
+                    const factorRendimiento = rendimiento / 100;
+                    const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
+                    costos += costeReal * (ing.cantidad || 0) * venta.cantidad;
                 }
             }
 
