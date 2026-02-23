@@ -192,7 +192,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== REGISTER ==========
-    router.post('/auth/register', async (req, res) => {
+    router.post('/auth/register', authLimiter, async (req, res) => {
         const client = await pool.connect();
         try {
             const { nombre, email, password } = req.body;
