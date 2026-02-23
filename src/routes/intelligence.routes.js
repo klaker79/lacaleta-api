@@ -247,7 +247,11 @@ module.exports = function (pool) {
                     if (r.ingredientes && Array.isArray(r.ingredientes)) {
                         r.ingredientes.forEach(ing => {
                             const precioIng = ingMap[ing.ingredienteId] || 0;
-                            coste += precioIng * (ing.cantidad || 0);
+                            // 🔧 FIX: Aplicar rendimiento al coste
+                            const rendimiento = parseFloat(ing.rendimiento) || 100;
+                            const factorRendimiento = rendimiento / 100;
+                            const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
+                            coste += costeReal * (ing.cantidad || 0);
                         });
                     }
                     const precioVenta = parseFloat(r.precio_venta) || 0;
