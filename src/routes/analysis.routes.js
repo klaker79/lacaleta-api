@@ -33,18 +33,23 @@ module.exports = function (pool) {
             }
 
             // Query 2: Todos los precios de ingredientes en UNA query
-            // 🔧 FIX: Incluir cantidad_por_formato para calcular precio UNITARIO
+            // 🔧 FIX: Incluir cantidad_por_formato Y rendimiento para calcular precio UNITARIO
             const ingredientesResult = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                'SELECT id, precio, cantidad_por_formato, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(ing => {
                 // ✅ Precio unitario = precio del formato / cantidad en el formato
                 const precioFormato = parseFloat(ing.precio) || 0;
                 const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
                 const precioUnitario = precioFormato / cantidadPorFormato;
                 preciosMap.set(ing.id, precioUnitario);
+                // 🔧 FIX: Guardar rendimiento base del ingrediente para fallback
+                if (ing.rendimiento) {
+                    rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
+                }
             });
 
             const analisis = [];
@@ -60,8 +65,11 @@ module.exports = function (pool) {
                 if (ingredientes && Array.isArray(ingredientes)) {
                     for (const ing of ingredientes) {
                         const precioIng = preciosMap.get(ing.ingredienteId) || 0;
-                        // 🔧 FIX: Aplicar rendimiento (aprovechamiento) al coste
-                        const rendimiento = parseFloat(ing.rendimiento) || 100;
+                        // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                        let rendimiento = parseFloat(ing.rendimiento);
+                        if (!rendimiento || rendimiento === 100) {
+                            rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
+                        }
                         const factorRendimiento = rendimiento / 100;
                         const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
                         costePlato += costeReal * (ing.cantidad || 0);
