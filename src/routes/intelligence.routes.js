@@ -234,12 +234,17 @@ module.exports = function (pool) {
         `, [req.restauranteId]);
 
             const ingredientes = await pool.query(`
-            SELECT id, nombre, precio, cantidad_por_formato
+            SELECT id, nombre, precio, cantidad_por_formato, rendimiento
             FROM ingredientes 
             WHERE restaurante_id = $1 AND deleted_at IS NULL
         `, [req.restauranteId]);
 
             const ingMap = buildIngredientPriceMap(ingredientes.rows);
+            // 🔧 FIX: Map de rendimiento base para fallback
+            const rendimientoBaseMap = {};
+            ingredientes.rows.forEach(i => {
+                if (i.rendimiento) rendimientoBaseMap[i.id] = parseFloat(i.rendimiento);
+            });
 
             const recetasProblema = result.rows
                 .map(r => {
@@ -247,8 +252,11 @@ module.exports = function (pool) {
                     if (r.ingredientes && Array.isArray(r.ingredientes)) {
                         r.ingredientes.forEach(ing => {
                             const precioIng = ingMap[ing.ingredienteId] || 0;
-                            // 🔧 FIX: Aplicar rendimiento al coste
-                            const rendimiento = parseFloat(ing.rendimiento) || 100;
+                            // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                            let rendimiento = parseFloat(ing.rendimiento);
+                            if (!rendimiento || rendimiento === 100) {
+                                rendimiento = rendimientoBaseMap[ing.ingredienteId] || 100;
+                            }
                             const factorRendimiento = rendimiento / 100;
                             const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
                             coste += costeReal * (ing.cantidad || 0);

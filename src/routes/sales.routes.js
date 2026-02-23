@@ -520,15 +520,19 @@ REGLAS:
                 });
             });
 
-            // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
-            const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
+            // CORREGIDO: Incluir cantidad_por_formato Y rendimiento para calcular precio UNITARIO
+            const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
             const ingredientesPrecios = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
                 const precio = parseFloat(i.precio) || 0;
                 const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
                 // Precio unitario = precio del formato / cantidad en el formato
                 const precioUnitario = precio / cantidadPorFormato;
                 ingredientesPrecios.set(i.id, precioUnitario);
+                if (i.rendimiento) {
+                    rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
+                }
             });
 
             // Acumulador para resumen diario
@@ -606,8 +610,11 @@ REGLAS:
                 if (Array.isArray(ingredientesReceta)) {
                     for (const ing of ingredientesReceta) {
                         const precioIng = ingredientesPrecios.get(ing.ingredienteId) || 0;
-                        // 🔧 FIX: Aplicar rendimiento al coste
-                        const rendimiento = parseFloat(ing.rendimiento) || 100;
+                        // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                        let rendimiento = parseFloat(ing.rendimiento);
+                        if (!rendimiento || rendimiento === 100) {
+                            rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
+                        }
                         const factorRendimiento = rendimiento / 100;
                         const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
                         costeIngredientes += costeReal * (ing.cantidad || 0) * cantidad * factorAplicado;

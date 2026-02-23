@@ -45,14 +45,18 @@ module.exports = function (pool) {
 
             // Precargar todos los precios de ingredientes en UNA query
             const ingredientesResult = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                'SELECT id, precio, cantidad_por_formato, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
                 const precio = parseFloat(i.precio) || 0;
                 const cpf = parseFloat(i.cantidad_por_formato) || 1;
                 preciosMap.set(i.id, precio / cpf);
+                if (i.rendimiento) {
+                    rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
+                }
             });
 
             // Calcular costos usando el Map (sin queries adicionales)
@@ -61,8 +65,11 @@ module.exports = function (pool) {
                 const ingredientes = venta.ingredientes || [];
                 for (const ing of ingredientes) {
                     const precio = preciosMap.get(ing.ingredienteId) || 0;
-                    // 🔧 FIX: Aplicar rendimiento al coste
-                    const rendimiento = parseFloat(ing.rendimiento) || 100;
+                    // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                    let rendimiento = parseFloat(ing.rendimiento);
+                    if (!rendimiento || rendimiento === 100) {
+                        rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
+                    }
                     const factorRendimiento = rendimiento / 100;
                     const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
                     costos += costeReal * (ing.cantidad || 0) * venta.cantidad;
