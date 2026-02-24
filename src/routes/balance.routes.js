@@ -345,21 +345,9 @@ module.exports = function (pool) {
         try {
             const { estado } = req.query;
             let query = `
-            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad,
-                dup.id as compra_diaria_existente,
-                dup.cantidad_comprada as cantidad_ya_registrada,
-                dup.precio_unitario as precio_ya_registrado
+            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad, i.proveedor_id as ingrediente_proveedor_id
             FROM compras_pendientes cp
             LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
-            LEFT JOIN LATERAL (
-                SELECT pcd.id, pcd.cantidad_comprada, pcd.precio_unitario
-                FROM precios_compra_diarios pcd
-                WHERE pcd.ingrediente_id = cp.ingrediente_id
-                  AND pcd.fecha::date = cp.fecha::date
-                  AND pcd.restaurante_id = cp.restaurante_id
-                ORDER BY pcd.created_at DESC
-                LIMIT 1
-            ) dup ON cp.ingrediente_id IS NOT NULL
             WHERE cp.restaurante_id = $1`;
             const params = [req.restauranteId];
 
@@ -373,7 +361,51 @@ module.exports = function (pool) {
             query += ' ORDER BY cp.created_at DESC, cp.batch_id, cp.ingrediente_nombre';
 
             const result = await pool.query(query, params);
-            res.json(result.rows);
+            const rows = result.rows;
+
+            // 🔒 Detección de duplicados: buscar pedidos manuales que coincidan por fecha (±1 día)
+            if (rows.length > 0) {
+                const fechas = [...new Set(rows.map(r => r.fecha).filter(Boolean))];
+                if (fechas.length > 0) {
+                    const pedidosResult = await pool.query(
+                        `SELECT id, fecha, total, estado, proveedor_id
+                         FROM pedidos
+                         WHERE restaurante_id = $1
+                           AND deleted_at IS NULL
+                           AND estado IN ('recibido', 'pendiente')
+                           AND fecha::date >= (($2::date) - INTERVAL '1 day')
+                           AND fecha::date <= (($3::date) + INTERVAL '1 day')`,
+                        [req.restauranteId, fechas.reduce((a, b) => a < b ? a : b), fechas.reduce((a, b) => a > b ? a : b)]
+                    );
+                    const pedidos = pedidosResult.rows;
+
+                    // Enriquecer cada item pendiente con info de duplicado
+                    for (const item of rows) {
+                        if (!item.fecha) continue;
+                        const itemDate = new Date(item.fecha).toISOString().split('T')[0];
+                        const match = pedidos.find(p => {
+                            const pedDate = new Date(p.fecha).toISOString().split('T')[0];
+                            const diffDays = Math.abs((new Date(pedDate) - new Date(itemDate)) / 86400000);
+                            if (diffDays > 1) return false;
+                            // Si el ingrediente tiene proveedor, solo match si coincide
+                            if (item.ingrediente_proveedor_id && p.proveedor_id) {
+                                return p.proveedor_id === item.ingrediente_proveedor_id;
+                            }
+                            return true;
+                        });
+                        if (match) {
+                            item.pedido_duplicado_id = match.id;
+                            item.pedido_duplicado_fecha = match.fecha;
+                            item.pedido_duplicado_total = match.total;
+                            item.pedido_duplicado_estado = match.estado;
+                        }
+                    }
+                }
+            }
+
+            // Limpiar campo interno antes de enviar
+            rows.forEach(r => delete r.ingrediente_proveedor_id);
+            res.json(rows);
         } catch (err) {
             log('error', 'Error listando compras pendientes', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
