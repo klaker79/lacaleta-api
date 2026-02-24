@@ -345,9 +345,21 @@ module.exports = function (pool) {
         try {
             const { estado } = req.query;
             let query = `
-            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad
+            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad,
+                dup.id as compra_diaria_existente,
+                dup.cantidad_comprada as cantidad_ya_registrada,
+                dup.precio_unitario as precio_ya_registrado
             FROM compras_pendientes cp
             LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
+            LEFT JOIN LATERAL (
+                SELECT pcd.id, pcd.cantidad_comprada, pcd.precio_unitario
+                FROM precios_compra_diarios pcd
+                WHERE pcd.ingrediente_id = cp.ingrediente_id
+                  AND pcd.fecha::date = cp.fecha::date
+                  AND pcd.restaurante_id = cp.restaurante_id
+                ORDER BY pcd.created_at DESC
+                LIMIT 1
+            ) dup ON cp.ingrediente_id IS NOT NULL
             WHERE cp.restaurante_id = $1`;
             const params = [req.restauranteId];
 
