@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
 
@@ -194,6 +195,232 @@ module.exports = function (pool) {
         } catch (err) {
             log('error', 'Error obteniendo compras diarias', { error: err.message });
             res.status(500).json({ error: 'Error interno', data: [] });
+        }
+    });
+
+    // ==========================================
+    // 📸 ESCANEO DE ALBARANES CON CLAUDE VISION
+    // ==========================================
+
+    router.post('/parse-albaran', authMiddleware, costlyApiLimiter, async (req, res) => {
+        try {
+            const { imageBase64, mediaType, filename } = req.body;
+
+            if (!imageBase64) {
+                return res.status(400).json({ error: 'Se requiere imageBase64' });
+            }
+
+            // Validar tipo
+            const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+            const finalMediaType = mediaType || 'image/jpeg';
+            if (!validTypes.includes(finalMediaType)) {
+                return res.status(400).json({ error: `Tipo no soportado: ${finalMediaType}. Usa JPG, PNG, WebP o PDF.` });
+            }
+
+            // Límite de tamaño: 10MB en base64
+            const MAX_SIZE = 10 * 1024 * 1024;
+            if (imageBase64.length > MAX_SIZE) {
+                return res.status(413).json({ error: 'Archivo demasiado grande. Máximo 10MB.' });
+            }
+
+            // API Key
+            const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+            if (!ANTHROPIC_API_KEY) {
+                return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada en el servidor' });
+            }
+
+            log('info', 'Procesando albarán con Claude Vision', { filename, mediaType: finalMediaType, tamaño: imageBase64.length });
+
+            // Construir content según tipo
+            const documentContent = finalMediaType === 'application/pdf'
+                ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: imageBase64 } }
+                : { type: 'image', source: { type: 'base64', media_type: finalMediaType, data: imageBase64 } };
+
+            // Llamar Claude Vision
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': ANTHROPIC_API_KEY,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-sonnet-4-20250514',
+                    max_tokens: 4096,
+                    messages: [{
+                        role: 'user',
+                        content: [
+                            documentContent,
+                            {
+                                type: 'text',
+                                text: `Extrae los datos de este albarán (nota de entrega de proveedor).
+Retorna ÚNICAMENTE JSON válido sin explicaciones:
+{
+  "proveedor": "nombre del proveedor",
+  "fecha": "YYYY-MM-DD",
+  "lineas": [
+    {"producto": "PULPO FRESCO", "cantidad": 10, "precio_unitario": 26.00, "total": 260.00}
+  ]
+}
+
+REGLAS:
+- fecha en formato YYYY-MM-DD
+- precio_unitario = precio por unidad/kg (NO el total)
+- Si no hay precio_unitario, calcula: total / cantidad
+- Ignorar líneas de IVA, portes, descuentos, totales generales
+- Solo líneas con cantidad > 0
+- Si no puedes leer la fecha, usa null`
+                            }
+                        ]
+                    }]
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                log('error', 'Error de Claude API procesando albarán', errorData);
+                return res.status(500).json({ error: 'Error procesando albarán con IA' });
+            }
+
+            const claudeResponse = await response.json();
+            let textContent = claudeResponse.content?.[0]?.text || '';
+
+            // Limpiar respuesta (quitar markdown code blocks)
+            textContent = textContent.replace(/```json/g, '').replace(/```/g, '').trim();
+
+            // Extraer JSON
+            const startIdx = textContent.indexOf('{');
+            const endIdx = textContent.lastIndexOf('}');
+            if (startIdx === -1 || endIdx === -1) {
+                return res.status(500).json({ error: 'No se pudo extraer datos del albarán' });
+            }
+
+            let data;
+            try {
+                data = JSON.parse(textContent.substring(startIdx, endIdx + 1));
+            } catch (parseError) {
+                log('error', 'Error parseando JSON de albarán', { error: parseError.message, rawText: textContent.substring(0, 500) });
+                return res.status(500).json({ error: 'Error parseando respuesta de IA' });
+            }
+
+            if (!data.lineas || !Array.isArray(data.lineas) || data.lineas.length === 0) {
+                return res.status(400).json({ error: 'No se detectaron líneas de producto en el albarán' });
+            }
+
+            // ── Matching de ingredientes (misma lógica que POST /purchases/pending) ──
+            const normalizar = (str) => {
+                return (str || '')
+                    .toLowerCase()
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9\s]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            };
+
+            const ingredientesResult = await pool.query(
+                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const ingredientesMap = new Map();
+            ingredientesResult.rows.forEach(i => {
+                ingredientesMap.set(normalizar(i.nombre), i.id);
+            });
+
+            const aliasResult = await pool.query(
+                `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a 
+                 JOIN ingredientes i ON a.ingrediente_id = i.id
+                 WHERE a.restaurante_id = $1`,
+                [req.restauranteId]
+            );
+            const aliasMap = new Map();
+            aliasResult.rows.forEach(a => {
+                aliasMap.set(normalizar(a.alias), a.ingrediente_id);
+            });
+
+            // ── Preparar INSERT en compras_pendientes ──
+            const batchId = crypto.randomUUID();
+            let fecha = data.fecha || new Date().toISOString().split('T')[0];
+
+            // Corrección de formato de fecha (DD-MM-YY, DD-MM-YYYY)
+            if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{2}$/.test(fecha)) {
+                const pts = fecha.split('-');
+                let year = parseInt(pts[2]);
+                if (year < 100) year += 2000;
+                fecha = `${year}-${pts[1]}-${pts[0]}`;
+            }
+            if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(fecha)) {
+                const pts = fecha.split('-');
+                fecha = `${pts[2]}-${pts[1]}-${pts[0]}`;
+            }
+
+            const values = [];
+            const placeholders = [];
+            let paramIdx = 1;
+            let matched = 0;
+            let totalImporte = 0;
+
+            for (const linea of data.lineas) {
+                const nombreNorm = normalizar(linea.producto);
+                let ingredienteId = null;
+
+                // 4 niveles de búsqueda
+                ingredienteId = ingredientesMap.get(nombreNorm) || null;
+                if (!ingredienteId) {
+                    for (const [nombreDB, id] of ingredientesMap) {
+                        if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) {
+                            ingredienteId = id;
+                            break;
+                        }
+                    }
+                }
+                if (!ingredienteId) {
+                    ingredienteId = aliasMap.get(nombreNorm) || null;
+                }
+                if (!ingredienteId) {
+                    for (const [aliasNombre, id] of aliasMap) {
+                        if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) {
+                            ingredienteId = id;
+                            break;
+                        }
+                    }
+                }
+
+                if (ingredienteId) matched++;
+
+                const precio = Math.abs(parseFloat(linea.precio_unitario)) || 0;
+                const cantidad = Math.abs(parseFloat(linea.cantidad)) || 0;
+                totalImporte += parseFloat(linea.total) || (precio * cantidad);
+
+                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
+                values.push(batchId, linea.producto, ingredienteId, precio, cantidad, fecha, req.restauranteId);
+                paramIdx += 7;
+            }
+
+            if (placeholders.length > 0) {
+                await pool.query(
+                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id)
+                     VALUES ${placeholders.join(', ')}`,
+                    values
+                );
+            }
+
+            log('info', 'Albarán escaneado y pendientes creados', {
+                batchId, proveedor: data.proveedor, fecha, items: data.lineas.length, matched
+            });
+
+            res.json({
+                success: true,
+                batchId,
+                proveedor: data.proveedor || null,
+                fecha,
+                totalItems: data.lineas.length,
+                matched,
+                unmatched: data.lineas.length - matched,
+                totalImporte: Math.round(totalImporte * 100) / 100
+            });
+        } catch (err) {
+            log('error', 'Error procesando albarán', { error: err.message });
+            res.status(500).json({ error: 'Error interno procesando albarán' });
         }
     });
 
