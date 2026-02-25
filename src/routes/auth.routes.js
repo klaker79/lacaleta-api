@@ -10,7 +10,6 @@ const { authMiddleware, requireAdmin, tokenBlacklist } = require('../middleware/
 const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { sanitizeString } = require('../utils/validators');
-
 // URLs parametrizadas (env vars con fallback para backwards-compat)
 const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
 const API_URL = process.env.API_URL || 'https://lacaleta-api.mindloop.cloud';
@@ -81,35 +80,67 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Tu cuenta no está verificada. Revisa tu email.', needsVerification: true, email: user.email });
             }
 
-            const token = jwt.sign(
-                { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol, isSuperAdmin: user.is_superadmin || false },
-                JWT_SECRET,
-                { expiresIn: '7d' }
+            // Multi-restaurant: check all restaurants this user has access to
+            const restResult = await pool.query(
+                `SELECT ur.restaurante_id, ur.rol, r.nombre
+                 FROM usuario_restaurantes ur
+                 JOIN restaurantes r ON ur.restaurante_id = r.id
+                 WHERE ur.usuario_id = $1
+                 ORDER BY ur.created_at ASC`,
+                [user.id]
             );
 
-            log('info', 'Login exitoso', { userId: user.id, email });
+            // Fallback for users not yet in junction table (pre-migration)
+            let restaurants = restResult.rows;
+            if (restaurants.length === 0) {
+                restaurants = [{ restaurante_id: user.restaurante_id, rol: user.rol, nombre: user.restaurante_nombre }];
+            }
 
             const isProduction = process.env.NODE_ENV === 'production';
-            res.cookie('auth_token', token, {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: 'lax',
-                maxAge: 7 * 24 * 60 * 60 * 1000,
-                path: '/'
-            });
 
-            res.json({
-                token,
-                user: {
-                    id: user.id,
-                    email: user.email,
-                    nombre: user.nombre,
-                    rol: user.rol,
-                    restaurante: user.restaurante_nombre,
-                    restauranteId: user.restaurante_id,
-                    isSuperAdmin: user.is_superadmin || false
-                }
-            });
+            if (restaurants.length === 1) {
+                // Single restaurant: auto-select (backward-compatible)
+                const rest = restaurants[0];
+                const token = jwt.sign(
+                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
+                    JWT_SECRET,
+                    { expiresIn: '7d' }
+                );
+
+                log('info', 'Login exitoso', { userId: user.id, email, restauranteId: rest.restaurante_id });
+
+                res.cookie('auth_token', token, {
+                    httpOnly: true, secure: isProduction, sameSite: 'lax',
+                    maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+                });
+
+                res.json({
+                    token,
+                    user: {
+                        id: user.id, email: user.email, nombre: user.nombre,
+                        rol: rest.rol, restaurante: rest.nombre,
+                        restauranteId: rest.restaurante_id,
+                        isSuperAdmin: user.is_superadmin || false
+                    },
+                    restaurants
+                });
+            } else {
+                // Multiple restaurants: require selection
+                const selectionToken = jwt.sign(
+                    { userId: user.id, email: user.email, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
+                    JWT_SECRET,
+                    { expiresIn: '5m' }
+                );
+
+                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email, count: restaurants.length });
+
+                res.json({
+                    needsSelection: true,
+                    selectionToken,
+                    restaurants,
+                    user: { id: user.id, nombre: user.nombre, email: user.email }
+                });
+            }
         } catch (err) {
             log('error', 'Error login', { error: err.message });
             res.status(500).json({ error: 'Error en el servidor' });
@@ -132,6 +163,131 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 expiresAt: new Date(req.user.exp * 1000).toISOString()
             }
         });
+    });
+
+    // ========== SELECT RESTAURANT (after multi-restaurant login) ==========
+    router.post('/auth/select-restaurant', authLimiter, async (req, res) => {
+        try {
+            const { selectionToken, restauranteId } = req.body;
+            if (!selectionToken || !restauranteId) {
+                return res.status(400).json({ error: 'selectionToken y restauranteId requeridos' });
+            }
+
+            const decoded = jwt.verify(selectionToken, JWT_SECRET);
+            if (decoded.type !== 'restaurant_selection') {
+                return res.status(401).json({ error: 'Token de selección inválido' });
+            }
+
+            // Verify user has access to this restaurant
+            const access = await pool.query(
+                'SELECT rol FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
+                [decoded.userId, restauranteId]
+            );
+            if (access.rows.length === 0) {
+                return res.status(403).json({ error: 'Sin acceso a este restaurante' });
+            }
+
+            const rest = await pool.query('SELECT nombre FROM restaurantes WHERE id = $1', [restauranteId]);
+            if (rest.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+
+            const token = jwt.sign(
+                { userId: decoded.userId, restauranteId: parseInt(restauranteId), email: decoded.email, rol: access.rows[0].rol, isSuperAdmin: decoded.isSuperAdmin || false },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            const isProduction = process.env.NODE_ENV === 'production';
+            res.cookie('auth_token', token, {
+                httpOnly: true, secure: isProduction, sameSite: 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+            });
+
+            log('info', 'Restaurante seleccionado', { userId: decoded.userId, restauranteId });
+
+            res.json({
+                token,
+                user: {
+                    id: decoded.userId, email: decoded.email,
+                    restaurante: rest.rows[0].nombre, restauranteId: parseInt(restauranteId),
+                    rol: access.rows[0].rol, isSuperAdmin: decoded.isSuperAdmin || false
+                }
+            });
+        } catch (err) {
+            if (err.name === 'TokenExpiredError') {
+                return res.status(401).json({ error: 'Token de selección expirado. Vuelve a iniciar sesión.' });
+            }
+            log('error', 'Error select-restaurant', { error: err.message });
+            res.status(500).json({ error: 'Error en el servidor' });
+        }
+    });
+
+    // ========== SWITCH RESTAURANT (when already logged in) ==========
+    router.post('/auth/switch-restaurant', authMiddleware, async (req, res) => {
+        try {
+            const { restauranteId } = req.body;
+            if (!restauranteId) {
+                return res.status(400).json({ error: 'restauranteId requerido' });
+            }
+
+            const access = await pool.query(
+                'SELECT rol FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
+                [req.user.userId, restauranteId]
+            );
+            if (access.rows.length === 0) {
+                return res.status(403).json({ error: 'Sin acceso a este restaurante' });
+            }
+
+            const rest = await pool.query('SELECT nombre FROM restaurantes WHERE id = $1', [restauranteId]);
+            if (rest.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+
+            const token = jwt.sign(
+                { userId: req.user.userId, restauranteId: parseInt(restauranteId), email: req.user.email, rol: access.rows[0].rol, isSuperAdmin: req.user.isSuperAdmin || false },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            const isProduction = process.env.NODE_ENV === 'production';
+            res.cookie('auth_token', token, {
+                httpOnly: true, secure: isProduction, sameSite: 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+            });
+
+            log('info', 'Restaurante cambiado', { userId: req.user.userId, from: req.restauranteId, to: restauranteId });
+
+            res.json({
+                token,
+                user: {
+                    id: req.user.userId, email: req.user.email,
+                    restaurante: rest.rows[0].nombre, restauranteId: parseInt(restauranteId),
+                    rol: access.rows[0].rol, isSuperAdmin: req.user.isSuperAdmin || false
+                }
+            });
+        } catch (err) {
+            log('error', 'Error switch-restaurant', { error: err.message });
+            res.status(500).json({ error: 'Error en el servidor' });
+        }
+    });
+
+    // ========== MY RESTAURANTS (list accessible restaurants) ==========
+    router.get('/auth/my-restaurants', authMiddleware, async (req, res) => {
+        try {
+            const result = await pool.query(
+                `SELECT ur.restaurante_id as id, ur.rol, r.nombre
+                 FROM usuario_restaurantes ur
+                 JOIN restaurantes r ON ur.restaurante_id = r.id
+                 WHERE ur.usuario_id = $1
+                 ORDER BY ur.created_at ASC`,
+                [req.user.userId]
+            );
+            res.json({ restaurants: result.rows, current: req.restauranteId });
+        } catch (err) {
+            log('error', 'Error my-restaurants', { error: err.message });
+            res.status(500).json({ error: 'Error obteniendo restaurantes' });
+        }
     });
 
     // ========== LOGOUT ==========
@@ -251,6 +407,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                     log('warn', 'Error creando Stripe customer (registro continúa)', { error: stripeErr.message });
                 }
             }
+
+            // Multi-restaurant: add to junction table
+            await client.query(
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                [userResult.rows[0].id, restauranteId, 'admin']
+            );
 
             await client.query('COMMIT');
 
@@ -543,6 +705,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             const result = await pool.query(
                 'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
                 [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
+            );
+
+            // Multi-restaurant: add to junction table
+            await pool.query(
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                [result.rows[0].id, req.restauranteId, nuevoRol]
             );
 
             log('info', 'Nuevo usuario de equipo creado', { admin: req.user.email, newUser: email });
