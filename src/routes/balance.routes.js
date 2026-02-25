@@ -572,7 +572,8 @@ REGLAS:
         try {
             const { estado } = req.query;
             let query = `
-            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad, i.proveedor_id as ingrediente_proveedor_id
+            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad, i.proveedor_id as ingrediente_proveedor_id,
+                   i.formato_compra as ingrediente_formato_compra, i.cantidad_por_formato as ingrediente_cantidad_por_formato
             FROM compras_pendientes cp
             LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
             WHERE cp.restaurante_id = $1`;
@@ -713,6 +714,27 @@ REGLAS:
         }
     });
 
+    // PATCH: Actualizar formato_override de un item pendiente
+    router.patch('/purchases/pending/:id/formato', authMiddleware, async (req, res) => {
+        try {
+            const { formato_override } = req.body;
+            if (formato_override === undefined || formato_override === null || Number(formato_override) <= 0) {
+                return res.status(400).json({ error: 'formato_override debe ser un número positivo' });
+            }
+            const result = await pool.query(
+                "UPDATE compras_pendientes SET formato_override = $1 WHERE id = $2 AND restaurante_id = $3 AND estado = 'pendiente' RETURNING id, formato_override",
+                [Number(formato_override), req.params.id, req.restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Item no encontrado o ya procesado' });
+            }
+            res.json(result.rows[0]);
+        } catch (err) {
+            log('error', 'Error actualizando formato_override', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     // POST: Aprobar un item pendiente → insertar en precios_compra_diarios + actualizar stock
     router.post('/purchases/pending/:id/approve', authMiddleware, async (req, res) => {
         const client = await pool.connect();
@@ -749,15 +771,12 @@ REGLAS:
                 restauranteId: req.restauranteId
             });
 
-            // Actualizar stock — multiplicar por cantidad_por_formato para convertir formatos a unidad base
-            // Ej: 2 garrafas × 7.5L = 15 litros, 2 cajas × 12 = 24 botellas
-            const ingResult = await client.query(
-                'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                [item.ingrediente_id, req.restauranteId]
-            );
-            const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 1;
-            const stockASumar = item.cantidad * cantidadPorFormato;
+            // Actualizar stock — usar formato_override seleccionado por el usuario
+            // formato_override=1 → unidad base (default seguro), formato_override=6 → caja de 6, etc.
+            const formatoOverride = parseFloat(item.formato_override) || 1;
+            const stockASumar = item.cantidad * formatoOverride;
 
+            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
                 [stockASumar, item.ingrediente_id, req.restauranteId]
@@ -823,14 +842,11 @@ REGLAS:
                     restauranteId: req.restauranteId
                 });
 
-                // Actualizar stock — multiplicar por cantidad_por_formato para convertir formatos a unidad base
-                const ingResult = await client.query(
-                    'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                    [item.ingrediente_id, req.restauranteId]
-                );
-                const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 1;
-                const stockASumar = item.cantidad * cantidadPorFormato;
+                // Actualizar stock — usar formato_override seleccionado por el usuario
+                const formatoOverride = parseFloat(item.formato_override) || 1;
+                const stockASumar = item.cantidad * formatoOverride;
 
+                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
                     [stockASumar, item.ingrediente_id, req.restauranteId]
