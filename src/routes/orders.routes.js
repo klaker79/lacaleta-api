@@ -1,6 +1,13 @@
 /**
  * orders Routes — Extracted from server.js
  * Orders CRUD with daily purchase tracking & stock rollback on delete
+ *
+ * ⚠️ STOCK OWNERSHIP RULE:
+ * The FRONTEND is the sole owner of stock adjustments (via bulkAdjustStock).
+ * POST/PUT in this file must NEVER modify stock_actual.
+ * They only record Diario (precios_compra_diarios) for cost tracking.
+ * DELETE is the exception: it MUST revert stock since there's no frontend trigger.
+ * See tests/critical/stock-no-double-count.test.js for validation.
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
