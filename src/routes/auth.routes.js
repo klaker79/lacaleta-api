@@ -291,22 +291,59 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== CREATE ADDITIONAL RESTAURANT (for existing users) ==========
+    // Creates restaurant + Stripe customer + Checkout session.
+    // Restaurant starts as 'pending_payment'. Webhook activates it after payment.
+    const PLAN_ORDER = { starter: 1, trial: 2, profesional: 2, premium: 3 };
+    const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999 };
+
     router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre } = req.body;
+            const { nombre, plan, billing } = req.body;
             if (!nombre || !nombre.trim()) {
                 return res.status(400).json({ error: 'Nombre del restaurante requerido' });
+            }
+            const validPlans = ['starter', 'profesional', 'premium'];
+            if (!plan || !validPlans.includes(plan)) {
+                return res.status(400).json({ error: 'Plan requerido: starter, profesional, premium' });
+            }
+            if (!billing || !['monthly', 'annual'].includes(billing)) {
+                return res.status(400).json({ error: 'Billing requerido: monthly, annual' });
+            }
+
+            // Validate plan >= current restaurant plan
+            const currentRest = await pool.query(
+                'SELECT plan FROM restaurantes WHERE id = $1', [req.restauranteId]
+            );
+            const currentPlan = currentRest.rows[0]?.plan || 'starter';
+            if ((PLAN_ORDER[plan] || 0) < (PLAN_ORDER[currentPlan] || 0)) {
+                return res.status(400).json({
+                    error: `El plan debe ser igual o superior a tu plan actual (${currentPlan})`
+                });
+            }
+
+            // Stripe price ID from env
+            const priceKey = `${plan}_${billing}`;
+            const PRICE_MAP = {
+                starter_monthly: process.env.STRIPE_PRICE_STARTER_MONTHLY,
+                starter_annual: process.env.STRIPE_PRICE_STARTER_ANNUAL,
+                profesional_monthly: process.env.STRIPE_PRICE_PRO_MONTHLY,
+                profesional_annual: process.env.STRIPE_PRICE_PRO_ANNUAL,
+                premium_monthly: process.env.STRIPE_PRICE_PREMIUM_MONTHLY,
+                premium_annual: process.env.STRIPE_PRICE_PREMIUM_ANNUAL
+            };
+            const priceId = PRICE_MAP[priceKey];
+            if (!priceId) {
+                return res.status(400).json({ error: 'Precio no configurado para este plan' });
             }
 
             await client.query('BEGIN');
 
-            // Create restaurant with 14-day trial
-            const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+            // Create restaurant with pending_payment status
             const restResult = await client.query(
-                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users)
-                 VALUES ($1, $2, 'trial', 'trialing', $3, 5) RETURNING id`,
-                [sanitizeString(nombre.trim()), req.user.email, trialEndsAt]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, max_users)
+                 VALUES ($1, $2, $3, 'pending_payment', $4) RETURNING id`,
+                [sanitizeString(nombre.trim()), req.user.email, plan, PLAN_MAX_USERS[plan] || 2]
             );
             const restauranteId = restResult.rows[0].id;
 
@@ -316,52 +353,45 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [req.user.userId, restauranteId, 'admin']
             );
 
-            // Create Stripe customer for the new restaurant
+            // Create Stripe customer + Checkout session
             const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+            let checkoutUrl = null;
+
             if (STRIPE_SECRET_KEY) {
-                try {
-                    const stripe = require('stripe')(STRIPE_SECRET_KEY);
-                    const user = await client.query('SELECT nombre FROM usuarios WHERE id = $1', [req.user.userId]);
-                    const customer = await stripe.customers.create({
-                        email: req.user.email,
-                        name: sanitizeString(nombre.trim()),
-                        metadata: { restaurante_id: String(restauranteId) }
-                    });
-                    await client.query(
-                        'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
-                        [customer.id, restauranteId]
-                    );
-                } catch (stripeErr) {
-                    log('warn', 'Error creando Stripe customer para nuevo restaurante', { error: stripeErr.message });
-                }
+                const stripe = require('stripe')(STRIPE_SECRET_KEY);
+                const customer = await stripe.customers.create({
+                    email: req.user.email,
+                    name: sanitizeString(nombre.trim()),
+                    metadata: { restaurante_id: String(restauranteId) }
+                });
+
+                await client.query(
+                    'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
+                    [customer.id, restauranteId]
+                );
+
+                const frontendUrl = process.env.FRONTEND_URL || 'https://app.mindloop.cloud';
+                const session = await stripe.checkout.sessions.create({
+                    customer: customer.id,
+                    mode: 'subscription',
+                    line_items: [{ price: priceId, quantity: 1 }],
+                    success_url: `${frontendUrl}/index.html?checkout=success&plan=${plan}&new_restaurant=${restauranteId}`,
+                    cancel_url: `${frontendUrl}/index.html?checkout=canceled&new_restaurant=${restauranteId}`,
+                    metadata: { restaurante_id: String(restauranteId), plan },
+                    subscription_data: {
+                        metadata: { restaurante_id: String(restauranteId), plan }
+                    }
+                });
+                checkoutUrl = session.url;
             }
 
             await client.query('COMMIT');
 
-            // Issue new JWT for the new restaurant
-            const token = jwt.sign(
-                { userId: req.user.userId, restauranteId, email: req.user.email, rol: 'admin', isSuperAdmin: req.user.isSuperAdmin || false },
-                JWT_SECRET,
-                { expiresIn: '7d' }
-            );
-
-            const isProduction = process.env.NODE_ENV === 'production';
-            res.cookie('auth_token', token, {
-                httpOnly: true, secure: isProduction, sameSite: 'lax',
-                maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+            log('info', 'Restaurante creado (pending_payment)', {
+                userId: req.user.userId, restauranteId, plan, billing
             });
 
-            log('info', 'Nuevo restaurante creado por usuario existente', { userId: req.user.userId, restauranteId, nombre: nombre.trim() });
-
-            res.status(201).json({
-                token,
-                restaurant: { id: restauranteId, nombre: nombre.trim(), plan: 'trial' },
-                user: {
-                    id: req.user.userId, email: req.user.email,
-                    restaurante: nombre.trim(), restauranteId,
-                    rol: 'admin', isSuperAdmin: req.user.isSuperAdmin || false
-                }
-            });
+            res.status(201).json({ checkoutUrl, restauranteId, plan });
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error creando restaurante adicional', { error: err.message });
