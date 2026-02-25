@@ -554,6 +554,31 @@ async function initializeDatabase(pool) {
     log('info', 'Migración is_superadmin completada');
   } catch (e) { log('warn', 'Migración is_superadmin', { error: e.message }); }
 
+  // ========== MIGRACION: Multi-restaurant junction table ==========
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usuario_restaurantes (
+        id SERIAL PRIMARY KEY,
+        usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        rol VARCHAR(50) DEFAULT 'usuario',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(usuario_id, restaurante_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_usuario_restaurantes_usuario
+        ON usuario_restaurantes(usuario_id);
+      CREATE INDEX IF NOT EXISTS idx_usuario_restaurantes_restaurante
+        ON usuario_restaurantes(restaurante_id);
+    `);
+    // Backfill: sync existing usuarios → junction table
+    await pool.query(`
+      INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol)
+      SELECT id, restaurante_id, rol FROM usuarios
+      ON CONFLICT (usuario_id, restaurante_id) DO NOTHING;
+    `);
+    log('info', 'Migración usuario_restaurantes completada (tabla + backfill)');
+  } catch (e) { log('warn', 'Migración usuario_restaurantes', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
