@@ -495,6 +495,14 @@ async function initializeDatabase(pool) {
     log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
   } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
 
+  // Columna formato_override en compras_pendientes (para selector de formato en revisión de albaranes)
+  try {
+    await pool.query(`
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS formato_override DECIMAL(10, 4) DEFAULT 1;
+        `);
+    log('info', 'Columna formato_override en compras_pendientes verificada');
+  } catch (e) { log('warn', 'Migración formato_override', { error: e.message }); }
+
   // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
   // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
   try {
