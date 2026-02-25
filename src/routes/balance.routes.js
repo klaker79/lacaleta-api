@@ -660,31 +660,29 @@ REGLAS:
                     for (const item of rows) {
                         if (!item.fecha) continue;
 
-                        // Check 1: ¿Hay pedido manual con misma fecha+proveedor?
+                        // Check 1: ¿Hay pedido manual con mismo proveedor+fecha?
+                        // REQUIERE que ambos tengan proveedor para evitar falsos positivos
                         const matchPedido = pedidos.find(p => {
                             if (!fechasDentroDeRango(p.fecha, item.fecha)) return false;
-                            if (item.ingrediente_proveedor_id && p.proveedor_id) {
-                                return Number(p.proveedor_id) === Number(item.ingrediente_proveedor_id);
-                            }
-                            return true;
+                            // Sin proveedor en alguno de los dos → no es match fiable
+                            if (!item.ingrediente_proveedor_id || !p.proveedor_id) return false;
+                            return Number(p.proveedor_id) === Number(item.ingrediente_proveedor_id);
                         });
 
                         // Check 2: ¿Este ingrediente ya fue aprobado en la misma fecha?
+                        // Requiere ingrediente_id asignado + match exacto
                         const matchAprobado = item.ingrediente_id ? comprasAprobadas.find(c => {
                             return fechasDentroDeRango(c.fecha, item.fecha) &&
                                 Number(c.ingrediente_id) === Number(item.ingrediente_id);
                         }) : null;
 
                         // Check 3: ¿Hay otro batch pendiente con mismo ingrediente+fecha?
-                        const matchOtroPend = otrosPendientes.find(o => {
+                        // Requiere ingrediente_id en ambos lados
+                        const matchOtroPend = (item.ingrediente_id) ? otrosPendientes.find(o => {
                             if (!fechasDentroDeRango(o.fecha, item.fecha)) return false;
-                            if (item.ingrediente_id && o.ingrediente_id) {
-                                return Number(o.ingrediente_id) === Number(item.ingrediente_id);
-                            }
-                            // Fallback: comparar por nombre
-                            return item.ingrediente_nombre && o.ingrediente_nombre &&
-                                item.ingrediente_nombre.toLowerCase().trim() === o.ingrediente_nombre.toLowerCase().trim();
-                        });
+                            if (!o.ingrediente_id) return false;
+                            return Number(o.ingrediente_id) === Number(item.ingrediente_id);
+                        }) : null;
 
                         if (matchPedido) {
                             item.pedido_duplicado_id = matchPedido.id;
