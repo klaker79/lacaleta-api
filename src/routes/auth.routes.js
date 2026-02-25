@@ -290,6 +290,87 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
         }
     });
 
+    // ========== CREATE ADDITIONAL RESTAURANT (for existing users) ==========
+    router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const { nombre } = req.body;
+            if (!nombre || !nombre.trim()) {
+                return res.status(400).json({ error: 'Nombre del restaurante requerido' });
+            }
+
+            await client.query('BEGIN');
+
+            // Create restaurant with 14-day trial
+            const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+            const restResult = await client.query(
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users)
+                 VALUES ($1, $2, 'trial', 'trialing', $3, 5) RETURNING id`,
+                [sanitizeString(nombre.trim()), req.user.email, trialEndsAt]
+            );
+            const restauranteId = restResult.rows[0].id;
+
+            // Link current user as admin
+            await client.query(
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                [req.user.userId, restauranteId, 'admin']
+            );
+
+            // Create Stripe customer for the new restaurant
+            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+            if (STRIPE_SECRET_KEY) {
+                try {
+                    const stripe = require('stripe')(STRIPE_SECRET_KEY);
+                    const user = await client.query('SELECT nombre FROM usuarios WHERE id = $1', [req.user.userId]);
+                    const customer = await stripe.customers.create({
+                        email: req.user.email,
+                        name: sanitizeString(nombre.trim()),
+                        metadata: { restaurante_id: String(restauranteId) }
+                    });
+                    await client.query(
+                        'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
+                        [customer.id, restauranteId]
+                    );
+                } catch (stripeErr) {
+                    log('warn', 'Error creando Stripe customer para nuevo restaurante', { error: stripeErr.message });
+                }
+            }
+
+            await client.query('COMMIT');
+
+            // Issue new JWT for the new restaurant
+            const token = jwt.sign(
+                { userId: req.user.userId, restauranteId, email: req.user.email, rol: 'admin', isSuperAdmin: req.user.isSuperAdmin || false },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            const isProduction = process.env.NODE_ENV === 'production';
+            res.cookie('auth_token', token, {
+                httpOnly: true, secure: isProduction, sameSite: 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+            });
+
+            log('info', 'Nuevo restaurante creado por usuario existente', { userId: req.user.userId, restauranteId, nombre: nombre.trim() });
+
+            res.status(201).json({
+                token,
+                restaurant: { id: restauranteId, nombre: nombre.trim(), plan: 'trial' },
+                user: {
+                    id: req.user.userId, email: req.user.email,
+                    restaurante: nombre.trim(), restauranteId,
+                    rol: 'admin', isSuperAdmin: req.user.isSuperAdmin || false
+                }
+            });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            log('error', 'Error creando restaurante adicional', { error: err.message });
+            res.status(500).json({ error: 'Error creando restaurante' });
+        } finally {
+            client.release();
+        }
+    });
+
     // ========== LOGOUT ==========
     router.post('/auth/logout', (req, res) => {
         const token = req.cookies?.auth_token || req.headers.authorization?.split(' ')[1];
