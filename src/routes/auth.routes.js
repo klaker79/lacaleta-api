@@ -81,11 +81,13 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             }
 
             // Multi-restaurant: check all restaurants this user has access to
+            // Exclude pending_payment (not yet paid) and suspended
             const restResult = await pool.query(
                 `SELECT ur.restaurante_id, ur.rol, r.nombre
                  FROM usuario_restaurantes ur
                  JOIN restaurantes r ON ur.restaurante_id = r.id
                  WHERE ur.usuario_id = $1
+                   AND r.plan_status NOT IN ('pending_payment', 'suspended')
                  ORDER BY ur.created_at ASC`,
                 [user.id]
             );
@@ -187,9 +189,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Sin acceso a este restaurante' });
             }
 
-            const rest = await pool.query('SELECT nombre FROM restaurantes WHERE id = $1', [restauranteId]);
+            const rest = await pool.query('SELECT nombre, plan_status FROM restaurantes WHERE id = $1', [restauranteId]);
             if (rest.rows.length === 0) {
                 return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            if (['pending_payment', 'suspended'].includes(rest.rows[0].plan_status)) {
+                return res.status(403).json({ error: 'Este restaurante no está activo' });
             }
 
             const token = jwt.sign(
@@ -239,7 +244,10 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Sin acceso a este restaurante' });
             }
 
-            const rest = await pool.query('SELECT nombre FROM restaurantes WHERE id = $1', [restauranteId]);
+            const rest = await pool.query('SELECT nombre, plan_status FROM restaurantes WHERE id = $1', [restauranteId]);
+            if (rest.rows.length > 0 && ['pending_payment', 'suspended'].includes(rest.rows[0].plan_status)) {
+                return res.status(403).json({ error: 'Este restaurante no está activo' });
+            }
             if (rest.rows.length === 0) {
                 return res.status(404).json({ error: 'Restaurante no encontrado' });
             }
@@ -276,10 +284,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     router.get('/auth/my-restaurants', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(
-                `SELECT ur.restaurante_id as id, ur.rol, r.nombre
+                `SELECT ur.restaurante_id as id, ur.rol, r.nombre, r.plan_status
                  FROM usuario_restaurantes ur
                  JOIN restaurantes r ON ur.restaurante_id = r.id
                  WHERE ur.usuario_id = $1
+                   AND r.plan_status NOT IN ('pending_payment', 'suspended')
                  ORDER BY ur.created_at ASC`,
                 [req.user.userId]
             );
@@ -295,6 +304,32 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     // Restaurant starts as 'pending_payment'. Webhook activates it after payment.
     const PLAN_ORDER = { starter: 1, trial: 2, profesional: 2, premium: 3 };
     const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999 };
+
+    // Cleanup orphaned pending_payment restaurants for a user
+    router.delete('/auth/pending-restaurant/:id', authMiddleware, async (req, res) => {
+        try {
+            const id = parseInt(req.params.id);
+            if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
+
+            // Only delete if it's pending_payment AND belongs to this user
+            const result = await pool.query(
+                `DELETE FROM restaurantes
+                 WHERE id = $1 AND plan_status = 'pending_payment'
+                   AND id IN (SELECT restaurante_id FROM usuario_restaurantes WHERE usuario_id = $2)
+                 RETURNING id`,
+                [id, req.user.userId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'No encontrado o ya activado' });
+            }
+            // Junction table cleaned by ON DELETE CASCADE
+            log('info', 'Restaurante pending_payment limpiado', { userId: req.user.userId, restauranteId: id });
+            res.json({ success: true });
+        } catch (err) {
+            log('error', 'Error limpiando pending restaurant', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
 
     router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
         const client = await pool.connect();
@@ -338,6 +373,14 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             }
 
             await client.query('BEGIN');
+
+            // Cleanup any previous orphaned pending_payment restaurants from this user
+            await client.query(
+                `DELETE FROM restaurantes
+                 WHERE plan_status = 'pending_payment'
+                   AND id IN (SELECT restaurante_id FROM usuario_restaurantes WHERE usuario_id = $1)`,
+                [req.user.userId]
+            );
 
             // Create restaurant with pending_payment status
             const restResult = await client.query(
