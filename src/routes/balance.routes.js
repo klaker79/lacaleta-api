@@ -590,41 +590,103 @@ REGLAS:
             const result = await pool.query(query, params);
             const rows = result.rows;
 
-            // 🔒 Detección de duplicados: buscar pedidos manuales que coincidan por fecha (±1 día)
+            // 🔒 Detección de duplicados: buscar compras ya existentes por fecha (±1 día)
+            // Chequea 3 fuentes: pedidos manuales, compras ya aprobadas, y otros batches pendientes
             if (rows.length > 0) {
                 const fechas = [...new Set(rows.map(r => r.fecha).filter(Boolean))];
+                const batchIds = [...new Set(rows.map(r => r.batch_id).filter(Boolean))];
                 if (fechas.length > 0) {
+                    const minFecha = fechas.reduce((a, b) => a < b ? a : b);
+                    const maxFecha = fechas.reduce((a, b) => a > b ? a : b);
+
+                    // 1. Pedidos manuales
                     const pedidosResult = await pool.query(
-                        `SELECT id, fecha, total, estado, proveedor_id
+                        `SELECT id, fecha, total, estado, proveedor_id, 'pedido' as origen
                          FROM pedidos
                          WHERE restaurante_id = $1
                            AND deleted_at IS NULL
                            AND estado IN ('recibido', 'pendiente')
                            AND fecha::date >= (($2::date) - INTERVAL '1 day')
                            AND fecha::date <= (($3::date) + INTERVAL '1 day')`,
-                        [req.restauranteId, fechas.reduce((a, b) => a < b ? a : b), fechas.reduce((a, b) => a > b ? a : b)]
+                        [req.restauranteId, minFecha, maxFecha]
                     );
+
+                    // 2. Compras ya aprobadas (precios_compra_diarios)
+                    const comprasAprobResult = await pool.query(
+                        `SELECT ingrediente_id, fecha, SUM(total_compra) as total, 'aprobado' as origen
+                         FROM precios_compra_diarios
+                         WHERE restaurante_id = $1
+                           AND fecha >= (($2::date) - INTERVAL '1 day')
+                           AND fecha <= (($3::date) + INTERVAL '1 day')
+                         GROUP BY ingrediente_id, fecha`,
+                        [req.restauranteId, minFecha, maxFecha]
+                    );
+
+                    // 3. Otros batches pendientes (mismo ingrediente, distinto batch)
+                    const otrosPendResult = await pool.query(
+                        `SELECT batch_id, ingrediente_id, fecha, ingrediente_nombre
+                         FROM compras_pendientes
+                         WHERE restaurante_id = $1
+                           AND estado = 'pendiente'
+                           AND fecha::date >= (($2::date) - INTERVAL '1 day')
+                           AND fecha::date <= (($3::date) + INTERVAL '1 day')
+                           ${batchIds.length > 0 ? `AND batch_id NOT IN (${batchIds.map((_, i) => `$${i + 4}`).join(',')})` : ''}`,
+                        [req.restauranteId, minFecha, maxFecha, ...batchIds]
+                    );
+
                     const pedidos = pedidosResult.rows;
+                    const comprasAprobadas = comprasAprobResult.rows;
+                    const otrosPendientes = otrosPendResult.rows;
 
                     // Enriquecer cada item pendiente con info de duplicado
                     for (const item of rows) {
                         if (!item.fecha) continue;
                         const itemDate = new Date(item.fecha).toISOString().split('T')[0];
-                        const match = pedidos.find(p => {
+
+                        // Check 1: ¿Hay pedido manual con misma fecha+proveedor?
+                        const matchPedido = pedidos.find(p => {
                             const pedDate = new Date(p.fecha).toISOString().split('T')[0];
                             const diffDays = Math.abs((new Date(pedDate) - new Date(itemDate)) / 86400000);
                             if (diffDays > 1) return false;
-                            // Si el ingrediente tiene proveedor, solo match si coincide
                             if (item.ingrediente_proveedor_id && p.proveedor_id) {
                                 return p.proveedor_id === item.ingrediente_proveedor_id;
                             }
                             return true;
                         });
-                        if (match) {
-                            item.pedido_duplicado_id = match.id;
-                            item.pedido_duplicado_fecha = match.fecha;
-                            item.pedido_duplicado_total = match.total;
-                            item.pedido_duplicado_estado = match.estado;
+
+                        // Check 2: ¿Este ingrediente ya fue aprobado en la misma fecha?
+                        const matchAprobado = item.ingrediente_id ? comprasAprobadas.find(c => {
+                            const cDate = new Date(c.fecha).toISOString().split('T')[0];
+                            const diffDays = Math.abs((new Date(cDate) - new Date(itemDate)) / 86400000);
+                            return diffDays <= 1 && c.ingrediente_id === item.ingrediente_id;
+                        }) : null;
+
+                        // Check 3: ¿Hay otro batch pendiente con mismo ingrediente+fecha?
+                        const matchOtroPend = otrosPendientes.find(o => {
+                            const oDate = new Date(o.fecha).toISOString().split('T')[0];
+                            const diffDays = Math.abs((new Date(oDate) - new Date(itemDate)) / 86400000);
+                            if (diffDays > 1) return false;
+                            if (item.ingrediente_id && o.ingrediente_id) return o.ingrediente_id === item.ingrediente_id;
+                            // Fallback: comparar por nombre de ingrediente
+                            return item.ingrediente_nombre && o.ingrediente_nombre &&
+                                item.ingrediente_nombre.toLowerCase() === o.ingrediente_nombre.toLowerCase();
+                        });
+
+                        if (matchPedido) {
+                            item.pedido_duplicado_id = matchPedido.id;
+                            item.pedido_duplicado_fecha = matchPedido.fecha;
+                            item.pedido_duplicado_total = matchPedido.total;
+                            item.pedido_duplicado_estado = matchPedido.estado;
+                        } else if (matchAprobado) {
+                            item.pedido_duplicado_id = -1; // Flag especial: ya aprobado
+                            item.pedido_duplicado_fecha = matchAprobado.fecha;
+                            item.pedido_duplicado_total = matchAprobado.total;
+                            item.pedido_duplicado_estado = 'ya aprobado';
+                        } else if (matchOtroPend) {
+                            item.pedido_duplicado_id = -2; // Flag especial: otro batch pendiente
+                            item.pedido_duplicado_fecha = matchOtroPend.fecha;
+                            item.pedido_duplicado_total = null;
+                            item.pedido_duplicado_estado = 'pendiente en otro albarán';
                         }
                     }
                 }
