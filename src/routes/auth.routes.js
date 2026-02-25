@@ -10,8 +10,6 @@ const { authMiddleware, requireAdmin, tokenBlacklist } = require('../middleware/
 const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { sanitizeString } = require('../utils/validators');
-const { seedTemplateIngredients } = require('../utils/seed-template');
-
 // URLs parametrizadas (env vars con fallback para backwards-compat)
 const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
 const API_URL = process.env.API_URL || 'https://lacaleta-api.mindloop.cloud';
@@ -415,9 +413,6 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
                 [userResult.rows[0].id, restauranteId, 'admin']
             );
-
-            // Seed template ingredients for the new restaurant
-            await seedTemplateIngredients(client, restauranteId);
 
             await client.query('COMMIT');
 

@@ -10,8 +10,6 @@ const { authMiddleware, requireSuperAdmin } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateNumber, sanitizeString } = require('../utils/validators');
-const { seedTemplateIngredients } = require('../utils/seed-template');
-
 const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
 const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999, trial: 5 };
 
@@ -270,9 +268,6 @@ module.exports = function (pool, config = {}) {
                 'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
                 [userResult.rows[0].id, restauranteId, 'admin']
             );
-
-            // Seed template ingredients
-            await seedTemplateIngredients(client, restauranteId);
 
             await client.query('COMMIT');
 
