@@ -103,19 +103,8 @@ module.exports = function (pool) {
                         pedidoId: result.rows[0].id
                     });
 
-                    // ⚡ FIX: Sumar stock al crear pedido como recibido (simétrico con DELETE que resta)
-                    if (cantidad > 0) {
-                        const ingRow = await client.query(
-                            'SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                            [ingId, req.restauranteId]
-                        );
-                        const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
-                        const stockASumar = cantidad * cantPorFormato;
-                        await client.query(
-                            `UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3`,
-                            [stockASumar, ingId, req.restauranteId]
-                        );
-                    }
+                    // Stock adjustment handled by frontend via bulkAdjustStock — NOT here
+                    // (avoids double-counting since frontend already adjusts stock atomically)
                 }
 
                 log('info', 'Compras diarias y stock registrados desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
@@ -182,19 +171,8 @@ module.exports = function (pool) {
                         pedidoId: id
                     });
 
-                    // ⚡ FIX: Sumar stock al recibir pedido (simétrico con DELETE que resta)
-                    if (cantidad > 0) {
-                        const ingRow = await client.query(
-                            'SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                            [ingId, req.restauranteId]
-                        );
-                        const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
-                        const stockASumar = cantidad * cantPorFormato;
-                        await client.query(
-                            `UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3`,
-                            [stockASumar, ingId, req.restauranteId]
-                        );
-                    }
+                    // Stock adjustment handled by frontend via bulkAdjustStock — NOT here
+                    // (avoids double-counting since frontend already adjusts stock atomically)
                 }
 
                 log('info', 'Compras diarias y stock registrados desde pedido', { pedidoId: id, items: ingredientes.length });
@@ -298,15 +276,22 @@ module.exports = function (pool) {
                 }
 
                 // Revertir stock de cada ingrediente
+                // Frontend adds stock via bulkAdjustStock. For pedido recepción,
+                // delta = cantidadRecibida × cantPorFormato (already multiplied).
+                // For compra mercado, delta = cantidad (raw base units, no multiplication).
+                // So: only multiply by cantPorFormato when cantidadRecibida exists.
                 for (const item of ingredientes) {
                     const ingId = item.ingredienteId || item.ingrediente_id;
-                    const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                    const rawCantidad = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
-                    if (cantidadRecibida > 0) {
-                        // ⚡ FIX: Multiplicar por cantidad_por_formato al revertir (consistente con recepción)
-                        const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
-                        const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
-                        const stockARevertir = cantidadRecibida * cantPorFormato;
+                    if (rawCantidad > 0) {
+                        let stockARevertir = rawCantidad;
+                        // Only multiply by formato if this was a pedido recepción (has cantidadRecibida)
+                        if (item.cantidadRecibida) {
+                            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
+                            const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                            stockARevertir = rawCantidad * cantPorFormato;
+                        }
                         await client.query(
                             `UPDATE ingredientes
                          SET stock_actual = GREATEST(0, stock_actual - $1),
