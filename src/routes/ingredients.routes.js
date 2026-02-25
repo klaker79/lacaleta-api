@@ -326,19 +326,23 @@ module.exports = function (pool) {
     });
 
     // Bulk atomic stock adjustment - Para operaciones con múltiples ingredientes (recepción, producción)
+    // ⚡ FIX W1: Wrapped in transaction — all adjustments succeed or none do
     router.post('/ingredients/bulk-adjust-stock', authMiddleware, async (req, res) => {
+        const client = await pool.connect();
         try {
             const { adjustments, reason } = req.body;
             // adjustments: [{ id: 123, delta: 5.0 }, { id: 456, delta: -2.0 }]
 
             if (!Array.isArray(adjustments) || adjustments.length === 0) {
+                client.release();
                 return res.status(400).json({ error: 'Array de ajustes requerido' });
             }
+
+            await client.query('BEGIN');
 
             const results = [];
             const errors = [];
 
-            // Procesar secuencialmente para mantener integridad
             for (const adj of adjustments) {
                 if (!adj.id || adj.delta === undefined || isNaN(parseFloat(adj.delta))) {
                     errors.push({ id: adj.id, error: 'ID o delta inválido' });
@@ -346,7 +350,13 @@ module.exports = function (pool) {
                 }
 
                 try {
-                    const result = await pool.query(
+                    // FOR UPDATE lock to prevent race conditions
+                    await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                        [adj.id, req.restauranteId]
+                    );
+
+                    const result = await client.query(
                         `UPDATE ingredientes 
                      SET stock_actual = GREATEST(0, COALESCE(stock_actual, 0) + $1),
                          ultima_actualizacion_stock = NOW()
@@ -370,7 +380,9 @@ module.exports = function (pool) {
                 }
             }
 
-            log('info', 'Bulk stock adjustment', {
+            await client.query('COMMIT');
+
+            log('info', 'Bulk stock adjustment (transactional)', {
                 reason: reason || 'no especificado',
                 exitosos: results.length,
                 fallidos: errors.length
@@ -378,8 +390,11 @@ module.exports = function (pool) {
 
             res.json({ success: errors.length === 0, results, errors, reason });
         } catch (err) {
+            await client.query('ROLLBACK');
             log('error', 'Error en bulk adjust stock', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
+        } finally {
+            client.release();
         }
     });
 
