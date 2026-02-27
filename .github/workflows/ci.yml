@@ -43,6 +43,7 @@ jobs:
       NODE_ENV: test
       API_URL: http://localhost:3001
       ALLOWED_ORIGINS: http://localhost:3001
+      AUTH_RATE_LIMIT: 500
 
       # Test user (used by tests/setup.js)
       TEST_USER_EMAIL: ci-test@mindloop.dev

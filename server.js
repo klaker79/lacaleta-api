@@ -131,7 +131,7 @@ app.use((req, res, next) => {
             log('warn', 'CORS: Request sin origin bloqueado', { path: req.path, ip: req.ip, method: req.method });
             return res.status(403).json({ error: 'CORS: Header Origin requerido' });
         }
-    } else if (ALLOWED_ORIGINS.includes(origin) || /https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1]))/.test(origin)) {
+    } else if (ALLOWED_ORIGINS.includes(origin) || /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin)) {
         // Permitir explícitamente orígenes de red local (LAN)
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');

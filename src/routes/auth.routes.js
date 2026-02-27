@@ -511,6 +511,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
             }
 
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return res.status(400).json({ error: 'Formato de email inválido' });
+            }
+
             if (password.length < 8) {
                 return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
             }
@@ -730,8 +735,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Token y nueva contraseña requeridos' });
             }
 
-            if (newPassword.length < 6) {
-                return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+            if (newPassword.length < 8) {
+                return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
             }
 
             const result = await pool.query(
@@ -847,6 +852,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             if (!nombre || !email || !password) {
                 return res.status(400).json({ error: 'Faltan datos requeridos (nombre, email, password)' });
+            }
+
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return res.status(400).json({ error: 'Formato de email inválido' });
             }
 
             const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
