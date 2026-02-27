@@ -859,6 +859,28 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Formato de email inválido' });
             }
 
+            // Check plan status and user limits
+            const restInfo = await pool.query(
+                'SELECT plan_status, max_users FROM restaurantes WHERE id = $1',
+                [req.restauranteId]
+            );
+            if (restInfo.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            const { plan_status, max_users } = restInfo.rows[0];
+
+            if (['suspended', 'canceled', 'past_due'].includes(plan_status)) {
+                return res.status(403).json({ error: 'Tu suscripción no está activa. Renueva tu plan para añadir usuarios.' });
+            }
+
+            const userCount = await pool.query(
+                'SELECT COUNT(*)::int AS total FROM usuarios WHERE restaurante_id = $1',
+                [req.restauranteId]
+            );
+            if (userCount.rows[0].total >= (max_users || 5)) {
+                return res.status(403).json({ error: `Has alcanzado el límite de ${max_users || 5} usuarios para tu plan. Mejora tu plan para añadir más.` });
+            }
+
             const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
             if (check.rows.length > 0) {
                 return res.status(400).json({ error: 'Este email ya está registrado' });
