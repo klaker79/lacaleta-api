@@ -360,16 +360,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Billing requerido: monthly, annual' });
             }
 
-            // Validate plan >= current restaurant plan
-            const currentRest = await pool.query(
-                'SELECT plan FROM restaurantes WHERE id = $1', [req.restauranteId]
-            );
-            const currentPlan = currentRest.rows[0]?.plan || 'starter';
-            if ((PLAN_ORDER[plan] || 0) < (PLAN_ORDER[currentPlan] || 0)) {
-                return res.status(400).json({
-                    error: `El plan debe ser igual o superior a tu plan actual (${currentPlan})`
-                });
-            }
+            // Each restaurant chooses its own plan independently
 
             // Stripe price ID from env
             const priceKey = `${plan}_${billing}`;
