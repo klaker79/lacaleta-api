@@ -83,19 +83,33 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             // Multi-restaurant: check all restaurants this user has access to
             // Exclude pending_payment (not yet paid) and suspended
             const restResult = await pool.query(
-                `SELECT ur.restaurante_id, ur.rol, r.nombre
+                `SELECT ur.restaurante_id, ur.rol, r.nombre, r.plan_status, r.trial_ends_at
                  FROM usuario_restaurantes ur
                  JOIN restaurantes r ON ur.restaurante_id = r.id
                  WHERE ur.usuario_id = $1
                    AND r.plan_status NOT IN ('pending_payment', 'suspended')
+                   AND NOT (r.plan_status = 'trialing' AND r.trial_ends_at < NOW())
                  ORDER BY ur.created_at ASC`,
                 [user.id]
             );
 
             // Fallback for users not yet in junction table (pre-migration)
             let restaurants = restResult.rows;
+            if (restaurants.length === 0 && user.restaurante_id) {
+                // Check if fallback restaurant is valid (not expired trial / not suspended)
+                const fallbackCheck = await pool.query(
+                    `SELECT plan_status, trial_ends_at FROM restaurantes WHERE id = $1`,
+                    [user.restaurante_id]
+                );
+                const fb = fallbackCheck.rows[0];
+                if (fb && !['pending_payment', 'suspended'].includes(fb.plan_status) &&
+                    !(fb.plan_status === 'trialing' && fb.trial_ends_at && new Date(fb.trial_ends_at) < new Date())) {
+                    restaurants = [{ restaurante_id: user.restaurante_id, rol: user.rol, nombre: user.restaurante_nombre }];
+                }
+            }
+
             if (restaurants.length === 0) {
-                restaurants = [{ restaurante_id: user.restaurante_id, rol: user.rol, nombre: user.restaurante_nombre }];
+                return res.status(403).json({ error: 'Tu periodo de prueba ha expirado o tu cuenta está suspendida. Contacta con soporte o mejora tu plan.' });
             }
 
             const isProduction = process.env.NODE_ENV === 'production';
@@ -859,6 +873,28 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Formato de email inválido' });
             }
 
+            // Check plan status and user limits
+            const restInfo = await pool.query(
+                'SELECT plan_status, max_users FROM restaurantes WHERE id = $1',
+                [req.restauranteId]
+            );
+            if (restInfo.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            const { plan_status, max_users } = restInfo.rows[0];
+
+            if (['suspended', 'canceled', 'past_due'].includes(plan_status)) {
+                return res.status(403).json({ error: 'Tu suscripción no está activa. Renueva tu plan para añadir usuarios.' });
+            }
+
+            const userCount = await pool.query(
+                'SELECT COUNT(*)::int AS total FROM usuarios WHERE restaurante_id = $1',
+                [req.restauranteId]
+            );
+            if (userCount.rows[0].total >= (max_users || 5)) {
+                return res.status(403).json({ error: `Has alcanzado el límite de ${max_users || 5} usuarios para tu plan. Mejora tu plan para añadir más.` });
+            }
+
             const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
             if (check.rows.length > 0) {
                 return res.status(400).json({ error: 'Este email ya está registrado' });
@@ -893,13 +929,27 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
             }
 
-            const result = await pool.query(
-                'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
+            // Remove from junction table first
+            await pool.query(
+                'DELETE FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
                 [userIdToDelete, req.restauranteId]
             );
 
-            if (result.rows.length === 0) {
-                return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
+            // Check if user still belongs to other restaurants
+            const otherRest = await pool.query(
+                'SELECT COUNT(*)::int AS total FROM usuario_restaurantes WHERE usuario_id = $1',
+                [userIdToDelete]
+            );
+
+            if (otherRest.rows[0].total === 0) {
+                // No other restaurants — delete user entirely
+                const result = await pool.query(
+                    'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
+                    [userIdToDelete, req.restauranteId]
+                );
+                if (result.rows.length === 0) {
+                    return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
+                }
             }
 
             log('info', 'Usuario eliminado del equipo', { admin: req.user.email, deletedId: userIdToDelete });
