@@ -46,6 +46,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('system', require('./system.routes'), pool);
     mount('stripe', require('./stripe.routes'), pool);
     mount('superadmin', require('./superadmin.routes'), pool, config);
+    mount('integrations', require('./integrations.routes'), pool);
 
     // Suppliers — already controller-based (Fase 4B)
     try {
