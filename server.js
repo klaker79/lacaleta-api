@@ -95,6 +95,7 @@ const DEFAULT_ORIGINS = [
     'https://admin.mindloop.cloud',
     // 🔒 FIX B2: Localhost solo en desarrollo (no exponer en producción)
     ...(process.env.NODE_ENV !== 'production' ? [
+        'http://localhost:3000',    // Vite dev (demo)
         'http://localhost:5173',    // Vite dev
         'http://localhost:5174',    // Admin panel dev
         'http://localhost:5500',    // Live Server
@@ -124,7 +125,7 @@ app.use((req, res, next) => {
         const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password'];
         const isPublicPath = publicPaths.some(p => req.path === p || (p !== '/' && req.path.startsWith(p)));
 
-        if (isPublicPath) {
+        if (isPublicPath || process.env.NODE_ENV !== 'production') {
             res.header('Access-Control-Allow-Origin', '*');
         } else {
             // Rechazar API requests sin origin (previene CSRF y uso no autorizado)
