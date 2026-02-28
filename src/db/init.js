@@ -580,6 +580,13 @@ async function initializeDatabase(pool) {
     log('info', 'Migración is_superadmin completada');
   } catch (e) { log('warn', 'Migración is_superadmin', { error: e.message }); }
 
+  // ========== MIGRACIÓN: Drop UNIQUE on restaurantes.email (multi-restaurant) ==========
+  // Same user can own multiple restaurants, so email can't be unique
+  try {
+    await pool.query(`ALTER TABLE restaurantes DROP CONSTRAINT IF EXISTS restaurantes_email_key;`);
+    log('info', 'Migración: UNIQUE constraint on restaurantes.email removed (multi-restaurant)');
+  } catch (e) { log('warn', 'Migración drop restaurantes email unique', { error: e.message }); }
+
   // ========== MIGRACION: Multi-restaurant junction table ==========
   try {
     await pool.query(`
