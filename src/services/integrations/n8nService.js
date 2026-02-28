@@ -55,7 +55,7 @@ module.exports = {
         try {
             const [workflows, executions] = await Promise.all([
                 makeRequest('/workflows?limit=100'),
-                makeRequest('/executions?limit=20&status=error,crashed')
+                makeRequest('/executions?limit=20&status=error')
             ]);
 
             const workflowList = workflows.data || [];
