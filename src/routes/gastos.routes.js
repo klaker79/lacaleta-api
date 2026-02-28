@@ -62,11 +62,12 @@ module.exports = function (pool) {
             const id = idCheck.value;
             const { concepto, monto_mensual } = req.body;
 
+            const conceptoLimpio = concepto !== undefined ? sanitizeString(concepto, 255) : undefined;
             const montoValidado = monto_mensual !== undefined ? validatePrecio(monto_mensual) : undefined;
 
             const result = await pool.query(
                 'UPDATE gastos_fijos SET concepto = COALESCE($1, concepto), monto_mensual = COALESCE($2, monto_mensual), updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND restaurante_id = $4 RETURNING *',
-                [concepto, montoValidado, id, req.restauranteId]
+                [conceptoLimpio, montoValidado, id, req.restauranteId]
             );
 
             if (result.rows.length === 0) {

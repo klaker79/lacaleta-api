@@ -15,7 +15,7 @@ const globalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // 100 intentos de login (margen de seguridad)
+    max: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 20, // 20 en prod, configurable para CI
     message: { error: 'Demasiados intentos de login, espera 15 minutos' },
     standardHeaders: true,
     legacyHeaders: false
