@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-unused-vars
 const fs = require('fs');
 
 // Configuración de la demo
@@ -59,17 +60,8 @@ RECIPES.forEach(recipe => {
     for (let i = 0; i < recipe.count; i++) {
         const date = randomDate(START_DATE, END_DATE);
         const dateStr = formatDate(date);
-        // Insertamos cada unidad como una fila, o podríamos agrupar
-        // Para simplificar y dar volumen de filas, insertamos unitario o pequeños grupos
-        // Como la tabla es plana, una fila = una venta de X cantidad de ese item
-        // Para variar, el 20% de las veces son 2 unidades
-        let qty = 1;
-        if (Math.random() > 0.8) qty = 2;
-
-        // Si nos pasamos de la cuenta total ajustamos, pero aquí simplificamos
-        // El count total será aproximado si uso random qty > 1
-        // Para ser exacto con el usuario: usaré qty=1 siempre para clavar los numeros
-        qty = 1;
+        // qty=1 siempre para clavar los numeros exactos del usuario
+        const qty = 1;
 
         values.push(`(${RESTAURANTE_ID}, ${recipe.id}, ${qty}, ${recipe.price}, ${qty * recipe.price}, '${dateStr}')`);
     }
