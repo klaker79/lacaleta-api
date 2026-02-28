@@ -122,7 +122,7 @@ app.use((req, res, next) => {
     // 🔒 FIX SEGURIDAD: Solo permitir * para health checks, no para toda la API
     if (!origin || origin === '') {
         // Rutas permitidas sin origin (health checks, métricas, Uptime Kuma)
-        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password'];
+        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password', '/api/stripe/webhook'];
         const isPublicPath = publicPaths.some(p => req.path === p || (p !== '/' && req.path.startsWith(p)));
 
         if (isPublicPath || process.env.NODE_ENV !== 'production') {
