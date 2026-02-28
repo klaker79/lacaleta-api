@@ -7,11 +7,13 @@
 const https = require('https');
 
 const CONFIGURED = !!(process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT);
+// Support EU region: if SENTRY_REGION=de or DSN contains .de.sentry.io, use de.sentry.io
+const SENTRY_HOST = process.env.SENTRY_REGION === 'de' ? 'de.sentry.io' : (process.env.SENTRY_REGION || 'sentry.io');
 
 function makeRequest(path) {
     return new Promise((resolve, reject) => {
         const options = {
-            hostname: 'sentry.io',
+            hostname: SENTRY_HOST,
             path: `/api/0/projects/${process.env.SENTRY_ORG}/${process.env.SENTRY_PROJECT}${path}`,
             headers: {
                 'Authorization': `Bearer ${process.env.SENTRY_AUTH_TOKEN}`,
