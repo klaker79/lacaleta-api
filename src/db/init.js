@@ -347,6 +347,32 @@ async function initializeDatabase(pool) {
         `);
   } catch (e) { log('warn', 'Migración recetas.codigo', { error: e.message }); }
 
+  // ========== MIGRACIÓN: Columnas v2 para recetas (cost calculation layer) ==========
+  try {
+    await pool.query(`
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS descripcion TEXT;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS categoria_id INTEGER;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS raciones INTEGER DEFAULT 1;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS coste_calculado DECIMAL(10, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS coste_por_racion DECIMAL(10, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS margen_porcentaje DECIMAL(5, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS food_cost DECIMAL(5, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS last_cost_calculation TIMESTAMP;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        `);
+    log('info', 'Migración columnas v2 recetas (cost calculation) completada');
+  } catch (e) { log('warn', 'Migración columnas v2 recetas', { error: e.message }); }
+
+  // ========== MIGRACIÓN: Columnas v2 para ingredientes (cost calculation layer) ==========
+  try {
+    await pool.query(`
+            ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS precio_kg DECIMAL(10, 2);
+            ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        `);
+    log('info', 'Migración columnas v2 ingredientes completada');
+  } catch (e) { log('warn', 'Migración columnas v2 ingredientes', { error: e.message }); }
+
   // Añadir columnas a proveedores
   try {
     await pool.query(`
