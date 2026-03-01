@@ -160,6 +160,15 @@ module.exports = function (pool, config = {}) {
                 }
                 updates.push(`plan = $${paramIndex++}`);
                 params.push(plan);
+
+                // Auto-set trial_ends_at when switching to trial
+                if (plan === 'trial') {
+                    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+                    updates.push(`trial_ends_at = $${paramIndex++}`);
+                    params.push(trialEndsAt);
+                } else {
+                    updates.push(`trial_ends_at = NULL`);
+                }
             }
             if (plan_status !== undefined) {
                 const validStatuses = ['trialing', 'active', 'canceled', 'past_due', 'paused', 'suspended'];
