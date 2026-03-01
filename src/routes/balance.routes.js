@@ -11,6 +11,63 @@ const crypto = require('crypto');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
 
 /**
+ * 🔍 Check for duplicate albaranes by comparing product names + quantities + date
+ * Returns null if no duplicate, or { batchId, fecha, itemCount, similarity } if found
+ */
+async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
+    try {
+        // Generate fingerprint: sorted product names (normalized) + quantities
+        const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim();
+        const newNames = items.map(i => normalizar(i.producto || i.ingrediente || '')).filter(Boolean).sort();
+        if (newNames.length === 0) return null;
+
+        // Find existing batches from the last 30 days in compras_pendientes
+        const existing = await pool.query(
+            `SELECT batch_id, ingrediente_nombre, cantidad, fecha
+             FROM compras_pendientes
+             WHERE restaurante_id = $1
+               AND fecha >= (CURRENT_DATE - INTERVAL '30 days')
+             ORDER BY batch_id, id`,
+            [restauranteId]
+        );
+
+        if (existing.rows.length === 0) return null;
+
+        // Group by batch_id
+        const batches = new Map();
+        for (const row of existing.rows) {
+            if (!batches.has(row.batch_id)) batches.set(row.batch_id, { items: [], fecha: row.fecha });
+            batches.get(row.batch_id).items.push(normalizar(row.ingrediente_nombre));
+        }
+
+        // Compare each batch's product names against new ones
+        for (const [batchId, batch] of batches) {
+            const existingNames = batch.items.sort();
+            // Count matching names
+            let matches = 0;
+            for (const name of newNames) {
+                if (existingNames.some(e => e === name || e.includes(name) || name.includes(e))) {
+                    matches++;
+                }
+            }
+            const similarity = matches / Math.max(newNames.length, existingNames.length);
+            if (similarity >= 0.7) {
+                return {
+                    batchId,
+                    fecha: batch.fecha,
+                    itemCount: existingNames.length,
+                    similarity: Math.round(similarity * 100)
+                };
+            }
+        }
+        return null;
+    } catch (err) {
+        log('error', 'Error checking duplicate albaran', { error: err.message });
+        return null; // Never block on error
+    }
+}
+
+/**
  * @param {Pool} pool - PostgreSQL connection pool
  */
 module.exports = function (pool) {
@@ -396,6 +453,13 @@ REGLAS:
                 paramIdx += 7;
             }
 
+            // 🔍 Check for duplicate albaran before inserting
+            const duplicateWarning = await checkDuplicateAlbaran(
+                pool, req.restauranteId,
+                data.lineas.map(l => ({ producto: l.producto, cantidad: l.cantidad })),
+                fecha
+            );
+
             if (placeholders.length > 0) {
                 await pool.query(
                     `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id)
@@ -452,7 +516,7 @@ REGLAS:
                 });
             }
 
-            res.json({
+            const albaranResponse = {
                 success: true,
                 batchId,
                 proveedor: data.proveedor || null,
@@ -461,7 +525,12 @@ REGLAS:
                 matched,
                 unmatched: data.lineas.length - matched,
                 totalImporte: Math.round(totalImporte * 100) / 100
-            });
+            };
+            if (duplicateWarning) {
+                albaranResponse.duplicateWarning = duplicateWarning;
+                log('info', 'Duplicate albaran detected', { batchId, duplicate: duplicateWarning });
+            }
+            res.json(albaranResponse);
         } catch (err) {
             log('error', 'Error procesando albarán', { error: err.message });
             res.status(500).json({ error: 'Error interno procesando albarán' });
@@ -595,6 +664,14 @@ REGLAS:
                 resultados.recibidos++;
             }
 
+            // 🔍 Check for duplicate albaran before inserting
+            const fechaCheck = compras[0]?.fecha || new Date().toISOString().split('T')[0];
+            const duplicateWarning = await checkDuplicateAlbaran(
+                pool, req.restauranteId,
+                compras.map(c => ({ ingrediente: c.ingrediente, cantidad: c.cantidad })),
+                fechaCheck
+            );
+
             if (placeholders.length > 0) {
                 await pool.query(
                     `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id)
@@ -604,6 +681,10 @@ REGLAS:
             }
 
             log('info', 'Compras pendientes recibidas', { batchId, items: resultados.recibidos });
+            if (duplicateWarning) {
+                resultados.duplicateWarning = duplicateWarning;
+                log('info', 'Duplicate albaran detected (n8n)', { batchId, duplicate: duplicateWarning });
+            }
             res.json(resultados);
         } catch (err) {
             log('error', 'Error recibiendo compras pendientes', { error: err.message });
