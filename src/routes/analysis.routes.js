@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 
 /**
@@ -13,7 +14,7 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== ANÁLISIS AVANZADO ==========
-    router.get('/analysis/menu-engineering', authMiddleware, async (req, res) => {
+    router.get('/analysis/menu-engineering', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             // Query 1: Ventas agrupadas por receta
             const ventas = await pool.query(

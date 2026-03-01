@@ -879,7 +879,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             }
 
             const userCount = await pool.query(
-                'SELECT COUNT(*)::int AS total FROM usuarios WHERE restaurante_id = $1',
+                'SELECT COUNT(*)::int AS total FROM usuario_restaurantes WHERE restaurante_id = $1',
                 [req.restauranteId]
             );
             if (userCount.rows[0].total >= (max_users || 5)) {

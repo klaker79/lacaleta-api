@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateCantidad, validateId } = require('../utils/validators');
@@ -315,7 +316,7 @@ module.exports = function (pool) {
 
     // ========== ENDPOINT: PARSEAR PDF DE TPV CON IA ==========
     // Recibe un PDF del TPV y extrae los datos de ventas usando Claude API
-    router.post('/parse-pdf', authMiddleware, costlyApiLimiter, async (req, res) => {
+    router.post('/parse-pdf', authMiddleware, requirePlan('profesional'), costlyApiLimiter, async (req, res) => {
         try {
             const { pdfBase64, filename } = req.body;
 

@@ -202,7 +202,7 @@ module.exports = function (pool) {
     // 📸 ESCANEO DE ALBARANES CON CLAUDE VISION
     // ==========================================
 
-    router.post('/parse-albaran', authMiddleware, costlyApiLimiter, async (req, res) => {
+    router.post('/parse-albaran', authMiddleware, requirePlan('profesional'), costlyApiLimiter, async (req, res) => {
         try {
             const { imageBase64, mediaType, filename } = req.body;
 
@@ -407,6 +407,50 @@ REGLAS:
             log('info', 'Albarán escaneado y pendientes creados', {
                 batchId, proveedor: data.proveedor, fecha, items: data.lineas.length, matched
             });
+
+            // ── Sync a Google Sheets via n8n webhook (fire-and-forget) ──
+            const webhookUrl = process.env.N8N_ALBARAN_WEBHOOK_URL;
+            if (webhookUrl) {
+                const proveedor = data.proveedor || 'Desconocido';
+                const totalFactura = Math.round(totalImporte * 100) / 100;
+                // Formato DD/MM/YYYY para Sheets (consistente con datos existentes)
+                const fechaParts = fecha.split('-');
+                const fechaSheets = fechaParts.length === 3
+                    ? `${fechaParts[2]}/${fechaParts[1]}/${fechaParts[0]}`
+                    : fecha;
+
+                const rows = data.lineas.map(l => {
+                    const importe = l.total || ((l.precio_unitario || 0) * (l.cantidad || 0));
+                    return {
+                        Fecha: fechaSheets,
+                        N_factura: '',
+                        Proveedor: proveedor,
+                        Categoria: '',
+                        Descripcion: l.producto,
+                        Cantidad: l.cantidad || 0,
+                        Unidad: 'ud',
+                        'Precio_unit (€)': l.precio_unitario || 0,
+                        'Importe (€)': importe,
+                        Importe_Final: importe,
+                        Unidad_normalizada: 1,
+                        Factor_base: 1,
+                        'Precio_base (€)': l.precio_unitario || 0,
+                        'Precio_base_normalizado (€)': l.precio_unitario || 0,
+                        Total_factura: totalFactura,
+                        Descuento_Porcentaje: 0,
+                        Importe_Descuento: 0,
+                        Link_Factura: ''
+                    };
+                });
+
+                fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows })
+                }).catch(err => {
+                    log('warn', 'Error enviando albarán a n8n webhook (no-blocking)', { error: err.message });
+                });
+            }
 
             res.json({
                 success: true,
