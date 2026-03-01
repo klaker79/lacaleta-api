@@ -251,6 +251,24 @@ module.exports = function stripeRoutes(pool) {
         }
     });
 
+    // ========== CHOOSE STARTER (post-trial downgrade) ==========
+    router.post('/stripe/choose-starter', authMiddleware, async (req, res) => {
+        try {
+            const restauranteId = req.restauranteId;
+            await pool.query(
+                `UPDATE restaurantes
+                 SET plan = 'starter', plan_status = 'active', max_users = 2, trial_ends_at = NULL
+                 WHERE id = $1`,
+                [restauranteId]
+            );
+            log('info', 'Restaurante cambio a plan Starter', { restauranteId });
+            res.json({ success: true, plan: 'starter' });
+        } catch (err) {
+            log('error', 'Error cambiando a Starter', { error: err.message });
+            res.status(500).json({ error: 'Error al cambiar de plan' });
+        }
+    });
+
     // ========== SUBSCRIPTION STATUS ==========
     router.get('/stripe/subscription-status', authMiddleware, async (req, res) => {
         try {
