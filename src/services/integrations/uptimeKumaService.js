@@ -48,6 +48,15 @@ module.exports = {
                 makeRequest(`${BASE_URL}/api/status-page/heartbeat/${STATUS_SLUG}`)
             ]);
 
+            // Build monitor name map from status page publicGroupList
+            const nameMap = {};
+            const groups = statusPage.publicGroupList || [];
+            for (const group of groups) {
+                for (const m of (group.monitorList || [])) {
+                    nameMap[m.id] = m.name;
+                }
+            }
+
             const monitors = [];
             const uptimeList = heartbeats.uptimeList || {};
             const heartbeatList = heartbeats.heartbeatList || {};
@@ -58,7 +67,7 @@ module.exports = {
                 const uptime30d = uptimeList[`${monitorId}_720`];
                 monitors.push({
                     id: monitorId,
-                    name: latest?.monitorName || `Monitor ${monitorId}`,
+                    name: nameMap[monitorId] || latest?.monitorName || `Monitor ${monitorId}`,
                     status: latest?.status === 1 ? 'up' : 'down',
                     uptime24h: uptime24h != null ? (uptime24h * 100).toFixed(2) : null,
                     uptime30d: uptime30d != null ? (uptime30d * 100).toFixed(2) : null,
@@ -73,7 +82,7 @@ module.exports = {
                 if (downBeats.length > 0) {
                     incidents.push({
                         monitorId,
-                        monitorName: downBeats[0]?.monitorName || `Monitor ${monitorId}`,
+                        monitorName: nameMap[monitorId] || downBeats[0]?.monitorName || `Monitor ${monitorId}`,
                         downPeriods: downBeats.length,
                         lastDown: downBeats[downBeats.length - 1]?.time
                     });
