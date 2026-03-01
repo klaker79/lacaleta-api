@@ -7,7 +7,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { authMiddleware, requireSuperAdmin } = require('../middleware/auth');
-const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateNumber, sanitizeString } = require('../utils/validators');
 const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
@@ -17,8 +16,9 @@ module.exports = function (pool, config = {}) {
     const router = Router();
     const JWT_SECRET = config.JWT_SECRET || process.env.JWT_SECRET;
 
-    // Apply auth + superadmin + rate limiting to all /superadmin routes
-    router.use('/superadmin', authMiddleware, requireSuperAdmin, authLimiter);
+    // Apply auth + superadmin to all /superadmin routes
+    // No authLimiter here — globalLimiter (2000/15min) is enough for admin panel
+    router.use('/superadmin', authMiddleware, requireSuperAdmin);
 
     // ========== METRICS / KPIs ==========
     router.get('/superadmin/metrics', async (req, res) => {

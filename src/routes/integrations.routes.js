@@ -4,7 +4,6 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireSuperAdmin } = require('../middleware/auth');
-const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { sentryService, uptimeKumaService, n8nService } = require('../services/integrations');
 
@@ -12,7 +11,7 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== INTEGRATIONS OVERVIEW (all 3 services) ==========
-    router.get('/superadmin/integrations/overview', authMiddleware, requireSuperAdmin, authLimiter, async (req, res) => {
+    router.get('/superadmin/integrations/overview', authMiddleware, requireSuperAdmin, async (req, res) => {
         try {
             const [sentry, uptime, n8n] = await Promise.allSettled([
                 sentryService.getStatus(),
@@ -33,7 +32,7 @@ module.exports = function (pool) {
     });
 
     // ========== SENTRY DETAIL ==========
-    router.get('/superadmin/integrations/sentry', authMiddleware, requireSuperAdmin, authLimiter, async (req, res) => {
+    router.get('/superadmin/integrations/sentry', authMiddleware, requireSuperAdmin, async (req, res) => {
         try {
             const data = await sentryService.getStatus();
             res.json(data);
@@ -44,7 +43,7 @@ module.exports = function (pool) {
     });
 
     // ========== UPTIME KUMA DETAIL ==========
-    router.get('/superadmin/integrations/uptime', authMiddleware, requireSuperAdmin, authLimiter, async (req, res) => {
+    router.get('/superadmin/integrations/uptime', authMiddleware, requireSuperAdmin, async (req, res) => {
         try {
             const data = await uptimeKumaService.getStatus();
             res.json(data);
@@ -55,7 +54,7 @@ module.exports = function (pool) {
     });
 
     // ========== N8N DETAIL ==========
-    router.get('/superadmin/integrations/n8n', authMiddleware, requireSuperAdmin, authLimiter, async (req, res) => {
+    router.get('/superadmin/integrations/n8n', authMiddleware, requireSuperAdmin, async (req, res) => {
         try {
             const data = await n8nService.getStatus();
             res.json(data);
