@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { sanitizeString, validatePrecio, validateNumber, validateId } = require('../utils/validators');
 
@@ -16,7 +17,7 @@ module.exports = function (pool) {
     // ========== VARIANTES DE RECETA (Botella/Copa) ==========
 
     // GET /api/recipes-variants - Obtener TODAS las variantes del restaurante
-    router.get('/recipes-variants', authMiddleware, async (req, res) => {
+    router.get('/recipes-variants', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const result = await pool.query(
                 `SELECT * FROM recetas_variantes 
@@ -32,7 +33,7 @@ module.exports = function (pool) {
     });
 
     // GET /api/recipes/:id/variants - Obtener variantes de una receta
-    router.get('/recipes/:id/variants', authMiddleware, async (req, res) => {
+    router.get('/recipes/:id/variants', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { id } = req.params;
             const result = await pool.query(
@@ -49,7 +50,7 @@ module.exports = function (pool) {
     });
 
     // POST /api/recipes/:id/variants - Crear variante
-    router.post('/recipes/:id/variants', authMiddleware, async (req, res) => {
+    router.post('/recipes/:id/variants', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { id } = req.params;
             const { nombre, factor, precio_venta, codigo } = req.body;
@@ -84,7 +85,7 @@ module.exports = function (pool) {
     });
 
     // PUT /api/recipes/:id/variants/:variantId - Actualizar variante
-    router.put('/recipes/:id/variants/:variantId', authMiddleware, async (req, res) => {
+    router.put('/recipes/:id/variants/:variantId', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const idCheck = validateId(req.params.id);
             const variantCheck = validateId(req.params.variantId);
@@ -117,7 +118,7 @@ module.exports = function (pool) {
     });
 
     // DELETE /api/recipes/:id/variants/:variantId - Eliminar variante
-    router.delete('/recipes/:id/variants/:variantId', authMiddleware, async (req, res) => {
+    router.delete('/recipes/:id/variants/:variantId', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const idCheck = validateId(req.params.id);
             const variantCheck = validateId(req.params.variantId);
