@@ -61,6 +61,10 @@ module.exports = {
             const workflowList = workflows.data || [];
             const executionList = executions.data || [];
 
+            // Build name lookup from workflows list
+            const nameMap = {};
+            for (const w of workflowList) nameMap[w.id] = w.name;
+
             return {
                 status: 'connected',
                 workflows: {
@@ -70,7 +74,7 @@ module.exports = {
                 },
                 recentFailures: executionList.map(e => ({
                     id: e.id,
-                    workflowName: e.workflowData?.name || 'Unknown',
+                    workflowName: e.workflowData?.name || nameMap[e.workflowId] || `Workflow #${e.workflowId || '?'}`,
                     status: e.status || (e.finished ? 'success' : 'error'),
                     startedAt: e.startedAt,
                     stoppedAt: e.stoppedAt,
