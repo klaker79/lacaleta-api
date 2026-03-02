@@ -472,53 +472,6 @@ REGLAS:
                 batchId, proveedor: data.proveedor, fecha, items: data.lineas.length, matched
             });
 
-            // ── Sync a Google Sheets via n8n webhook (fire-and-forget) ──
-            const webhookUrl = process.env.N8N_ALBARAN_WEBHOOK_URL;
-            if (webhookUrl) {
-                const proveedor = data.proveedor || 'Desconocido';
-                const totalFactura = Math.round(totalImporte * 100) / 100;
-                // Formato DD/MM/YYYY para Sheets
-                const fechaParts = fecha.split('-');
-                const fechaSheets = fechaParts.length === 3
-                    ? `${fechaParts[2]}/${fechaParts[1]}/${fechaParts[0]}`
-                    : fecha;
-
-                // Build PRODUCTOS JSON array (same structure as Facturas_maica)
-                const productos = data.lineas.map(l => ({
-                    'Descripción': l.producto || '',
-                    'Cantidad': String(l.cantidad || 0),
-                    'Unidad': 'ud',
-                    'Contenido': null,
-                    'Precio Unitario': String(l.precio_unitario || 0),
-                    'Descuento_Porcentaje': '0',
-                    'Importe_Descuento': '0.00',
-                    'Importe_Final': String(l.total || ((l.precio_unitario || 0) * (l.cantidad || 0)))
-                }));
-
-                // One row per invoice for Facturas_maica sheet
-                const rows = [{
-                    'NUMERO DE FACTURA': '',
-                    'FECHA DE FACTURA': fechaSheets,
-                    'REMITENTE': proveedor,
-                    'DESCRIPCION': `Albarán escaneado - ${proveedor}`,
-                    'CATEGORIA': '',
-                    'IMPORTE SIN IVA': totalFactura,
-                    'IVA': 0,
-                    'TOTAL': totalFactura,
-                    'MONEDA': 'EUR',
-                    'PRODUCTOS': JSON.stringify(productos),
-                    'LINK FACTURA': ''
-                }];
-
-                fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rows })
-                }).catch(err => {
-                    log('warn', 'Error enviando albarán a n8n webhook (no-blocking)', { error: err.message });
-                });
-            }
-
             const albaranResponse = {
                 success: true,
                 batchId,
@@ -994,6 +947,57 @@ REGLAS:
 
             await client.query('COMMIT');
             log('info', 'Batch de compras aprobado', { batchId, aprobados: resultados.aprobados, omitidos: resultados.omitidos });
+
+            // ── Sync approved data to Google Sheets via n8n webhook (fire-and-forget) ──
+            // Only fires AFTER approval with final edited data
+            const webhookUrl = process.env.N8N_ALBARAN_WEBHOOK_URL;
+            if (webhookUrl && resultados.aprobados > 0) {
+                const approvedItems = itemsResult.rows.filter(i => i.ingrediente_id);
+                const fecha = approvedItems[0]?.fecha;
+                const fechaStr = fecha ? new Date(fecha).toISOString().split('T')[0] : '';
+                const fechaParts = fechaStr.split('-');
+                const fechaSheets = fechaParts.length === 3
+                    ? `${fechaParts[2]}/${fechaParts[1]}/${fechaParts[0]}`
+                    : fechaStr;
+
+                const totalImporte = approvedItems.reduce((sum, i) => sum + (i.precio * i.cantidad), 0);
+                const totalFactura = Math.round(totalImporte * 100) / 100;
+
+                // Build PRODUCTOS from final approved data
+                const productos = approvedItems.map(i => ({
+                    'Descripción': i.ingrediente_nombre || '',
+                    'Cantidad': String(i.cantidad || 0),
+                    'Unidad': 'ud',
+                    'Contenido': null,
+                    'Precio Unitario': String(i.precio || 0),
+                    'Descuento_Porcentaje': '0',
+                    'Importe_Descuento': '0.00',
+                    'Importe_Final': String(Math.round((i.precio * i.cantidad) * 100) / 100)
+                }));
+
+                const rows = [{
+                    'NUMERO DE FACTURA': '',
+                    'FECHA DE FACTURA': fechaSheets,
+                    'REMITENTE': '',
+                    'DESCRIPCION': `Albarán aprobado - ${approvedItems.length} productos`,
+                    'CATEGORIA': '',
+                    'IMPORTE SIN IVA': totalFactura,
+                    'IVA': 0,
+                    'TOTAL': totalFactura,
+                    'MONEDA': 'EUR',
+                    'PRODUCTOS': JSON.stringify(productos),
+                    'LINK FACTURA': ''
+                }];
+
+                fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows })
+                }).catch(err => {
+                    log('warn', 'Error enviando batch aprobado a n8n webhook (no-blocking)', { error: err.message });
+                });
+            }
+
             res.json(resultados);
         } catch (err) {
             await client.query('ROLLBACK');
