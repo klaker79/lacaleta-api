@@ -404,26 +404,49 @@ module.exports = function (pool) {
                             documentContent,
                             {
                                 type: 'text',
-                                text: `Extrae los datos de este albarán (nota de entrega de proveedor).
-Retorna ÚNICAMENTE JSON válido sin explicaciones:
+                                text: `Eres un sistema de OCR de alta precisión para albaranes y facturas de proveedores de hostelería en España.
+
+TAREA: Extrae TODOS los datos del documento con PRECISIÓN EXACTA. Copia el texto EXACTAMENTE como aparece impreso.
+
+Retorna ÚNICAMENTE un JSON válido (sin explicaciones, sin markdown):
 {
-  "proveedor": "nombre del proveedor/empresa",
-  "numero_factura": "número de serie, albarán o factura",
+  "proveedor": "nombre EXACTO de la empresa emisora tal como aparece en el documento",
+  "numero_factura": "número de serie/albarán/factura tal como aparece (ej: '426', 'A-7005900', 'F2024-001')",
   "fecha": "YYYY-MM-DD",
   "lineas": [
-    {"producto": "PULPO FRESCO", "cantidad": 10, "precio_unitario": 26.00, "total": 260.00}
+    {
+      "producto": "nombre EXACTO del producto tal como aparece impreso",
+      "cantidad": 15.00,
+      "precio_unitario": 1.65,
+      "total": 24.75,
+      "unidad": "kg"
+    }
   ]
 }
 
-REGLAS:
-- proveedor = nombre de la empresa que emite el albarán/factura
-- numero_factura = número de serie, albarán o factura (ej: "426", "7005900")
-- fecha en formato YYYY-MM-DD
-- precio_unitario = precio por unidad/kg (NO el total)
-- Si no hay precio_unitario, calcula: total / cantidad
-- Ignorar líneas de IVA, portes, descuentos, totales generales
-- Solo líneas con cantidad > 0
-- Si no puedes leer algún campo, usa null`
+REGLAS CRÍTICAS DE PRECISIÓN:
+
+1. PROVEEDOR: Copia el nombre de la empresa emisora EXACTAMENTE como aparece en la cabecera del documento. Incluye razón social completa (ej: "AS VACAS DA ULLOA SCG", no "Sen Mais").
+
+2. NÚMERO DE FACTURA/ALBARÁN: Busca en la cabecera campos como "Serie/Número", "Nº Albarán", "Nº Factura", "Serie", "Número". Copia el valor EXACTO.
+
+3. FECHA: 
+   - Busca la fecha en la cabecera del documento (no en caducidades ni lotes).
+   - Los documentos son RECIENTES (años 2024, 2025, 2026). Si ves "04/02/2026", la fecha es 2026-02-04.
+   - Si la fecha dice "04/02/26", el año es 2026 (NO 1926, NO 2006).
+   - Formato de salida SIEMPRE: YYYY-MM-DD.
+   - CUIDADO: En España las fechas son DD/MM/YYYY, no MM/DD/YYYY.
+
+4. PRODUCTOS:
+   - Copia el nombre del producto EXACTAMENTE como está impreso (respeta mayúsculas, tildes, abreviaturas).
+   - Incluye TODAS las líneas con productos, incluso devoluciones (cantidad negativa).
+   - "precio_unitario" = precio por UNA unidad/kg (NO el importe total de la línea).
+   - Si solo ves importe total y cantidad: precio_unitario = total / cantidad.
+   - "unidad": extrae la unidad si aparece (kg, ud, litro, caja, bandeja). Si no aparece, usa "ud".
+
+5. NO INCLUIR: líneas de totales, subtotales, IVA, bases imponibles, portes, recargos de equivalencia.
+
+6. Si un campo no es legible, usa null. NUNCA inventes datos.`
                             }
                         ]
                     }]
@@ -461,6 +484,56 @@ REGLAS:
                 return res.status(400).json({ error: 'No se detectaron líneas de producto en el albarán' });
             }
 
+            // ══════════════════════════════════════════════
+            // POST-PROCESSING: Validación y corrección de datos
+            // ══════════════════════════════════════════════
+
+            // ── Fecha: normalizar y validar ──
+            let fecha = data.fecha || new Date().toISOString().split('T')[0];
+
+            if (typeof fecha === 'string') {
+                // Normalizar separadores (/, ., -) 
+                const cleanFecha = fecha.replace(/[\/\.]/g, '-').trim();
+
+                // DD-MM-YY → YYYY-MM-DD
+                if (/^\d{2}-\d{2}-\d{2}$/.test(cleanFecha)) {
+                    const [dd, mm, yy] = cleanFecha.split('-');
+                    let year = parseInt(yy);
+                    year = year < 100 ? year + 2000 : year;
+                    fecha = `${year}-${mm}-${dd}`;
+                }
+                // DD-MM-YYYY → YYYY-MM-DD
+                else if (/^\d{2}-\d{2}-\d{4}$/.test(cleanFecha)) {
+                    const [dd, mm, yyyy] = cleanFecha.split('-');
+                    fecha = `${yyyy}-${mm}-${dd}`;
+                }
+                // Already YYYY-MM-DD — keep as is
+                else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanFecha)) {
+                    fecha = cleanFecha;
+                }
+
+                // Sanity check: year must be >= 2020
+                const yearMatch = fecha.match(/^(\d{4})/);
+                if (yearMatch) {
+                    const year = parseInt(yearMatch[1]);
+                    if (year < 2020) {
+                        // Common OCR error: 2008 instead of 2026, 2020 instead of 2026
+                        // Fix by using current year or inferring from context
+                        const currentYear = new Date().getFullYear();
+                        fecha = fecha.replace(/^\d{4}/, String(currentYear));
+                        log('warn', `Fecha del albarán corregida: año ${year} → ${currentYear}`, { original: data.fecha, corrected: fecha });
+                    }
+                }
+            }
+
+            // ── Cantidades y precios: asegurar valores absolutos y numéricos ──
+            data.lineas = data.lineas.map(l => ({
+                ...l,
+                cantidad: Math.abs(parseFloat(l.cantidad)) || 0,
+                precio_unitario: Math.abs(parseFloat(l.precio_unitario)) || 0,
+                total: l.total != null ? parseFloat(l.total) : null
+            }));
+
             // ── Matching de ingredientes (misma lógica que POST /purchases/pending) ──
             const normalizar = (str) => {
                 return (str || '')
@@ -493,19 +566,6 @@ REGLAS:
 
             // ── Preparar INSERT en compras_pendientes ──
             const batchId = crypto.randomUUID();
-            let fecha = data.fecha || new Date().toISOString().split('T')[0];
-
-            // Corrección de formato de fecha (DD-MM-YY, DD-MM-YYYY)
-            if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{2}$/.test(fecha)) {
-                const pts = fecha.split('-');
-                let year = parseInt(pts[2]);
-                if (year < 100) year += 2000;
-                fecha = `${year}-${pts[1]}-${pts[0]}`;
-            }
-            if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(fecha)) {
-                const pts = fecha.split('-');
-                fecha = `${pts[2]}-${pts[1]}-${pts[0]}`;
-            }
 
             const values = [];
             const placeholders = [];
