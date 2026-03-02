@@ -477,35 +477,38 @@ REGLAS:
             if (webhookUrl) {
                 const proveedor = data.proveedor || 'Desconocido';
                 const totalFactura = Math.round(totalImporte * 100) / 100;
-                // Formato DD/MM/YYYY para Sheets (consistente con datos existentes)
+                // Formato DD/MM/YYYY para Sheets
                 const fechaParts = fecha.split('-');
                 const fechaSheets = fechaParts.length === 3
                     ? `${fechaParts[2]}/${fechaParts[1]}/${fechaParts[0]}`
                     : fecha;
 
-                const rows = data.lineas.map(l => {
-                    const importe = l.total || ((l.precio_unitario || 0) * (l.cantidad || 0));
-                    return {
-                        Fecha: fechaSheets,
-                        N_factura: '',
-                        Proveedor: proveedor,
-                        Categoria: '',
-                        Descripcion: l.producto,
-                        Cantidad: l.cantidad || 0,
-                        Unidad: 'ud',
-                        'Precio_unit (€)': l.precio_unitario || 0,
-                        'Importe (€)': importe,
-                        Importe_Final: importe,
-                        Unidad_normalizada: 1,
-                        Factor_base: 1,
-                        'Precio_base (€)': l.precio_unitario || 0,
-                        'Precio_base_normalizado (€)': l.precio_unitario || 0,
-                        Total_factura: totalFactura,
-                        Descuento_Porcentaje: 0,
-                        Importe_Descuento: 0,
-                        Link_Factura: ''
-                    };
-                });
+                // Build PRODUCTOS JSON array (same structure as Facturas_maica)
+                const productos = data.lineas.map(l => ({
+                    'Descripción': l.producto || '',
+                    'Cantidad': String(l.cantidad || 0),
+                    'Unidad': 'ud',
+                    'Contenido': null,
+                    'Precio Unitario': String(l.precio_unitario || 0),
+                    'Descuento_Porcentaje': '0',
+                    'Importe_Descuento': '0.00',
+                    'Importe_Final': String(l.total || ((l.precio_unitario || 0) * (l.cantidad || 0)))
+                }));
+
+                // One row per invoice for Facturas_maica sheet
+                const rows = [{
+                    'NUMERO DE FACTURA': '',
+                    'FECHA DE FACTURA': fechaSheets,
+                    'REMITENTE': proveedor,
+                    'DESCRIPCION': `Albarán escaneado - ${proveedor}`,
+                    'CATEGORIA': '',
+                    'IMPORTE SIN IVA': totalFactura,
+                    'IVA': 0,
+                    'TOTAL': totalFactura,
+                    'MONEDA': 'EUR',
+                    'PRODUCTOS': JSON.stringify(productos),
+                    'LINK FACTURA': ''
+                }];
 
                 fetch(webhookUrl, {
                     method: 'POST',
