@@ -493,7 +493,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             if (typeof fecha === 'string') {
                 // Normalizar separadores (/, ., -) 
-                const cleanFecha = fecha.replace(/[\/\.]/g, '-').trim();
+                const cleanFecha = fecha.replace(/[/.]/g, '-').trim();
 
                 // DD-MM-YY → YYYY-MM-DD
                 if (/^\d{2}-\d{2}-\d{2}$/.test(cleanFecha)) {
