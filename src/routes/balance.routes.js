@@ -36,11 +36,12 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
             return matches / Math.max(newNames.length, existingNames.length);
         };
 
-        // ── Source 1: compras_pendientes (all states, last 60 days) ──
+        // ── Source 1: compras_pendientes (ONLY approved, last 60 days) ──
         const pendingResult = await pool.query(
             `SELECT batch_id, ingrediente_nombre, cantidad, fecha, estado
              FROM compras_pendientes
              WHERE restaurante_id = $1
+               AND estado = 'aprobado'
                AND fecha >= (CURRENT_DATE - INTERVAL '60 days')
              ORDER BY batch_id, id`,
             [restauranteId]
@@ -49,7 +50,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
         if (pendingResult.rows.length > 0) {
             const batches = new Map();
             for (const row of pendingResult.rows) {
-                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { items: [], fecha: row.fecha, estado: row.estado });
+                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { items: [], fecha: row.fecha });
                 batches.get(row.batch_id).items.push(normalizar(row.ingrediente_nombre));
             }
             for (const [batchId, batch] of batches) {
@@ -60,7 +61,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
                         fecha: batch.fecha,
                         itemCount: batch.items.length,
                         similarity: Math.round(similarity * 100),
-                        source: 'pending'
+                        source: 'approved'
                     };
                 }
             }
@@ -106,7 +107,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
              FROM pedidos p
              WHERE p.restaurante_id = $1
                AND p.deleted_at IS NULL
-               AND p.estado IN ('recibido', 'pendiente')
+               AND p.estado = 'recibido'
                AND p.fecha >= (CURRENT_DATE - INTERVAL '60 days')`,
             [restauranteId]
         );
