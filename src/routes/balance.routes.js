@@ -11,55 +11,149 @@ const crypto = require('crypto');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
 
 /**
- * 🔍 Check for duplicate albaranes by comparing product names + quantities + date
- * Returns null if no duplicate, or { batchId, fecha, itemCount, similarity } if found
+ * 🔍 Check for duplicate albaranes across ALL 3 data sources:
+ *   1. compras_pendientes (pending queue — all states)
+ *   2. precios_compra_diarios (approved/consolidated purchases)
+ *   3. pedidos (manual orders with JSONB ingredientes)
+ *
+ * Returns null if no duplicate, or { batchId, fecha, itemCount, similarity, source } if found.
+ * source: 'pending' | 'approved' | 'manual_order'
  */
 async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
     try {
-        // Generate fingerprint: sorted product names (normalized) + quantities
         const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim();
         const newNames = items.map(i => normalizar(i.producto || i.ingrediente || '')).filter(Boolean).sort();
         if (newNames.length === 0) return null;
 
-        // Find existing batches from the last 30 days in compras_pendientes
-        const existing = await pool.query(
-            `SELECT batch_id, ingrediente_nombre, cantidad, fecha
-             FROM compras_pendientes
-             WHERE restaurante_id = $1
-               AND fecha >= (CURRENT_DATE - INTERVAL '30 days')
-             ORDER BY batch_id, id`,
-            [restauranteId]
-        );
-
-        if (existing.rows.length === 0) return null;
-
-        // Group by batch_id
-        const batches = new Map();
-        for (const row of existing.rows) {
-            if (!batches.has(row.batch_id)) batches.set(row.batch_id, { items: [], fecha: row.fecha });
-            batches.get(row.batch_id).items.push(normalizar(row.ingrediente_nombre));
-        }
-
-        // Compare each batch's product names against new ones
-        for (const [batchId, batch] of batches) {
-            const existingNames = batch.items.sort();
-            // Count matching names
+        // Helper: compare two sorted name lists with substring matching
+        const calcSimilarity = (existingNames) => {
             let matches = 0;
             for (const name of newNames) {
                 if (existingNames.some(e => e === name || e.includes(name) || name.includes(e))) {
                     matches++;
                 }
             }
-            const similarity = matches / Math.max(newNames.length, existingNames.length);
-            if (similarity >= 0.7) {
-                return {
-                    batchId,
-                    fecha: batch.fecha,
-                    itemCount: existingNames.length,
-                    similarity: Math.round(similarity * 100)
-                };
+            return matches / Math.max(newNames.length, existingNames.length);
+        };
+
+        // ── Source 1: compras_pendientes (all states, last 60 days) ──
+        const pendingResult = await pool.query(
+            `SELECT batch_id, ingrediente_nombre, cantidad, fecha, estado
+             FROM compras_pendientes
+             WHERE restaurante_id = $1
+               AND fecha >= (CURRENT_DATE - INTERVAL '60 days')
+             ORDER BY batch_id, id`,
+            [restauranteId]
+        );
+
+        if (pendingResult.rows.length > 0) {
+            const batches = new Map();
+            for (const row of pendingResult.rows) {
+                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { items: [], fecha: row.fecha, estado: row.estado });
+                batches.get(row.batch_id).items.push(normalizar(row.ingrediente_nombre));
+            }
+            for (const [batchId, batch] of batches) {
+                const similarity = calcSimilarity(batch.items.sort());
+                if (similarity >= 0.7) {
+                    return {
+                        batchId,
+                        fecha: batch.fecha,
+                        itemCount: batch.items.length,
+                        similarity: Math.round(similarity * 100),
+                        source: 'pending'
+                    };
+                }
             }
         }
+
+        // ── Source 2: precios_compra_diarios (consolidated purchases, last 60 days) ──
+        const approvedResult = await pool.query(
+            `SELECT pcd.fecha, pcd.proveedor_id, pcd.pedido_id, i.nombre as ingrediente_nombre
+             FROM precios_compra_diarios pcd
+             JOIN ingredientes i ON pcd.ingrediente_id = i.id
+             WHERE pcd.restaurante_id = $1
+               AND pcd.fecha >= (CURRENT_DATE - INTERVAL '60 days')
+             ORDER BY pcd.fecha, pcd.proveedor_id`,
+            [restauranteId]
+        );
+
+        if (approvedResult.rows.length > 0) {
+            // Group by (fecha + pedido_id or proveedor_id) as "virtual batch"
+            const approvedBatches = new Map();
+            for (const row of approvedResult.rows) {
+                const key = `${row.fecha}_${row.pedido_id || row.proveedor_id || 0}`;
+                if (!approvedBatches.has(key)) approvedBatches.set(key, { items: [], fecha: row.fecha });
+                approvedBatches.get(key).items.push(normalizar(row.ingrediente_nombre));
+            }
+            for (const [key, batch] of approvedBatches) {
+                if (batch.items.length < 2) continue; // Skip single-item "batches" to avoid noise
+                const similarity = calcSimilarity(batch.items.sort());
+                if (similarity >= 0.7) {
+                    return {
+                        batchId: key,
+                        fecha: batch.fecha,
+                        itemCount: batch.items.length,
+                        similarity: Math.round(similarity * 100),
+                        source: 'approved'
+                    };
+                }
+            }
+        }
+
+        // ── Source 3: pedidos manuales (JSONB ingredientes, last 60 days) ──
+        const ordersResult = await pool.query(
+            `SELECT p.id, p.fecha, p.ingredientes
+             FROM pedidos p
+             WHERE p.restaurante_id = $1
+               AND p.deleted_at IS NULL
+               AND p.estado IN ('recibido', 'pendiente')
+               AND p.fecha >= (CURRENT_DATE - INTERVAL '60 days')`,
+            [restauranteId]
+        );
+
+        if (ordersResult.rows.length > 0) {
+            // Extract ingredient IDs from JSONB, then look up names
+            const allIngIds = new Set();
+            for (const order of ordersResult.rows) {
+                const ings = Array.isArray(order.ingredientes) ? order.ingredientes : [];
+                for (const ing of ings) {
+                    const id = ing.ingredienteId || ing.ingrediente_id;
+                    if (id) allIngIds.add(Number(id));
+                }
+            }
+
+            if (allIngIds.size > 0) {
+                const idsArr = [...allIngIds];
+                const namesResult = await pool.query(
+                    `SELECT id, nombre FROM ingredientes WHERE id = ANY($1::int[])`,
+                    [idsArr]
+                );
+                const nameMap = new Map();
+                for (const row of namesResult.rows) {
+                    nameMap.set(row.id, normalizar(row.nombre));
+                }
+
+                for (const order of ordersResult.rows) {
+                    const ings = Array.isArray(order.ingredientes) ? order.ingredientes : [];
+                    const orderNames = ings
+                        .map(ing => nameMap.get(Number(ing.ingredienteId || ing.ingrediente_id)))
+                        .filter(Boolean)
+                        .sort();
+                    if (orderNames.length < 2) continue;
+                    const similarity = calcSimilarity(orderNames);
+                    if (similarity >= 0.7) {
+                        return {
+                            batchId: `order_${order.id}`,
+                            fecha: order.fecha,
+                            itemCount: orderNames.length,
+                            similarity: Math.round(similarity * 100),
+                            source: 'manual_order'
+                        };
+                    }
+                }
+            }
+        }
+
         return null;
     } catch (err) {
         log('error', 'Error checking duplicate albaran', { error: err.message });
