@@ -529,6 +529,15 @@ async function initializeDatabase(pool) {
     log('info', 'Columna formato_override en compras_pendientes verificada');
   } catch (e) { log('warn', 'Migración formato_override', { error: e.message }); }
 
+  // Columnas proveedor y numero_factura en compras_pendientes (para sincronización con Sheets)
+  try {
+    await pool.query(`
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS proveedor TEXT;
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS numero_factura TEXT;
+        `);
+    log('info', 'Columnas proveedor/numero_factura en compras_pendientes verificadas');
+  } catch (e) { log('warn', 'Migración proveedor/numero_factura', { error: e.message }); }
+
   // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
   // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
   try {

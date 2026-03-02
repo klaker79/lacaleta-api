@@ -313,7 +313,8 @@ module.exports = function (pool) {
                                 text: `Extrae los datos de este albarán (nota de entrega de proveedor).
 Retorna ÚNICAMENTE JSON válido sin explicaciones:
 {
-  "proveedor": "nombre del proveedor",
+  "proveedor": "nombre del proveedor/empresa",
+  "numero_factura": "número de serie, albarán o factura",
   "fecha": "YYYY-MM-DD",
   "lineas": [
     {"producto": "PULPO FRESCO", "cantidad": 10, "precio_unitario": 26.00, "total": 260.00}
@@ -321,12 +322,14 @@ Retorna ÚNICAMENTE JSON válido sin explicaciones:
 }
 
 REGLAS:
+- proveedor = nombre de la empresa que emite el albarán/factura
+- numero_factura = número de serie, albarán o factura (ej: "426", "7005900")
 - fecha en formato YYYY-MM-DD
 - precio_unitario = precio por unidad/kg (NO el total)
 - Si no hay precio_unitario, calcula: total / cantidad
 - Ignorar líneas de IVA, portes, descuentos, totales generales
 - Solo líneas con cantidad > 0
-- Si no puedes leer la fecha, usa null`
+- Si no puedes leer algún campo, usa null`
                             }
                         ]
                     }]
@@ -448,9 +451,9 @@ REGLAS:
                 const cantidad = Math.abs(parseFloat(linea.cantidad)) || 0;
                 totalImporte += parseFloat(linea.total) || (precio * cantidad);
 
-                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
-                values.push(batchId, linea.producto, ingredienteId, precio, cantidad, fecha, req.restauranteId);
-                paramIdx += 7;
+                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`);
+                values.push(batchId, linea.producto, ingredienteId, precio, cantidad, fecha, req.restauranteId, data.proveedor || null, data.numero_factura || null);
+                paramIdx += 9;
             }
 
             // 🔍 Check for duplicate albaran before inserting
@@ -462,7 +465,7 @@ REGLAS:
 
             if (placeholders.length > 0) {
                 await pool.query(
-                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id)
+                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id, proveedor, numero_factura)
                      VALUES ${placeholders.join(', ')}`,
                     values
                 );
@@ -953,12 +956,21 @@ REGLAS:
             const webhookUrl = process.env.N8N_ALBARAN_WEBHOOK_URL;
             if (webhookUrl && resultados.aprobados > 0) {
                 const approvedItems = itemsResult.rows.filter(i => i.ingrediente_id);
+
+                // Get proveedor and numero_factura from batch (stored at parse time)
+                const proveedor = approvedItems.find(i => i.proveedor)?.proveedor || '';
+                const numeroFactura = approvedItems.find(i => i.numero_factura)?.numero_factura || '';
+
+                // Format date as DD/MM/YYYY from the stored fecha
                 const fecha = approvedItems[0]?.fecha;
-                const fechaStr = fecha ? new Date(fecha).toISOString().split('T')[0] : '';
-                const fechaParts = fechaStr.split('-');
-                const fechaSheets = fechaParts.length === 3
-                    ? `${fechaParts[2]}/${fechaParts[1]}/${fechaParts[0]}`
-                    : fechaStr;
+                let fechaSheets = '';
+                if (fecha) {
+                    const d = new Date(fecha);
+                    const dd = String(d.getUTCDate()).padStart(2, '0');
+                    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+                    const yyyy = d.getUTCFullYear();
+                    fechaSheets = `${dd}/${mm}/${yyyy}`;
+                }
 
                 const totalImporte = approvedItems.reduce((sum, i) => sum + (i.precio * i.cantidad), 0);
                 const totalFactura = Math.round(totalImporte * 100) / 100;
@@ -976,10 +988,10 @@ REGLAS:
                 }));
 
                 const rows = [{
-                    'NUMERO DE FACTURA': '',
+                    'NUMERO DE FACTURA': numeroFactura,
                     'FECHA DE FACTURA': fechaSheets,
-                    'REMITENTE': '',
-                    'DESCRIPCION': `Albarán aprobado - ${approvedItems.length} productos`,
+                    'REMITENTE': proveedor,
+                    'DESCRIPCION': `Albarán ${proveedor || 'aprobado'} - ${approvedItems.length} productos`,
                     'CATEGORIA': '',
                     'IMPORTE SIN IVA': totalFactura,
                     'IVA': 0,
