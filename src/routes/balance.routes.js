@@ -37,12 +37,11 @@ async function checkDuplicateAlbaran(pool, restauranteId, ingredientIds, fecha) 
             return m / Math.max(newIds.length, existingIds.length);
         };
 
-        // ── Source 1: compras_pendientes (approved, last 60 days) ──
+        // ── Source 1: compras_pendientes (ALL states — pendiente, aprobado, rechazado) ──
         const pendingResult = await pool.query(
-            `SELECT batch_id, ingrediente_id, fecha
+            `SELECT batch_id, ingrediente_id, fecha, estado
              FROM compras_pendientes
              WHERE restaurante_id = $1
-               AND estado = 'aprobado'
                AND ingrediente_id IS NOT NULL
                AND fecha >= (CURRENT_DATE - INTERVAL '60 days')
              ORDER BY batch_id, id`,
@@ -52,14 +51,15 @@ async function checkDuplicateAlbaran(pool, restauranteId, ingredientIds, fecha) 
         if (pendingResult.rows.length > 0) {
             const batches = new Map();
             for (const row of pendingResult.rows) {
-                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { ids: [], fecha: row.fecha });
+                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { ids: [], fecha: row.fecha, estado: row.estado });
                 batches.get(row.batch_id).ids.push(Number(row.ingrediente_id));
             }
             for (const [batchId, batch] of batches) {
                 if (!isDateClose(batch.fecha)) continue;
                 const similarity = calcSimilarity(batch.ids.sort((a, b) => a - b));
                 if (similarity >= 0.7) {
-                    return { batchId, fecha: batch.fecha, itemCount: batch.ids.length, similarity: Math.round(similarity * 100), source: 'approved' };
+                    const source = batch.estado === 'aprobado' ? 'approved' : 'pending';
+                    return { batchId, fecha: batch.fecha, itemCount: batch.ids.length, similarity: Math.round(similarity * 100), source };
                 }
             }
         }
@@ -542,6 +542,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             let paramIdx = 1;
             let matched = 0;
             let totalImporte = 0;
+            const resolvedIngredientIds = [];
 
             for (const linea of data.lineas) {
                 const nombreNorm = normalizar(linea.producto);
@@ -569,7 +570,10 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     }
                 }
 
-                if (ingredienteId) matched++;
+                if (ingredienteId) {
+                    matched++;
+                    resolvedIngredientIds.push(ingredienteId);
+                }
 
                 const precio = Math.abs(parseFloat(linea.precio_unitario)) || 0;
                 const cantidad = Math.abs(parseFloat(linea.cantidad)) || 0;
@@ -581,26 +585,30 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             }
 
             // 🔍 Check for duplicate albaran before inserting (using resolved ingredient IDs)
-            const resolvedIngredientIds = [];
-            for (const linea of data.lineas) {
-                const nombreNorm = normalizar(linea.producto);
-                let ingId = ingredientesMap.get(nombreNorm) || null;
-                if (!ingId) {
-                    for (const [nombreDB, id] of ingredientesMap) {
-                        if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) { ingId = id; break; }
-                    }
-                }
-                if (!ingId) ingId = aliasMap.get(nombreNorm) || null;
-                if (!ingId) {
-                    for (const [aliasNombre, id] of aliasMap) {
-                        if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) { ingId = id; break; }
-                    }
-                }
-                if (ingId) resolvedIngredientIds.push(ingId);
-            }
             const duplicateWarning = await checkDuplicateAlbaran(
                 pool, req.restauranteId, resolvedIngredientIds, fecha
             );
+
+            // 🔒 BLOCK insertion if duplicate detected (not just a warning)
+            if (duplicateWarning && duplicateWarning.similarity >= 70) {
+                log('warn', 'Duplicate albaran blocked by checkDuplicateAlbaran', {
+                    existingBatchId: duplicateWarning.batchId,
+                    newBatchId: batchId,
+                    similarity: duplicateWarning.similarity,
+                    source: duplicateWarning.source
+                });
+                return res.json({
+                    success: true,
+                    batchId: duplicateWarning.batchId,
+                    proveedor: data.proveedor || null,
+                    fecha,
+                    totalItems: data.lineas.length,
+                    matched,
+                    unmatched: data.lineas.length - matched,
+                    totalImporte: Math.round(totalImporte * 100) / 100,
+                    duplicateWarning
+                });
+            }
 
             // 🔒 Server-side dedup: reject if ANY batch was created in last 2 minutes
             // OCR produces different spellings each scan, so comparing names is unreliable.
