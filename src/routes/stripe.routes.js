@@ -128,10 +128,13 @@ module.exports = function stripeRoutes(pool) {
             if (STRIPE_WEBHOOK_SECRET) {
                 const sig = req.headers['stripe-signature'];
                 event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-            } else {
-                // Dev mode: no signature verification
+            } else if (process.env.NODE_ENV === 'development') {
+                // Dev mode only: no signature verification
                 event = JSON.parse(req.body.toString());
                 log('warn', 'Stripe webhook sin verificación de firma (dev mode)');
+            } else {
+                log('error', 'STRIPE_WEBHOOK_SECRET no configurado en producción');
+                return res.status(500).json({ error: 'Webhook not configured' });
             }
         } catch (err) {
             log('error', 'Webhook signature verification failed', { error: err.message });
