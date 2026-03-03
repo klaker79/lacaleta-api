@@ -17,13 +17,29 @@ const { upsertCompraDiaria } = require('../utils/businessHelpers');
  *   3. pedidos (manual orders with JSONB ingredientes)
  *
  * Returns null if no duplicate, or { batchId, fecha, itemCount, similarity, source } if found.
- * source: 'pending' | 'approved' | 'manual_order'
+ * source: 'approved' | 'manual_order'
+ *
+ * IMPORTANT: Only flags as duplicate when BOTH conditions are met:
+ *   1. Product names match ≥ 70% (substring matching)
+ *   2. Dates are within ±2 days of each other
  */
 async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
     try {
         const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim();
         const newNames = items.map(i => normalizar(i.producto || i.ingrediente || '')).filter(Boolean).sort();
         if (newNames.length === 0) return null;
+
+        // Parse the new albaran's fecha for date proximity comparison
+        const newDate = fecha ? new Date(fecha) : null;
+
+        // Helper: check if two dates are within ±2 days
+        const isDateClose = (existingFecha) => {
+            if (!newDate || !existingFecha) return true; // If no date, fall back to name-only check
+            const existingDate = new Date(existingFecha);
+            const diffMs = Math.abs(newDate.getTime() - existingDate.getTime());
+            const diffDays = diffMs / (1000 * 60 * 60 * 24);
+            return diffDays <= 2;
+        };
 
         // Helper: compare two sorted name lists with substring matching
         const calcSimilarity = (existingNames) => {
@@ -54,6 +70,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
                 batches.get(row.batch_id).items.push(normalizar(row.ingrediente_nombre));
             }
             for (const [batchId, batch] of batches) {
+                if (!isDateClose(batch.fecha)) continue; // Skip if dates are >2 days apart
                 const similarity = calcSimilarity(batch.items.sort());
                 if (similarity >= 0.7) {
                     return {
@@ -88,6 +105,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
             }
             for (const [key, batch] of approvedBatches) {
                 if (batch.items.length < 2) continue; // Skip single-item "batches" to avoid noise
+                if (!isDateClose(batch.fecha)) continue; // Skip if dates are >2 days apart
                 const similarity = calcSimilarity(batch.items.sort());
                 if (similarity >= 0.7) {
                     return {
@@ -135,6 +153,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
                 }
 
                 for (const order of ordersResult.rows) {
+                    if (!isDateClose(order.fecha)) continue; // Skip if dates are >2 days apart
                     const ings = Array.isArray(order.ingredientes) ? order.ingredientes : [];
                     const orderNames = ings
                         .map(ing => nameMap.get(Number(ing.ingredienteId || ing.ingrediente_id)))
