@@ -948,11 +948,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                         samplePendingItem: rows[0] ? { ingrediente_id: rows[0].ingrediente_id, fecha: rows[0].fecha, ingrediente_nombre: rows[0].ingrediente_nombre } : null
                     });
 
-                    // Helper para comparar fechas ±1 día
+                    // Helper para comparar fechas — SOLO misma fecha exacta
                     const fechasDentroDeRango = (f1, f2) => {
                         const d1 = new Date(f1).toISOString().split('T')[0];
                         const d2 = new Date(f2).toISOString().split('T')[0];
-                        return Math.abs((new Date(d1) - new Date(d2)) / 86400000) <= 1;
+                        return d1 === d2;
                     };
 
                     // Enriquecer cada item pendiente con info de duplicado
