@@ -11,53 +11,39 @@ const crypto = require('crypto');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
 
 /**
- * 🔍 Check for duplicate albaranes across ALL 3 data sources:
- *   1. compras_pendientes (pending queue — all states)
- *   2. precios_compra_diarios (approved/consolidated purchases)
- *   3. pedidos (manual orders with JSONB ingredientes)
- *
- * Returns null if no duplicate, or { batchId, fecha, itemCount, similarity, source } if found.
- * source: 'approved' | 'manual_order'
- *
- * IMPORTANT: Only flags as duplicate when BOTH conditions are met:
- *   1. Product names match ≥ 70% (substring matching)
- *   2. Dates are within ±2 days of each other
+ * Duplicate albaran detection using resolved INGREDIENT IDs.
+ * OCR produces different text each scan, so comparing product names is unreliable.
+ * Compares ingredient IDs against 3 sources. Flags duplicate when:
+ *   1. Ingredient IDs overlap ≥ 70%
+ *   2. Dates within ±2 days
  */
-async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
+async function checkDuplicateAlbaran(pool, restauranteId, ingredientIds, fecha) {
     try {
-        const normalizar = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim();
-        const newNames = items.map(i => normalizar(i.producto || i.ingrediente || '')).filter(Boolean).sort();
-        if (newNames.length === 0) return null;
+        const newIds = ingredientIds.filter(Boolean).map(Number).sort((a, b) => a - b);
+        if (newIds.length === 0) return null;
 
-        // Parse the new albaran's fecha for date proximity comparison
         const newDate = fecha ? new Date(fecha) : null;
 
-        // Helper: check if two dates are within ±2 days
         const isDateClose = (existingFecha) => {
-            if (!newDate || !existingFecha) return true; // If no date, fall back to name-only check
-            const existingDate = new Date(existingFecha);
-            const diffMs = Math.abs(newDate.getTime() - existingDate.getTime());
-            const diffDays = diffMs / (1000 * 60 * 60 * 24);
+            if (!newDate || !existingFecha) return true;
+            const diffDays = Math.abs(newDate.getTime() - new Date(existingFecha).getTime()) / 86400000;
             return diffDays <= 2;
         };
 
-        // Helper: compare two sorted name lists with substring matching
-        const calcSimilarity = (existingNames) => {
-            let matches = 0;
-            for (const name of newNames) {
-                if (existingNames.some(e => e === name || e.includes(name) || name.includes(e))) {
-                    matches++;
-                }
-            }
-            return matches / Math.max(newNames.length, existingNames.length);
+        const calcSimilarity = (existingIds) => {
+            const s = new Set(existingIds);
+            let m = 0;
+            for (const id of newIds) { if (s.has(id)) m++; }
+            return m / Math.max(newIds.length, existingIds.length);
         };
 
-        // ── Source 1: compras_pendientes (ONLY approved, last 60 days) ──
+        // ── Source 1: compras_pendientes (approved, last 60 days) ──
         const pendingResult = await pool.query(
-            `SELECT batch_id, ingrediente_nombre, cantidad, fecha, estado
+            `SELECT batch_id, ingrediente_id, fecha
              FROM compras_pendientes
              WHERE restaurante_id = $1
                AND estado = 'aprobado'
+               AND ingrediente_id IS NOT NULL
                AND fecha >= (CURRENT_DATE - INTERVAL '60 days')
              ORDER BY batch_id, id`,
             [restauranteId]
@@ -66,29 +52,22 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
         if (pendingResult.rows.length > 0) {
             const batches = new Map();
             for (const row of pendingResult.rows) {
-                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { items: [], fecha: row.fecha });
-                batches.get(row.batch_id).items.push(normalizar(row.ingrediente_nombre));
+                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { ids: [], fecha: row.fecha });
+                batches.get(row.batch_id).ids.push(Number(row.ingrediente_id));
             }
             for (const [batchId, batch] of batches) {
-                if (!isDateClose(batch.fecha)) continue; // Skip if dates are >2 days apart
-                const similarity = calcSimilarity(batch.items.sort());
+                if (!isDateClose(batch.fecha)) continue;
+                const similarity = calcSimilarity(batch.ids.sort((a, b) => a - b));
                 if (similarity >= 0.7) {
-                    return {
-                        batchId,
-                        fecha: batch.fecha,
-                        itemCount: batch.items.length,
-                        similarity: Math.round(similarity * 100),
-                        source: 'approved'
-                    };
+                    return { batchId, fecha: batch.fecha, itemCount: batch.ids.length, similarity: Math.round(similarity * 100), source: 'approved' };
                 }
             }
         }
 
         // ── Source 2: precios_compra_diarios (consolidated purchases, last 60 days) ──
         const approvedResult = await pool.query(
-            `SELECT pcd.fecha, pcd.proveedor_id, pcd.pedido_id, i.nombre as ingrediente_nombre
+            `SELECT pcd.fecha, pcd.proveedor_id, pcd.pedido_id, pcd.ingrediente_id
              FROM precios_compra_diarios pcd
-             JOIN ingredientes i ON pcd.ingrediente_id = i.id
              WHERE pcd.restaurante_id = $1
                AND pcd.fecha >= (CURRENT_DATE - INTERVAL '60 days')
              ORDER BY pcd.fecha, pcd.proveedor_id`,
@@ -96,22 +75,21 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
         );
 
         if (approvedResult.rows.length > 0) {
-            // Group by (fecha + pedido_id or proveedor_id) as "virtual batch"
             const approvedBatches = new Map();
             for (const row of approvedResult.rows) {
                 const key = `${row.fecha}_${row.pedido_id || row.proveedor_id || 0}`;
-                if (!approvedBatches.has(key)) approvedBatches.set(key, { items: [], fecha: row.fecha });
-                approvedBatches.get(key).items.push(normalizar(row.ingrediente_nombre));
+                if (!approvedBatches.has(key)) approvedBatches.set(key, { ids: [], fecha: row.fecha });
+                approvedBatches.get(key).ids.push(Number(row.ingrediente_id));
             }
             for (const [key, batch] of approvedBatches) {
-                if (batch.items.length < 2) continue; // Skip single-item "batches" to avoid noise
-                if (!isDateClose(batch.fecha)) continue; // Skip if dates are >2 days apart
-                const similarity = calcSimilarity(batch.items.sort());
+                if (batch.ids.length < 2) continue;
+                if (!isDateClose(batch.fecha)) continue;
+                const similarity = calcSimilarity(batch.ids.sort((a, b) => a - b));
                 if (similarity >= 0.7) {
                     return {
                         batchId: key,
                         fecha: batch.fecha,
-                        itemCount: batch.items.length,
+                        itemCount: batch.ids.length,
                         similarity: Math.round(similarity * 100),
                         source: 'approved'
                     };
@@ -131,45 +109,17 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
         );
 
         if (ordersResult.rows.length > 0) {
-            // Extract ingredient IDs from JSONB, then look up names
-            const allIngIds = new Set();
             for (const order of ordersResult.rows) {
+                if (!isDateClose(order.fecha)) continue;
                 const ings = Array.isArray(order.ingredientes) ? order.ingredientes : [];
-                for (const ing of ings) {
-                    const id = ing.ingredienteId || ing.ingrediente_id;
-                    if (id) allIngIds.add(Number(id));
-                }
-            }
-
-            if (allIngIds.size > 0) {
-                const idsArr = [...allIngIds];
-                const namesResult = await pool.query(
-                    `SELECT id, nombre FROM ingredientes WHERE id = ANY($1::int[])`,
-                    [idsArr]
-                );
-                const nameMap = new Map();
-                for (const row of namesResult.rows) {
-                    nameMap.set(row.id, normalizar(row.nombre));
-                }
-
-                for (const order of ordersResult.rows) {
-                    if (!isDateClose(order.fecha)) continue; // Skip if dates are >2 days apart
-                    const ings = Array.isArray(order.ingredientes) ? order.ingredientes : [];
-                    const orderNames = ings
-                        .map(ing => nameMap.get(Number(ing.ingredienteId || ing.ingrediente_id)))
-                        .filter(Boolean)
-                        .sort();
-                    if (orderNames.length < 2) continue;
-                    const similarity = calcSimilarity(orderNames);
-                    if (similarity >= 0.7) {
-                        return {
-                            batchId: `order_${order.id}`,
-                            fecha: order.fecha,
-                            itemCount: orderNames.length,
-                            similarity: Math.round(similarity * 100),
-                            source: 'manual_order'
-                        };
-                    }
+                const orderIds = ings
+                    .map(ing => Number(ing.ingredienteId || ing.ingrediente_id))
+                    .filter(Boolean)
+                    .sort((a, b) => a - b);
+                if (orderIds.length < 2) continue;
+                const similarity = calcSimilarity(orderIds);
+                if (similarity >= 0.7) {
+                    return { batchId: `order_${order.id}`, fecha: order.fecha, itemCount: orderIds.length, similarity: Math.round(similarity * 100), source: 'manual_order' };
                 }
             }
         }
@@ -177,7 +127,7 @@ async function checkDuplicateAlbaran(pool, restauranteId, items, fecha) {
         return null;
     } catch (err) {
         log('error', 'Error checking duplicate albaran', { error: err.message });
-        return null; // Never block on error
+        return null;
     }
 }
 
@@ -630,11 +580,26 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 paramIdx += 9;
             }
 
-            // 🔍 Check for duplicate albaran before inserting
+            // 🔍 Check for duplicate albaran before inserting (using resolved ingredient IDs)
+            const resolvedIngredientIds = [];
+            for (const linea of data.lineas) {
+                const nombreNorm = normalizar(linea.producto);
+                let ingId = ingredientesMap.get(nombreNorm) || null;
+                if (!ingId) {
+                    for (const [nombreDB, id] of ingredientesMap) {
+                        if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) { ingId = id; break; }
+                    }
+                }
+                if (!ingId) ingId = aliasMap.get(nombreNorm) || null;
+                if (!ingId) {
+                    for (const [aliasNombre, id] of aliasMap) {
+                        if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) { ingId = id; break; }
+                    }
+                }
+                if (ingId) resolvedIngredientIds.push(ingId);
+            }
             const duplicateWarning = await checkDuplicateAlbaran(
-                pool, req.restauranteId,
-                data.lineas.map(l => ({ producto: l.producto, cantidad: l.cantidad })),
-                fecha
+                pool, req.restauranteId, resolvedIngredientIds, fecha
             );
 
             // 🔒 Server-side dedup: reject if ANY batch was created in last 2 minutes
