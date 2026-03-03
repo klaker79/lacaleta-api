@@ -344,6 +344,42 @@ module.exports = function (pool) {
                 return res.status(413).json({ error: 'Archivo demasiado grande. Máximo 10MB.' });
             }
 
+            // ── Image hash dedup: SHA-256 of the raw base64 content ──
+            const imageHash = crypto.createHash('sha256').update(imageBase64).digest('hex');
+
+            const hashCheck = await pool.query(
+                `SELECT batch_id, fecha, COUNT(*) as item_count
+                 FROM compras_pendientes
+                 WHERE restaurante_id = $1 AND image_hash = $2
+                 GROUP BY batch_id, fecha
+                 LIMIT 1`,
+                [req.restauranteId, imageHash]
+            );
+
+            if (hashCheck.rows.length > 0) {
+                const dup = hashCheck.rows[0];
+                log('warn', 'Duplicate albaran blocked by image hash', {
+                    existingBatchId: dup.batch_id, imageHash, restauranteId: req.restauranteId
+                });
+                return res.json({
+                    success: true,
+                    batchId: dup.batch_id,
+                    proveedor: null,
+                    fecha: dup.fecha,
+                    totalItems: parseInt(dup.item_count),
+                    matched: 0,
+                    unmatched: 0,
+                    totalImporte: 0,
+                    duplicateWarning: {
+                        batchId: dup.batch_id,
+                        fecha: dup.fecha,
+                        itemCount: parseInt(dup.item_count),
+                        similarity: 100,
+                        source: 'image_hash'
+                    }
+                });
+            }
+
             // API Key
             const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
             if (!ANTHROPIC_API_KEY) {
@@ -579,9 +615,9 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const cantidad = Math.abs(parseFloat(linea.cantidad)) || 0;
                 totalImporte += parseFloat(linea.total) || (precio * cantidad);
 
-                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`);
-                values.push(batchId, linea.producto, ingredienteId, precio, cantidad, fecha, req.restauranteId, data.proveedor || null, data.numero_factura || null);
-                paramIdx += 9;
+                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9})`);
+                values.push(batchId, linea.producto, ingredienteId, precio, cantidad, fecha, req.restauranteId, data.proveedor || null, data.numero_factura || null, imageHash);
+                paramIdx += 10;
             }
 
             // 🔍 Check for duplicate albaran before inserting (using resolved ingredient IDs)
@@ -649,7 +685,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             if (placeholders.length > 0) {
                 await pool.query(
-                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id, proveedor, numero_factura)
+                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id, proveedor, numero_factura, image_hash)
                      VALUES ${placeholders.join(', ')}`,
                     values
                 );
