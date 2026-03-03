@@ -274,8 +274,8 @@ module.exports = function (pool) {
 
             // 4. SOFT DELETE: marca como eliminado
             await client.query(
-                'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1',
-                [req.params.id]
+                'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2',
+                [req.params.id, req.restauranteId]
             );
 
             // 5. Actualizar ventas_diarias_resumen (restar la venta eliminada)

@@ -357,8 +357,8 @@ module.exports = function (pool) {
             // 3. SOFT DELETE de la merma (no borrar físicamente para tener historial)
             // ⚡ FIX Bug #6: Cambiar de HARD DELETE a SOFT DELETE
             await client.query(
-                'UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
-                [req.params.id]
+                'UPDATE mermas SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND restaurante_id = $2',
+                [req.params.id, req.restauranteId]
             );
 
             await client.query('COMMIT');
