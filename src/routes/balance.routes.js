@@ -637,44 +637,41 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 fecha
             );
 
-            // 🔒 Server-side dedup: reject if identical batch created in last 5 minutes
-            const recentBatches = await pool.query(
-                `SELECT batch_id, array_agg(lower(ingrediente_nombre) ORDER BY lower(ingrediente_nombre)) as nombres
+            // 🔒 Server-side dedup: reject if ANY batch was created in last 2 minutes
+            // OCR produces different spellings each scan, so comparing names is unreliable.
+            // Physically impossible to scan 2 different albaranes in under 2 minutes.
+            const recentBatch = await pool.query(
+                `SELECT batch_id, COUNT(*) as item_count
                  FROM compras_pendientes
                  WHERE restaurante_id = $1
-                   AND created_at >= NOW() - INTERVAL '5 minutes'
-                 GROUP BY batch_id`,
+                   AND created_at >= NOW() - INTERVAL '2 minutes'
+                 GROUP BY batch_id
+                 LIMIT 1`,
                 [req.restauranteId]
             );
 
-            if (recentBatches.rows.length > 0) {
-                const newNamesNorm = data.lineas.map(l => (l.producto || '').toLowerCase()).sort();
-                const newNamesStr = newNamesNorm.join('|');
-                for (const recent of recentBatches.rows) {
-                    const existingStr = (recent.nombres || []).join('|');
-                    if (existingStr === newNamesStr) {
-                        log('warn', 'Duplicate albaran rejected (same products within 5 min)', {
-                            existingBatchId: recent.batch_id, newBatchId: batchId
-                        });
-                        return res.json({
-                            success: true,
-                            batchId: recent.batch_id,
-                            proveedor: data.proveedor || null,
-                            fecha,
-                            totalItems: data.lineas.length,
-                            matched,
-                            unmatched: data.lineas.length - matched,
-                            totalImporte: Math.round(totalImporte * 100) / 100,
-                            duplicateWarning: {
-                                batchId: recent.batch_id,
-                                fecha,
-                                itemCount: data.lineas.length,
-                                similarity: 100,
-                                source: 'recent_duplicate'
-                            }
-                        });
+            if (recentBatch.rows.length > 0) {
+                const existing = recentBatch.rows[0];
+                log('warn', 'Duplicate albaran rejected (cooldown 2 min)', {
+                    existingBatchId: existing.batch_id, newBatchId: batchId
+                });
+                return res.json({
+                    success: true,
+                    batchId: existing.batch_id,
+                    proveedor: data.proveedor || null,
+                    fecha,
+                    totalItems: data.lineas.length,
+                    matched,
+                    unmatched: data.lineas.length - matched,
+                    totalImporte: Math.round(totalImporte * 100) / 100,
+                    duplicateWarning: {
+                        batchId: existing.batch_id,
+                        fecha,
+                        itemCount: parseInt(existing.item_count),
+                        similarity: 100,
+                        source: 'recent_duplicate'
                     }
-                }
+                });
             }
 
             if (placeholders.length > 0) {
