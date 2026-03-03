@@ -351,6 +351,7 @@ module.exports = function (pool) {
                 `SELECT batch_id, fecha, COUNT(*) as item_count
                  FROM compras_pendientes
                  WHERE restaurante_id = $1 AND image_hash = $2
+                   AND estado IN ('pendiente', 'aprobado')
                  GROUP BY batch_id, fecha
                  LIMIT 1`,
                 [req.restauranteId, imageHash]
@@ -533,6 +534,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             }
 
             // ── Dedup por numero_factura: mismo nº + mismo restaurante = duplicado seguro ──
+            // Solo bloquea si el batch sigue pendiente o aprobado (rechazados se pueden volver a subir)
             const numFactura = (data.numero_factura || '').toString().trim();
             if (numFactura) {
                 const facturaCheck = await pool.query(
@@ -540,6 +542,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                      FROM compras_pendientes
                      WHERE restaurante_id = $1
                        AND TRIM(numero_factura) = $2
+                       AND estado IN ('pendiente', 'aprobado')
                      GROUP BY batch_id, fecha
                      ORDER BY fecha DESC
                      LIMIT 1`,
