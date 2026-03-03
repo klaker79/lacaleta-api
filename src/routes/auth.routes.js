@@ -892,7 +892,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             }
 
             const passwordHash = await bcrypt.hash(password, 10);
-            const nuevoRol = rol || 'usuario';
+            const allowedRoles = ['usuario', 'admin'];
+            const nuevoRol = allowedRoles.includes(rol) ? rol : 'usuario';
             const result = await pool.query(
                 'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
                 [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
