@@ -532,6 +532,39 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 }
             }
 
+            // ── Dedup por numero_factura: mismo nº + mismo restaurante = duplicado seguro ──
+            const numFactura = (data.numero_factura || '').toString().trim();
+            if (numFactura) {
+                const facturaCheck = await pool.query(
+                    `SELECT batch_id, fecha, COUNT(*) as item_count
+                     FROM compras_pendientes
+                     WHERE restaurante_id = $1
+                       AND TRIM(numero_factura) = $2
+                     GROUP BY batch_id, fecha
+                     ORDER BY fecha DESC
+                     LIMIT 1`,
+                    [req.restauranteId, numFactura]
+                );
+
+                if (facturaCheck.rows.length > 0) {
+                    const dup = facturaCheck.rows[0];
+                    log('warn', 'Duplicate albaran blocked by numero_factura', {
+                        existingBatchId: dup.batch_id, numero_factura: numFactura, restauranteId: req.restauranteId
+                    });
+                    return res.json({
+                        success: false,
+                        duplicateWarning: {
+                            batchId: dup.batch_id,
+                            fecha: dup.fecha,
+                            itemCount: parseInt(dup.item_count),
+                            similarity: 100,
+                            source: 'numero_factura',
+                            numero_factura: numFactura
+                        }
+                    });
+                }
+            }
+
             // ── Cantidades y precios: asegurar valores absolutos y numéricos ──
             data.lineas = data.lineas.map(l => ({
                 ...l,
