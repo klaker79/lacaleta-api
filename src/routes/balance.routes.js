@@ -968,14 +968,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                             return Number(p.proveedor_id) === Number(item.ingrediente_proveedor_id);
                         });
 
-                        // Check 2: ¿Este ingrediente ya fue aprobado en la misma fecha?
-                        // Requiere ingrediente_id asignado + match exacto
-                        const matchAprobado = item.ingrediente_id ? comprasAprobadas.find(c => {
-                            return fechasDentroDeRango(c.fecha, item.fecha) &&
-                                Number(c.ingrediente_id) === Number(item.ingrediente_id);
-                        }) : null;
-
-                        // Check 3: ¿Hay otro batch pendiente con mismo ingrediente+fecha?
+                        // Check 2: ¿Hay otro batch pendiente con mismo ingrediente+fecha?
                         // Requiere ingrediente_id en ambos lados
                         const matchOtroPend = (item.ingrediente_id) ? otrosPendientes.find(o => {
                             if (!fechasDentroDeRango(o.fecha, item.fecha)) return false;
@@ -988,11 +981,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                             item.pedido_duplicado_fecha = matchPedido.fecha;
                             item.pedido_duplicado_total = matchPedido.total;
                             item.pedido_duplicado_estado = matchPedido.estado;
-                        } else if (matchAprobado) {
-                            item.pedido_duplicado_id = -1;
-                            item.pedido_duplicado_fecha = matchAprobado.fecha;
-                            item.pedido_duplicado_total = matchAprobado.total;
-                            item.pedido_duplicado_estado = 'ya aprobado';
                         } else if (matchOtroPend) {
                             item.pedido_duplicado_id = -2;
                             item.pedido_duplicado_fecha = matchOtroPend.fecha;
