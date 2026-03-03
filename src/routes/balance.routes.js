@@ -637,6 +637,46 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 fecha
             );
 
+            // 🔒 Server-side dedup: reject if identical batch created in last 5 minutes
+            const recentBatches = await pool.query(
+                `SELECT batch_id, array_agg(lower(ingrediente_nombre) ORDER BY lower(ingrediente_nombre)) as nombres
+                 FROM compras_pendientes
+                 WHERE restaurante_id = $1
+                   AND created_at >= NOW() - INTERVAL '5 minutes'
+                 GROUP BY batch_id`,
+                [req.restauranteId]
+            );
+
+            if (recentBatches.rows.length > 0) {
+                const newNamesNorm = data.lineas.map(l => (l.producto || '').toLowerCase()).sort();
+                const newNamesStr = newNamesNorm.join('|');
+                for (const recent of recentBatches.rows) {
+                    const existingStr = (recent.nombres || []).join('|');
+                    if (existingStr === newNamesStr) {
+                        log('warn', 'Duplicate albaran rejected (same products within 5 min)', {
+                            existingBatchId: recent.batch_id, newBatchId: batchId
+                        });
+                        return res.json({
+                            success: true,
+                            batchId: recent.batch_id,
+                            proveedor: data.proveedor || null,
+                            fecha,
+                            totalItems: data.lineas.length,
+                            matched,
+                            unmatched: data.lineas.length - matched,
+                            totalImporte: Math.round(totalImporte * 100) / 100,
+                            duplicateWarning: {
+                                batchId: recent.batch_id,
+                                fecha,
+                                itemCount: data.lineas.length,
+                                similarity: 100,
+                                source: 'recent_duplicate'
+                            }
+                        });
+                    }
+                }
+            }
+
             if (placeholders.length > 0) {
                 await pool.query(
                     `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id, proveedor, numero_factura)
