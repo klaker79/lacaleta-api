@@ -317,8 +317,8 @@ module.exports = function (pool) {
 
             // 3. SOFT DELETE del pedido
             await client.query(
-                'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1',
-                [req.params.id]
+                'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2',
+                [req.params.id, req.restauranteId]
             );
 
             await client.query('COMMIT');

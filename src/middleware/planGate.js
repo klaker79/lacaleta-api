@@ -79,7 +79,7 @@ function requirePlan(minimumPlan) {
             next();
         } catch (err) {
             log('error', 'Error en planGate', { error: err.message });
-            next(); // Fail open on error to not break existing functionality
+            return res.status(503).json({ error: 'Servicio temporalmente no disponible' });
         }
     };
 }
