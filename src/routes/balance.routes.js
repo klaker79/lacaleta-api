@@ -1364,7 +1364,17 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const precio = parseFloat(compra.precio) || 0;
                 const cantidad = parseFloat(compra.cantidad) || 0;
                 const total = precio * cantidad;
-                const fecha = compra.fecha || new Date().toISOString().split('T')[0];
+                // 🛡️ Fecha validation: if OCR produced garbage, use today
+                let fecha = compra.fecha || null;
+                if (fecha) {
+                    const d = new Date(fecha);
+                    if (isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2030) {
+                        log('warn', 'Fecha inválida en compra bulk, usando hoy', { original: fecha, ingrediente: compra.ingrediente });
+                        fecha = new Date().toISOString().split('T')[0];
+                    }
+                } else {
+                    fecha = new Date().toISOString().split('T')[0];
+                }
 
                 // 🛡️ Deduplicación: si ya existe una compra de este ingrediente en esta fecha
                 // (por ejemplo, desde un pedido manual), SKIP para no duplicar
