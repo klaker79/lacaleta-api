@@ -204,7 +204,6 @@ module.exports = function (pool) {
         try {
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) {
-                client.release();
                 return res.status(400).json({ error: 'ID inválido' });
             }
             await client.query('BEGIN');
@@ -462,7 +461,6 @@ REGLAS:
             );
 
             if (parseInt(existingResult.rows[0].count) > 0) {
-                client.release();
                 return res.status(409).json({
                     error: 'Ya existen ventas para esta fecha',
                     fecha: fechaVenta,

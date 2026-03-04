@@ -334,7 +334,6 @@ module.exports = function (pool) {
             // adjustments: [{ id: 123, delta: 5.0 }, { id: 456, delta: -2.0 }]
 
             if (!Array.isArray(adjustments) || adjustments.length === 0) {
-                client.release();
                 return res.status(400).json({ error: 'Array de ajustes requerido' });
             }
 
@@ -427,13 +426,14 @@ module.exports = function (pool) {
     router.get('/ingredients-suppliers', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(`
-            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio, 
+            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
                    ip.es_proveedor_principal, ip.created_at,
                    p.nombre as proveedor_nombre
             FROM ingredientes_proveedores ip
             JOIN proveedores p ON ip.proveedor_id = p.id
             JOIN ingredientes i ON ip.ingrediente_id = i.id
             WHERE i.restaurante_id = $1
+              AND p.deleted_at IS NULL
             ORDER BY ip.ingrediente_id, ip.es_proveedor_principal DESC
         `, [req.restauranteId]);
 
@@ -460,12 +460,13 @@ module.exports = function (pool) {
             }
 
             const result = await pool.query(`
-            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio, 
+            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
                    ip.es_proveedor_principal, ip.created_at,
                    p.nombre as proveedor_nombre, p.contacto, p.telefono, p.email
             FROM ingredientes_proveedores ip
             JOIN proveedores p ON ip.proveedor_id = p.id
             WHERE ip.ingrediente_id = $1
+              AND p.deleted_at IS NULL
             ORDER BY ip.es_proveedor_principal DESC, p.nombre ASC
         `, [id]);
 
