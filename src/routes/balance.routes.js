@@ -843,34 +843,66 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const cantidad = Math.abs(parseFloat(compra.cantidad)) || 0;
                 let fecha = compra.fecha || new Date().toISOString().split('T')[0];
 
-                // ⚡ FIX: Handle DD-MM-YY format (e.g. "19-02-26" -> "2026-02-19") from n8n
-                if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{2}$/.test(fecha)) {
-                    const pts = fecha.split('-');
-                    // Assume DD-MM-YY (Euro format with 2-digit year)
-                    let year = parseInt(pts[2]);
-                    if (year < 100) year += 2000;
-                    fecha = `${year}-${pts[1]}-${pts[0]}`;
-                }
-                // ⚡ FIX: Handle DD-MM-YYYY format (e.g. "19-02-2026" -> "2026-02-19") from n8n
-                if (typeof fecha === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(fecha)) {
-                    const pts = fecha.split('-');
-                    fecha = `${pts[2]}-${pts[1]}-${pts[0]}`;
-                }
-                // Smart date correction: detect DD/MM vs MM/DD swap
-                try {
-                    const pd = new Date(fecha + 'T00:00:00');
-                    const now = new Date(); now.setHours(0, 0, 0, 0);
-                    const diff = (pd - now) / 86400000;
-                    const pts = fecha.split('-');
-                    if (pts.length === 3 && parseInt(pts[2]) <= 12 && (diff > 7 || diff < -365)) {
-                        const sw = `${pts[0]}-${pts[2]}-${pts[1]}`;
-                        const sd = new Date(sw + 'T00:00:00');
-                        if (Math.abs((sd - now) / 86400000) < Math.abs(diff)) {
-                            log('info', 'Auto-corrected date DD/MM swap', { original: fecha, corrected: sw });
-                            fecha = sw;
-                        }
+                // ⚡ Robust date parsing: handles DD-MM-YY, YY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, etc.
+                if (typeof fecha === 'string') {
+                    const origFecha = fecha;
+                    // Normalize separators: / . → -
+                    fecha = fecha.replace(/[/.]/g, '-').trim();
+
+                    // Already YYYY-MM-DD — keep as is
+                    if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(fecha)) {
+                        // valid, keep
                     }
-                } catch (e) { /* keep original */ }
+                    // DD-MM-YYYY or D-M-YYYY
+                    else if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(fecha)) {
+                        const pts = fecha.split('-');
+                        fecha = `${pts[2]}-${pts[1].padStart(2, '0')}-${pts[0].padStart(2, '0')}`;
+                    }
+                    // Ambiguous XX-YY-ZZ (all 1-2 digits) — could be DD-MM-YY or YY-MM-DD
+                    else if (/^\d{1,2}-\d{1,2}-\d{1,2}$/.test(fecha)) {
+                        const pts = fecha.split('-');
+                        const a = parseInt(pts[0]), b = parseInt(pts[1]), c = parseInt(pts[2]);
+                        const now = new Date(); now.setHours(0, 0, 0, 0);
+
+                        const currentYear = now.getFullYear();
+
+                        // Interpretation 1: DD-MM-YY (European)
+                        let y1 = (c < 100 ? c + 2000 : c);
+                        if (y1 < currentYear - 1) y1 = currentYear; // correct old years
+                        const dmy = `${y1}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
+                        const dmyValid = b >= 1 && b <= 12 && a >= 1 && a <= 31;
+
+                        // Interpretation 2: YY-MM-DD (short ISO)
+                        let y2 = (a < 100 ? a + 2000 : a);
+                        if (y2 < currentYear - 1) y2 = currentYear; // correct old years
+                        const ymd = `${y2}-${String(b).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+                        const ymdValid = b >= 1 && b <= 12 && c >= 1 && c <= 31;
+
+                        if (dmyValid && ymdValid) {
+                            // Both valid — pick the one closest to today
+                            const dmyDiff = Math.abs(new Date(dmy + 'T00:00:00') - now);
+                            const ymdDiff = Math.abs(new Date(ymd + 'T00:00:00') - now);
+                            fecha = ymdDiff <= dmyDiff ? ymd : dmy;
+                        } else if (dmyValid) {
+                            fecha = dmy;
+                        } else if (ymdValid) {
+                            fecha = ymd;
+                        } else {
+                            // Fallback: DD-MM-YY
+                            fecha = dmy;
+                        }
+
+                        log('info', 'Date parsed from ambiguous format', { original: origFecha, result: fecha, dmyCandidate: dmy, ymdCandidate: ymd });
+                    }
+
+                    // Sanity: year must be >= 2020, otherwise use current year
+                    const ym = fecha.match(/^(\d{4})/);
+                    if (ym && parseInt(ym[1]) < 2020) {
+                        const currentYear = new Date().getFullYear();
+                        fecha = fecha.replace(/^\d{4}/, String(currentYear));
+                        log('warn', 'Date year corrected', { original: origFecha, corrected: fecha });
+                    }
+                }
 
 
                 placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
