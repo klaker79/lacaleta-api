@@ -879,13 +879,23 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 resultados.recibidos++;
             }
 
-            // 🔍 Check for duplicate albaran before inserting
+            // 🔍 Check for duplicate albaran BEFORE inserting
             const fechaCheck = compras[0]?.fecha || new Date().toISOString().split('T')[0];
             const duplicateWarning = await checkDuplicateAlbaran(
                 pool, req.restauranteId,
                 compras.map(c => ({ ingrediente: c.ingrediente, cantidad: c.cantidad })),
                 fechaCheck
             );
+
+            // 🔒 BLOCK: Si hay duplicado, NO insertar
+            if (duplicateWarning) {
+                log('warn', 'Duplicate purchase BLOCKED (not inserted)', { batchId, duplicate: duplicateWarning });
+                return res.status(409).json({
+                    error: 'Albarán duplicado detectado',
+                    duplicateWarning,
+                    batchId
+                });
+            }
 
             if (placeholders.length > 0) {
                 await pool.query(
@@ -896,10 +906,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             }
 
             log('info', 'Compras pendientes recibidas', { batchId, items: resultados.recibidos });
-            if (duplicateWarning) {
-                resultados.duplicateWarning = duplicateWarning;
-                log('info', 'Duplicate albaran detected (n8n)', { batchId, duplicate: duplicateWarning });
-            }
             res.json(resultados);
         } catch (err) {
             log('error', 'Error recibiendo compras pendientes', { error: err.message });
