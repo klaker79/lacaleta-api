@@ -32,33 +32,19 @@ module.exports = function (pool) {
             WHEN i.stock_real IS NULL THEN NULL
             ELSE (i.stock_real - i.stock_actual)
         END as diferencia,
-        -- Precio unitario: 1) media ponderada de compras reales, 2) precio/cpf, 3) precio
-        COALESCE(
-          pcd.precio_medio_compra,
-          CASE
-            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
-            THEN i.precio / i.cantidad_por_formato
-            ELSE i.precio
-          END
-        ) as precio_medio,
+        -- Precio unitario: precio / cantidad_por_formato (formula original estable)
+        CASE
+          WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
+          THEN i.precio / i.cantidad_por_formato
+          ELSE i.precio
+        END as precio_medio,
         -- Valor stock = stock_actual x precio_unitario
-        (i.stock_actual * COALESCE(
-          pcd.precio_medio_compra,
-          CASE
-            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
-            THEN i.precio / i.cantidad_por_formato
-            ELSE i.precio
-          END
-        )) as valor_stock
+        (i.stock_actual * CASE
+          WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
+          THEN i.precio / i.cantidad_por_formato
+          ELSE i.precio
+        END) as valor_stock
       FROM ingredientes i
-      LEFT JOIN (
-        SELECT
-          ingrediente_id,
-          SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0) as precio_medio_compra
-        FROM precios_compra_diarios
-        WHERE restaurante_id = $1
-        GROUP BY ingrediente_id
-      ) pcd ON pcd.ingrediente_id = i.id
       WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
       ORDER BY i.id
     `, [req.restauranteId]);
