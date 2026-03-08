@@ -165,17 +165,29 @@ module.exports = function (pool) {
                 [startDate, endDate, req.restauranteId]
             );
 
-            // Precargar todos los precios de ingredientes en UNA query
+            // Precargar precios de ingredientes + media de compras reales
             const ingredientesResult = await pool.query(
-                'SELECT id, precio, cantidad_por_formato, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const preciosMap = new Map();
             const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
-                const precio = parseFloat(i.precio) || 0;
-                const cpf = parseFloat(i.cantidad_por_formato) || 1;
-                preciosMap.set(i.id, precio / cpf);
+                if (i.precio_medio_compra) {
+                    preciosMap.set(i.id, parseFloat(i.precio_medio_compra));
+                } else {
+                    const precio = parseFloat(i.precio) || 0;
+                    const cpf = parseFloat(i.cantidad_por_formato) || 1;
+                    preciosMap.set(i.id, precio / cpf);
+                }
                 if (i.rendimiento) {
                     rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
                 }

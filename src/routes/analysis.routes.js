@@ -33,21 +33,30 @@ module.exports = function (pool) {
                 return res.json([]);
             }
 
-            // Query 2: Todos los precios de ingredientes en UNA query
-            // 🔧 FIX: Incluir cantidad_por_formato Y rendimiento para calcular precio UNITARIO
+            // Query 2: Precios de ingredientes + media de compras reales
             const ingredientesResult = await pool.query(
-                'SELECT id, precio, cantidad_por_formato, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const preciosMap = new Map();
             const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(ing => {
-                // ✅ Precio unitario = precio del formato / cantidad en el formato
-                const precioFormato = parseFloat(ing.precio) || 0;
-                const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
-                const precioUnitario = precioFormato / cantidadPorFormato;
-                preciosMap.set(ing.id, precioUnitario);
-                // 🔧 FIX: Guardar rendimiento base del ingrediente para fallback
+                // Prioridad: media compras reales > precio config / cpf
+                if (ing.precio_medio_compra) {
+                    preciosMap.set(ing.id, parseFloat(ing.precio_medio_compra));
+                } else {
+                    const precioFormato = parseFloat(ing.precio) || 0;
+                    const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
+                    preciosMap.set(ing.id, precioFormato / cantidadPorFormato);
+                }
                 if (ing.rendimiento) {
                     rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
                 }

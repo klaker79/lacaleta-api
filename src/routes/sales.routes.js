@@ -519,16 +519,29 @@ REGLAS:
                 });
             });
 
-            // CORREGIDO: Incluir cantidad_por_formato Y rendimiento para calcular precio UNITARIO
-            const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
+            // Precios de ingredientes + media de compras reales
+            const ingredientesResult = await client.query(
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [req.restauranteId]
+            );
             const ingredientesPrecios = new Map();
             const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
-                const precio = parseFloat(i.precio) || 0;
-                const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
-                // Precio unitario = precio del formato / cantidad en el formato
-                const precioUnitario = precio / cantidadPorFormato;
-                ingredientesPrecios.set(i.id, precioUnitario);
+                if (i.precio_medio_compra) {
+                    ingredientesPrecios.set(i.id, parseFloat(i.precio_medio_compra));
+                } else {
+                    const precio = parseFloat(i.precio) || 0;
+                    const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
+                    ingredientesPrecios.set(i.id, precio / cantidadPorFormato);
+                }
                 if (i.rendimiento) {
                     rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
                 }
