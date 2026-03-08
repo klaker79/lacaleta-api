@@ -17,7 +17,7 @@ module.exports = function (pool) {
     router.get('/inventory/complete', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(`
-      SELECT 
+      SELECT
         i.id,
         i.nombre,
         i.unidad,
@@ -28,35 +28,37 @@ module.exports = function (pool) {
         i.ultima_actualizacion_stock,
         i.formato_compra,
         i.cantidad_por_formato,
-        CASE 
-            WHEN i.stock_real IS NULL THEN NULL 
-            ELSE (i.stock_real - i.stock_actual) 
+        CASE
+            WHEN i.stock_real IS NULL THEN NULL
+            ELSE (i.stock_real - i.stock_actual)
         END as diferencia,
-        -- Precio unitario: media REAL de compras (precios_compra_diarios), fallback a precio/formato
+        -- Precio unitario: 1) media ponderada de compras reales, 2) precio/cpf, 3) precio
         COALESCE(
-          (SELECT AVG(pcd.precio_unitario) 
-           FROM precios_compra_diarios pcd 
-           WHERE pcd.ingrediente_id = i.id 
-             AND pcd.restaurante_id = i.restaurante_id),
-          CASE 
-            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+          pcd.precio_medio_compra,
+          CASE
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
             THEN i.precio / i.cantidad_por_formato
-            ELSE i.precio 
+            ELSE i.precio
           END
         ) as precio_medio,
-        -- Valor stock = stock_actual × precio_medio (real)
+        -- Valor stock = stock_actual x precio_unitario
         (i.stock_actual * COALESCE(
-          (SELECT AVG(pcd.precio_unitario) 
-           FROM precios_compra_diarios pcd 
-           WHERE pcd.ingrediente_id = i.id 
-             AND pcd.restaurante_id = i.restaurante_id),
-          CASE 
-            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+          pcd.precio_medio_compra,
+          CASE
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
             THEN i.precio / i.cantidad_por_formato
-            ELSE i.precio 
+            ELSE i.precio
           END
         )) as valor_stock
       FROM ingredientes i
+      LEFT JOIN (
+        SELECT
+          ingrediente_id,
+          SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0) as precio_medio_compra
+        FROM precios_compra_diarios
+        WHERE restaurante_id = $1
+        GROUP BY ingrediente_id
+      ) pcd ON pcd.ingrediente_id = i.id
       WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
       ORDER BY i.id
     `, [req.restauranteId]);
