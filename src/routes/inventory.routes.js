@@ -32,19 +32,30 @@ module.exports = function (pool) {
             WHEN i.stock_real IS NULL THEN NULL 
             ELSE (i.stock_real - i.stock_actual) 
         END as diferencia,
-        -- Precio unitario: SIEMPRE dividir precio por cantidad_por_formato
-        -- (La subquery de pedidos se elimina porque los pedidos históricos tienen precios por formato sin dividir)
-        CASE 
-          WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
-          THEN i.precio / i.cantidad_por_formato
-          ELSE i.precio 
-        END as precio_medio,
-        -- Valor stock = stock_actual × precio_unitario
-        (i.stock_actual * CASE 
-          WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
-          THEN i.precio / i.cantidad_por_formato
-          ELSE i.precio 
-        END) as valor_stock
+        -- Precio unitario: media REAL de compras (precios_compra_diarios), fallback a precio/formato
+        COALESCE(
+          (SELECT AVG(pcd.precio_unitario) 
+           FROM precios_compra_diarios pcd 
+           WHERE pcd.ingrediente_id = i.id 
+             AND pcd.restaurante_id = i.restaurante_id),
+          CASE 
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+            THEN i.precio / i.cantidad_por_formato
+            ELSE i.precio 
+          END
+        ) as precio_medio,
+        -- Valor stock = stock_actual × precio_medio (real)
+        (i.stock_actual * COALESCE(
+          (SELECT AVG(pcd.precio_unitario) 
+           FROM precios_compra_diarios pcd 
+           WHERE pcd.ingrediente_id = i.id 
+             AND pcd.restaurante_id = i.restaurante_id),
+          CASE 
+            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+            THEN i.precio / i.cantidad_por_formato
+            ELSE i.precio 
+          END
+        )) as valor_stock
       FROM ingredientes i
       WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
       ORDER BY i.id

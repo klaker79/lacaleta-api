@@ -234,12 +234,27 @@ module.exports = function (pool) {
         `, [req.restauranteId]);
 
             const ingredientes = await pool.query(`
-            SELECT id, nombre, precio, cantidad_por_formato, rendimiento
-            FROM ingredientes 
-            WHERE restaurante_id = $1 AND deleted_at IS NULL
+            SELECT 
+                i.id, i.nombre, i.precio, i.cantidad_por_formato, i.rendimiento,
+                COALESCE(
+                    (SELECT AVG(pcd.precio_unitario) 
+                     FROM precios_compra_diarios pcd 
+                     WHERE pcd.ingrediente_id = i.id AND pcd.restaurante_id = i.restaurante_id),
+                    CASE 
+                        WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+                        THEN i.precio / i.cantidad_por_formato
+                        ELSE i.precio 
+                    END
+                ) as precio_medio
+            FROM ingredientes i
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
         `, [req.restauranteId]);
 
-            const ingMap = buildIngredientPriceMap(ingredientes.rows);
+            // Use real average purchase prices (precio_medio) instead of configured prices
+            const ingMap = {};
+            ingredientes.rows.forEach(i => {
+                ingMap[i.id] = parseFloat(i.precio_medio) || 0;
+            });
             // 🔧 FIX: Map de rendimiento base para fallback
             const rendimientoBaseMap = {};
             ingredientes.rows.forEach(i => {
