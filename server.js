@@ -125,10 +125,13 @@ app.use((req, res, next) => {
         const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password', '/api/stripe/webhook'];
         const isPublicPath = publicPaths.some(p => req.path === p || (p !== '/' && req.path.startsWith(p)));
 
-        if (isPublicPath || process.env.NODE_ENV !== 'production') {
+        // ⚡ FIX: Permitir requests server-to-server (n8n, automations) que envían Authorization header
+        const hasAuthHeader = req.headers.authorization && req.headers.authorization.startsWith('Bearer ');
+
+        if (isPublicPath || hasAuthHeader || process.env.NODE_ENV !== 'production') {
             res.header('Access-Control-Allow-Origin', '*');
         } else {
-            // Rechazar API requests sin origin (previene CSRF y uso no autorizado)
+            // Rechazar API requests sin origin Y sin auth (previene CSRF y uso no autorizado)
             log('warn', 'CORS: Request sin origin bloqueado', { path: req.path, ip: req.ip, method: req.method });
             return res.status(403).json({ error: 'CORS: Header Origin requerido' });
         }
