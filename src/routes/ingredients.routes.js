@@ -240,6 +240,54 @@ module.exports = function (pool) {
                 'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
                 [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
             );
+
+            // ⚡ PROPAGACIÓN: Si cambió el rendimiento, actualizar TODAS las recetas que usan este ingrediente
+            const oldRendimiento = parseInt(existing.rendimiento) || 100;
+            if (finalRendimiento !== oldRendimiento) {
+                try {
+                    const recetasResult = await pool.query(
+                        'SELECT id, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                        [req.restauranteId]
+                    );
+
+                    let recetasActualizadas = 0;
+                    for (const receta of recetasResult.rows) {
+                        const ingredientes = receta.ingredientes || [];
+                        if (!Array.isArray(ingredientes)) continue;
+
+                        let changed = false;
+                        const updatedIngredientes = ingredientes.map(ing => {
+                            const ingId = ing.ingredienteId || ing.ingrediente_id || ing.id;
+                            if (ingId === id) {
+                                changed = true;
+                                return { ...ing, rendimiento: finalRendimiento };
+                            }
+                            return ing;
+                        });
+
+                        if (changed) {
+                            await pool.query(
+                                'UPDATE recetas SET ingredientes = $1 WHERE id = $2 AND restaurante_id = $3',
+                                [JSON.stringify(updatedIngredientes), receta.id, req.restauranteId]
+                            );
+                            recetasActualizadas++;
+                        }
+                    }
+
+                    if (recetasActualizadas > 0) {
+                        log('info', 'Rendimiento propagado a recetas', {
+                            ingredienteId: id,
+                            de: oldRendimiento,
+                            a: finalRendimiento,
+                            recetasActualizadas
+                        });
+                    }
+                } catch (propError) {
+                    // No fallar la operación principal si la propagación falla
+                    log('error', 'Error propagando rendimiento a recetas', { error: propError.message });
+                }
+            }
+
             res.json(result.rows[0] || {});
         } catch (err) {
             log('error', 'Error actualizando ingrediente', { error: err.message });
