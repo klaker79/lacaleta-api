@@ -926,90 +926,111 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             // ══════════════════════════════════════════════════════════
             // 🔍 DEDUPLICATION: Block duplicate albaranes BEFORE insert
+            // Uses 3 layers — tolerant of OCR variations from Gemini
             // ══════════════════════════════════════════════════════════
-
-            // Collect resolved ingredient IDs from matching loop
-            const resolvedIds = values
-                .filter((_, i) => i % 7 === 2)  // ingredienteId is at position 2 in each 7-value group
-                .filter(Boolean);
 
             let duplicateWarning = null;
 
-            // ── Layer 1: ID-based dedup (when ingredients were matched) ──
-            if (resolvedIds.length > 0) {
-                const pendingResult = await pool.query(
-                    `SELECT batch_id, ingrediente_id, fecha
-                     FROM compras_pendientes
-                     WHERE restaurante_id = $1
-                       AND ingrediente_id IS NOT NULL
-                       AND estado IN ('pendiente', 'aprobado')
-                       AND created_at >= NOW() - INTERVAL '7 days'
-                     ORDER BY batch_id, id`,
-                    [req.restauranteId]
-                );
+            // Get ALL recent pending/approved items for comparison
+            const recentPending = await pool.query(
+                `SELECT batch_id, fecha, ingrediente_nombre, ingrediente_id, cantidad, precio,
+                        COUNT(*) OVER (PARTITION BY batch_id) as batch_size
+                 FROM compras_pendientes
+                 WHERE restaurante_id = $1
+                   AND estado IN ('pendiente', 'aprobado')
+                   AND created_at >= NOW() - INTERVAL '7 days'
+                 ORDER BY batch_id`,
+                [req.restauranteId]
+            );
 
-                if (pendingResult.rows.length > 0) {
-                    const batches = new Map();
-                    for (const row of pendingResult.rows) {
-                        if (!batches.has(row.batch_id)) batches.set(row.batch_id, { ids: [], fecha: row.fecha });
-                        batches.get(row.batch_id).ids.push(Number(row.ingrediente_id));
+            if (recentPending.rows.length > 0) {
+                // Group existing items by batch
+                const existingBatches = new Map();
+                for (const row of recentPending.rows) {
+                    if (!existingBatches.has(row.batch_id)) {
+                        existingBatches.set(row.batch_id, { items: [], fecha: row.fecha, size: Number(row.batch_size) });
+                    }
+                    existingBatches.get(row.batch_id).items.push(row);
+                }
+
+                // Build new albaran data for comparison
+                const newItemCount = compras.length;
+                const newTotal = compras.reduce((sum, c) => sum + (Math.abs(parseFloat(c.precio)) || 0) * (Math.abs(parseFloat(c.cantidad)) || 0), 0);
+                const newPairs = compras.map(c => ({
+                    qty: Math.abs(parseFloat(c.cantidad)) || 0,
+                    price: Math.abs(parseFloat(c.precio)) || 0
+                })).sort((a, b) => a.qty - b.qty || a.price - b.price);
+
+                for (const [existingBatchId, batch] of existingBatches) {
+                    // ── Layer 1: Item count + total amount (fast pre-filter) ──
+                    // If item count differs by more than 1 or total differs by more than 15%, skip
+                    const existingTotal = batch.items.reduce((sum, i) => sum + Number(i.precio) * Number(i.cantidad), 0);
+                    if (Math.abs(batch.size - newItemCount) > 1) continue;
+                    if (existingTotal > 0 && newTotal > 0) {
+                        const totalDiff = Math.abs(existingTotal - newTotal) / Math.max(existingTotal, newTotal);
+                        if (totalDiff > 0.15) continue;
                     }
 
-                    const newIdSet = new Set(resolvedIds.map(Number));
-                    for (const [existingBatchId, batch] of batches) {
-                        const existingSet = new Set(batch.ids);
-                        let overlap = 0;
-                        for (const id of newIdSet) { if (existingSet.has(id)) overlap++; }
-                        const similarity = overlap / Math.max(newIdSet.size, existingSet.size);
-                        if (similarity >= 0.7) {
-                            duplicateWarning = {
-                                batchId: existingBatchId, fecha: batch.fecha,
-                                itemCount: batch.ids.length,
-                                similarity: Math.round(similarity * 100),
-                                source: 'ingredient_ids'
-                            };
-                            break;
+                    // ── Layer 2: Fuzzy qty+price pair matching ──
+                    // Compare sorted (qty, price) pairs with ±10% tolerance
+                    // This works even when Gemini produces slightly different product names
+                    const existingPairs = batch.items.map(i => ({
+                        qty: Number(i.cantidad),
+                        price: Number(i.precio)
+                    })).sort((a, b) => a.qty - b.qty || a.price - b.price);
+
+                    let matchedPairs = 0;
+                    const usedExisting = new Set();
+                    for (const newPair of newPairs) {
+                        for (let j = 0; j < existingPairs.length; j++) {
+                            if (usedExisting.has(j)) continue;
+                            const ep = existingPairs[j];
+                            const qtyMatch = newPair.qty === 0 && ep.qty === 0 ||
+                                (newPair.qty > 0 && ep.qty > 0 && Math.abs(newPair.qty - ep.qty) / Math.max(newPair.qty, ep.qty) <= 0.10);
+                            const priceMatch = newPair.price === 0 && ep.price === 0 ||
+                                (newPair.price > 0 && ep.price > 0 && Math.abs(newPair.price - ep.price) / Math.max(newPair.price, ep.price) <= 0.10);
+                            if (qtyMatch && priceMatch) {
+                                matchedPairs++;
+                                usedExisting.add(j);
+                                break;
+                            }
                         }
                     }
-                }
-            }
 
-            // ── Layer 2: Text fingerprint dedup (when no IDs matched) ──
-            if (!duplicateWarning) {
-                const fingerprint = compras
-                    .map(c => `${normalizar(c.ingrediente)}|${Math.abs(parseFloat(c.cantidad)) || 0}|${Math.abs(parseFloat(c.precio)) || 0}`)
-                    .sort()
-                    .join(';;');
-
-                const recentPending = await pool.query(
-                    `SELECT batch_id, fecha, ingrediente_nombre, cantidad, precio
-                     FROM compras_pendientes
-                     WHERE restaurante_id = $1
-                       AND estado IN ('pendiente', 'aprobado')
-                       AND created_at >= NOW() - INTERVAL '7 days'
-                     ORDER BY batch_id`,
-                    [req.restauranteId]
-                );
-
-                if (recentPending.rows.length > 0) {
-                    const existingBatches = new Map();
-                    for (const row of recentPending.rows) {
-                        if (!existingBatches.has(row.batch_id)) existingBatches.set(row.batch_id, []);
-                        existingBatches.get(row.batch_id).push(row);
+                    const pairSimilarity = matchedPairs / Math.max(newPairs.length, existingPairs.length);
+                    if (pairSimilarity >= 0.7) {
+                        duplicateWarning = {
+                            batchId: existingBatchId,
+                            fecha: batch.fecha,
+                            itemCount: batch.size,
+                            similarity: Math.round(pairSimilarity * 100),
+                            source: 'qty_price_match'
+                        };
+                        break;
                     }
 
-                    for (const [existingBatchId, items] of existingBatches) {
-                        const existingFingerprint = items
-                            .map(i => `${normalizar(i.ingrediente_nombre)}|${Number(i.cantidad)}|${Number(i.precio)}`)
-                            .sort()
-                            .join(';;');
+                    // ── Layer 3: Ingredient ID overlap (when both batches have matched IDs) ──
+                    const resolvedIds = values
+                        .filter((_, i) => i % 7 === 2)
+                        .filter(Boolean)
+                        .map(Number);
+                    const existingIds = batch.items
+                        .filter(i => i.ingrediente_id)
+                        .map(i => Number(i.ingrediente_id));
 
-                        if (existingFingerprint === fingerprint) {
+                    if (resolvedIds.length > 0 && existingIds.length > 0) {
+                        const newIdSet = new Set(resolvedIds);
+                        const existingIdSet = new Set(existingIds);
+                        let overlap = 0;
+                        for (const id of newIdSet) { if (existingIdSet.has(id)) overlap++; }
+                        const idSimilarity = overlap / Math.max(newIdSet.size, existingIdSet.size);
+                        if (idSimilarity >= 0.7) {
                             duplicateWarning = {
-                                batchId: existingBatchId, fecha: items[0].fecha,
-                                itemCount: items.length,
-                                similarity: 100,
-                                source: 'text_fingerprint'
+                                batchId: existingBatchId,
+                                fecha: batch.fecha,
+                                itemCount: batch.size,
+                                similarity: Math.round(idSimilarity * 100),
+                                source: 'ingredient_ids'
                             };
                             break;
                         }
@@ -1081,20 +1102,53 @@ REGLAS CRÍTICAS DE PRECISIÓN:
         }
     });
 
-    // PATCH: Actualizar formato_override de un item pendiente
+    // PATCH: Actualizar formato_override de un item pendiente + recalcular precio
     router.patch('/purchases/pending/:id/formato', authMiddleware, async (req, res) => {
         try {
             const { formato_override } = req.body;
             if (formato_override === undefined || formato_override === null || Number(formato_override) <= 0) {
                 return res.status(400).json({ error: 'formato_override debe ser un número positivo' });
             }
-            const result = await pool.query(
-                "UPDATE compras_pendientes SET formato_override = $1 WHERE id = $2 AND restaurante_id = $3 AND estado = 'pendiente' RETURNING id, formato_override",
-                [Number(formato_override), req.params.id, req.restauranteId]
+
+            // Obtener item actual + datos del ingrediente para recalcular precio
+            const itemResult = await pool.query(
+                `SELECT cp.id, cp.ingrediente_id, cp.precio, i.precio as ingrediente_precio, i.cantidad_por_formato
+                 FROM compras_pendientes cp
+                 LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
+                 WHERE cp.id = $1 AND cp.restaurante_id = $2 AND cp.estado = 'pendiente'`,
+                [req.params.id, req.restauranteId]
             );
-            if (result.rows.length === 0) {
+
+            if (itemResult.rows.length === 0) {
                 return res.status(404).json({ error: 'Item no encontrado o ya procesado' });
             }
+
+            const item = itemResult.rows[0];
+            const cantidadPorFormato = parseFloat(item.cantidad_por_formato) || 1;
+            const precioFormato = parseFloat(item.ingrediente_precio) || 0;
+            const nuevoFormato = Number(formato_override);
+
+            // Recalcular precio: ingrediente.precio es siempre el precio por formato_compra (ej: por CAJA)
+            // Si el usuario elige unidad (×1): precio = precioFormato / cantidadPorFormato
+            // Si el usuario elige formato completo (×N): precio = precioFormato
+            let nuevoPrecio = item.precio; // fallback: no cambiar si no hay datos
+            if (precioFormato > 0 && cantidadPorFormato > 1) {
+                if (nuevoFormato === 1) {
+                    // Unidad individual: dividir precio del formato entre cantidad por formato
+                    nuevoPrecio = +(precioFormato / cantidadPorFormato).toFixed(4);
+                } else {
+                    // Formato completo: usar precio del formato tal cual
+                    nuevoPrecio = precioFormato;
+                }
+            }
+
+            const result = await pool.query(
+                `UPDATE compras_pendientes SET formato_override = $1, precio = $2
+                 WHERE id = $3 AND restaurante_id = $4 AND estado = 'pendiente'
+                 RETURNING id, formato_override, precio`,
+                [nuevoFormato, nuevoPrecio, req.params.id, req.restauranteId]
+            );
+
             res.json(result.rows[0]);
         } catch (err) {
             log('error', 'Error actualizando formato_override', { error: err.message });
