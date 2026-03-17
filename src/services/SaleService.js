@@ -3,10 +3,15 @@
  * services/SaleService.js
  * ============================================
  *
- * Lógica de negocio para ventas.
+ * @deprecated NO USAR — La fórmula de descuento de stock es INCORRECTA.
+ * No divide por porciones ni aplica factor de variante.
+ * Las rutas inline de sales.routes.js son las activas en producción y tienen la fórmula correcta:
+ *   cantidadADescontar = (ingCantidad / porciones) * cantidadVendida * factorVariante
+ * Este archivo usa:
+ *   consumo = ing.cantidad * cantidad  ← INCORRECTO
  *
  * @author MindLoopIA
- * @version 1.0.0
+ * @version 1.0.0 (DEPRECATED 2026-02-20)
  */
 
 const BaseService = require('./BaseService');

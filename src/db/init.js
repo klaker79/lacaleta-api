@@ -327,11 +327,17 @@ async function initializeDatabase(pool) {
             
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
-            
+        `);
+    log('info', 'Migración columnas ingredientes/mermas completada');
+  } catch (e) { log('warn', 'Migración columnas ingredientes/mermas', { error: e.message }); }
+
+  // Alerts en bloque separado (puede no existir la tabla si no se ha creado aún)
+  try {
+    await pool.query(`
             ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'warning';
         `);
-    log('info', 'Migración columnas auditoría completada');
-  } catch (e) { log('warn', 'Migración columnas auditoría', { error: e.message }); }
+    log('info', 'Migración columna alerts.severity completada');
+  } catch (e) { log('warn', 'Migración alerts.severity (tabla puede no existir)', { error: e.message }); }
 
   // Añadir columna 'codigo' a recetas
   try {
@@ -340,6 +346,32 @@ async function initializeDatabase(pool) {
             ALTER TABLE recetas ADD COLUMN IF NOT EXISTS fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
         `);
   } catch (e) { log('warn', 'Migración recetas.codigo', { error: e.message }); }
+
+  // ========== MIGRACIÓN: Columnas v2 para recetas (cost calculation layer) ==========
+  try {
+    await pool.query(`
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS descripcion TEXT;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS categoria_id INTEGER;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS raciones INTEGER DEFAULT 1;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS coste_calculado DECIMAL(10, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS coste_por_racion DECIMAL(10, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS margen_porcentaje DECIMAL(5, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS food_cost DECIMAL(5, 2);
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS last_cost_calculation TIMESTAMP;
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        `);
+    log('info', 'Migración columnas v2 recetas (cost calculation) completada');
+  } catch (e) { log('warn', 'Migración columnas v2 recetas', { error: e.message }); }
+
+  // ========== MIGRACIÓN: Columnas v2 para ingredientes (cost calculation layer) ==========
+  try {
+    await pool.query(`
+            ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS precio_kg DECIMAL(10, 2);
+            ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        `);
+    log('info', 'Migración columnas v2 ingredientes completada');
+  } catch (e) { log('warn', 'Migración columnas v2 ingredientes', { error: e.message }); }
 
   // Añadir columnas a proveedores
   try {
@@ -489,6 +521,23 @@ async function initializeDatabase(pool) {
     log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
   } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
 
+  // Columna formato_override en compras_pendientes (para selector de formato en revisión de albaranes)
+  try {
+    await pool.query(`
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS formato_override DECIMAL(10, 4) DEFAULT 1;
+        `);
+    log('info', 'Columna formato_override en compras_pendientes verificada');
+  } catch (e) { log('warn', 'Migración formato_override', { error: e.message }); }
+
+  // Columnas proveedor y numero_factura en compras_pendientes (para sincronización con Sheets)
+  try {
+    await pool.query(`
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS proveedor TEXT;
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS numero_factura TEXT;
+        `);
+    log('info', 'Columnas proveedor/numero_factura en compras_pendientes verificadas');
+  } catch (e) { log('warn', 'Migración proveedor/numero_factura', { error: e.message }); }
+
   // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
   // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
   try {
@@ -516,19 +565,65 @@ async function initializeDatabase(pool) {
     log('info', 'Columna periodo_id en mermas verificada');
   } catch (e) { log('warn', 'Migración periodo_id mermas', { error: e.message }); }
 
-  // ========== LIMPIEZA DE TABLAS OBSOLETAS ==========
-  log('info', 'Limpiando tablas obsoletas...');
-
+  // ========== MIGRACIÓN: Stripe subscription fields ==========
   try {
     await pool.query(`
-            DROP TABLE IF EXISTS daily_records CASCADE;
-            DROP TABLE IF EXISTS lanave_ventas_tpv CASCADE;
-            DROP TABLE IF EXISTS producto_id_tpv CASCADE;
-            DROP TABLE IF EXISTS snapshots_diarios CASCADE;
-            DROP TABLE IF EXISTS inventory_counts CASCADE;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT UNIQUE;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'trial';
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS plan_status TEXT DEFAULT 'trialing';
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
+            ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 2;
         `);
-    log('info', 'Tablas obsoletas eliminadas');
-  } catch (e) { log('warn', 'Error eliminando tablas obsoletas', { error: e.message }); }
+    // Promote existing restaurants (pre-Stripe) to premium
+    await pool.query(`
+            UPDATE restaurantes SET plan = 'premium', plan_status = 'active', max_users = 999
+            WHERE plan = 'trial';
+        `);
+    log('info', 'Migración Stripe fields completada');
+  } catch (e) { log('warn', 'Migración Stripe fields', { error: e.message }); }
+
+  // ========== MIGRACION: Super Admin flag ==========
+  try {
+    await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN DEFAULT FALSE;`);
+    log('info', 'Migración is_superadmin completada');
+  } catch (e) { log('warn', 'Migración is_superadmin', { error: e.message }); }
+
+  // ========== MIGRACIÓN: Drop UNIQUE on restaurantes.email (multi-restaurant) ==========
+  // Same user can own multiple restaurants, so email can't be unique
+  try {
+    await pool.query(`ALTER TABLE restaurantes DROP CONSTRAINT IF EXISTS restaurantes_email_key;`);
+    log('info', 'Migración: UNIQUE constraint on restaurantes.email removed (multi-restaurant)');
+  } catch (e) { log('warn', 'Migración drop restaurantes email unique', { error: e.message }); }
+
+  // ========== MIGRACION: Multi-restaurant junction table ==========
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usuario_restaurantes (
+        id SERIAL PRIMARY KEY,
+        usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        rol VARCHAR(50) DEFAULT 'usuario',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(usuario_id, restaurante_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_usuario_restaurantes_usuario
+        ON usuario_restaurantes(usuario_id);
+      CREATE INDEX IF NOT EXISTS idx_usuario_restaurantes_restaurante
+        ON usuario_restaurantes(restaurante_id);
+    `);
+    // Backfill: sync existing usuarios → junction table
+    await pool.query(`
+      INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol)
+      SELECT id, restaurante_id, rol FROM usuarios
+      ON CONFLICT (usuario_id, restaurante_id) DO NOTHING;
+    `);
+    log('info', 'Migración usuario_restaurantes completada (tabla + backfill)');
+  } catch (e) { log('warn', 'Migración usuario_restaurantes', { error: e.message }); }
+
+  // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
+  // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
+  // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
 
   log('info', 'Tablas y migraciones completadas');
 }

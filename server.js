@@ -54,6 +54,7 @@ const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
 // ========== ARQUITECTURA LIMPIA V2 ==========
 const { setupEventHandlers } = require('./src/application/bootstrap');
@@ -91,18 +92,15 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_ORIGINS = [
     'https://klaker79.github.io',
     'https://app.mindloop.cloud',
-    'http://localhost:5173',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
-    'http://localhost:3003',
-    'http://localhost:3004',
-    'http://localhost:3005',
-    'http://localhost:3006',
-    'http://localhost:3007',
-    'http://localhost:8080'
+    'https://admin.mindloop.cloud',
+    // 🔒 FIX B2: Localhost solo en desarrollo (no exponer en producción)
+    ...(process.env.NODE_ENV !== 'production' ? [
+        'http://localhost:3000',    // Vite dev (demo)
+        'http://localhost:5173',    // Vite dev
+        'http://localhost:5174',    // Admin panel dev
+        'http://localhost:5500',    // Live Server
+        'http://127.0.0.1:5500'
+    ] : [])
 ];
 const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
@@ -110,6 +108,9 @@ const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
 const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
 
 const app = express();
+
+// Make pool accessible to middleware (planGate)
+app.locals.pool = null; // Set after pool is created
 
 // Trust proxy for express-rate-limit behind Traefik
 app.set('trust proxy', 1);
@@ -121,18 +122,21 @@ app.use((req, res, next) => {
     // 🔒 FIX SEGURIDAD: Solo permitir * para health checks, no para toda la API
     if (!origin || origin === '') {
         // Rutas permitidas sin origin (health checks, métricas, Uptime Kuma)
-        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password'];
+        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password', '/api/stripe/webhook'];
         const isPublicPath = publicPaths.some(p => req.path === p || (p !== '/' && req.path.startsWith(p)));
 
-        if (isPublicPath) {
+        // ⚡ FIX: Permitir requests server-to-server (n8n, automations) que envían Authorization header
+        const hasAuthHeader = req.headers.authorization && req.headers.authorization.startsWith('Bearer ');
+
+        if (isPublicPath || hasAuthHeader || process.env.NODE_ENV !== 'production') {
             res.header('Access-Control-Allow-Origin', '*');
         } else {
-            // Rechazar API requests sin origin (previene CSRF y uso no autorizado)
+            // Rechazar API requests sin origin Y sin auth (previene CSRF y uso no autorizado)
             log('warn', 'CORS: Request sin origin bloqueado', { path: req.path, ip: req.ip, method: req.method });
             return res.status(403).json({ error: 'CORS: Header Origin requerido' });
         }
-    } else if (ALLOWED_ORIGINS.includes(origin) || /https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1]))/.test(origin)) {
-        // Permitir explícitamente orígenes de red local (LAN)
+    } else if (ALLOWED_ORIGINS.includes(origin) || (process.env.NODE_ENV !== 'production' && /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin))) {
+        // Permitir orígenes de red local (LAN) solo en desarrollo
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
     } else {
@@ -152,23 +156,24 @@ app.use((req, res, next) => {
     next();
 });
 
-// Parser JSON
-app.use(express.json({ limit: '10mb' }));
+// Parser JSON (skip for Stripe webhook which needs raw body)
+app.use((req, res, next) => {
+    if (req.originalUrl === '/api/stripe/webhook') return next();
+    express.json({ limit: '10mb' })(req, res, next);
+});
 
 // Parser de cookies para auth segura
 app.use(cookieParser());
 
-// ========== SECURITY HEADERS (C5) ==========
-app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '0');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    if (process.env.NODE_ENV === 'production') {
-        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    }
-    next();
-});
+// ========== SECURITY HEADERS (Helmet) ==========
+app.use(helmet({
+    contentSecurityPolicy: false,           // API no sirve HTML
+    crossOriginEmbedderPolicy: false,       // Permite cargas cross-origin
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+if (process.env.NODE_ENV === 'production') {
+    app.use(helmet.hsts({ maxAge: 31536000, includeSubDomains: true }));
+}
 
 app.use(globalLimiter);
 // ========== GLOBAL ERROR HANDLERS ==========
@@ -194,11 +199,15 @@ process.on('uncaughtException', (error) => {
     }, 100);
 });
 
-// Graceful shutdown - close pool before exit
-process.on('SIGTERM', async () => {
+// Graceful shutdown - stop accepting connections, then close pool
+let server;
+process.on('SIGTERM', () => {
     log('info', 'SIGTERM received, shutting down gracefully');
-    try { await pool.end(); } catch (e) { /* ignore */ }
-    process.exit(0);
+    if (server) server.close();
+    setTimeout(async () => {
+        try { await pool.end(); } catch (e) { /* ignore */ }
+        process.exit(0);
+    }, 10000);
 });
 
 // ========== BASE DE DATOS ==========
@@ -215,6 +224,9 @@ const pool = new Pool({
     keepAlive: true,                  // Mantener conexiones vivas
     keepAliveInitialDelayMillis: 10000 // Enviar keepalive cada 10s
 });
+
+// Make pool available to middleware (planGate)
+app.locals.pool = pool;
 
 // Manejar errores del pool (evita crash por conexiones muertas)
 pool.on('error', (err) => {
@@ -277,9 +289,10 @@ app.get('/api/health', async (req, res) => {
             version: require('./package.json').version
         });
     } catch (e) {
+        log('error', 'Health check failed', { error: e.message });
         res.status(503).json({
             status: 'unhealthy',
-            error: e.message
+            error: 'Database connection failed'
         });
     }
 });
@@ -348,7 +361,7 @@ setupEventHandlers();
 // Exportar app para tests E2E
 module.exports = app;
 
-app.listen(PORT, '0.0.0.0', () => {
+server = app.listen(PORT, '0.0.0.0', () => {
     log('info', 'Servidor iniciado', { port: PORT, version: require('./package.json').version, cors: ALLOWED_ORIGINS });
     console.log(`🚀 API corriendo en puerto ${PORT}`);
     console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL (con arquitectura limpia v2)`);

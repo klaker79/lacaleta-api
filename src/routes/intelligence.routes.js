@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { buildIngredientPriceMap } = require('../utils/businessHelpers');
 
@@ -27,7 +28,7 @@ module.exports = function (pool) {
         'default': 7
     };
 
-    router.get('/intelligence/freshness', authMiddleware, async (req, res) => {
+    router.get('/intelligence/freshness', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const result = await pool.query(`
             WITH compras_recientes AS (
@@ -54,7 +55,7 @@ module.exports = function (pool) {
                 c.fecha_recepcion
             FROM compras_recientes c
             JOIN ingredientes i ON i.id = c.ingrediente_id::int
-            WHERE i.stock_actual > 0
+            WHERE i.stock_actual > 0 AND i.deleted_at IS NULL
             ORDER BY c.dias_desde_compra DESC
         `, [req.restauranteId]);
 
@@ -85,7 +86,7 @@ module.exports = function (pool) {
     });
 
     // ========== 🧠 INTELIGENCIA - PLAN COMPRAS ==========
-    router.get('/intelligence/purchase-plan', authMiddleware, async (req, res) => {
+    router.get('/intelligence/purchase-plan', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const targetDay = parseInt(req.query.day) || 6; // Sábado por defecto
             const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -121,7 +122,7 @@ module.exports = function (pool) {
                 i.stock_actual - (COALESCE(c.consumo_total / NULLIF(c.dias_distintos, 0), 0) * 1.2) as diferencia
             FROM ingredientes i
             LEFT JOIN consumo_por_dia c ON c.ingrediente_id = i.id AND c.dia_semana = $2
-            WHERE i.restaurante_id = $1
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
               AND c.consumo_total > 0
             ORDER BY diferencia ASC
         `, [req.restauranteId, targetDay]);
@@ -151,7 +152,7 @@ module.exports = function (pool) {
         '2026-10-12', '2026-11-01', '2026-12-06', '2026-12-08', '2026-12-25'
     ];
 
-    router.get('/intelligence/overstock', authMiddleware, async (req, res) => {
+    router.get('/intelligence/overstock', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             // Calcular día efectivo (festivos = sábado)
             const hoy = new Date().toISOString().split('T')[0];
@@ -192,7 +193,7 @@ module.exports = function (pool) {
                     THEN i.stock_actual / c.consumo_dia ELSE 999 END as dias_stock
             FROM ingredientes i
             LEFT JOIN consumo_dia_actual c ON c.ingrediente_id = i.id
-            WHERE i.restaurante_id = $1 AND i.stock_actual > 0
+            WHERE i.restaurante_id = $1 AND i.stock_actual > 0 AND i.deleted_at IS NULL
               AND COALESCE(c.consumo_dia, 0) > 0
             ORDER BY dias_stock DESC
         `, [req.restauranteId, diaActual]);
@@ -215,7 +216,7 @@ module.exports = function (pool) {
     });
 
     // ========== 🧠 INTELIGENCIA - REVISION PRECIOS ==========
-    router.get('/intelligence/price-check', authMiddleware, async (req, res) => {
+    router.get('/intelligence/price-check', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const TARGET_FOOD_COST = 35;
             const ALERT_THRESHOLD = 40;
@@ -233,12 +234,32 @@ module.exports = function (pool) {
         `, [req.restauranteId]);
 
             const ingredientes = await pool.query(`
-            SELECT id, nombre, precio, cantidad_por_formato
-            FROM ingredientes 
-            WHERE restaurante_id = $1
+            SELECT 
+                i.id, i.nombre, i.precio, i.cantidad_por_formato, i.rendimiento,
+                COALESCE(
+                    (SELECT AVG(pcd.precio_unitario) 
+                     FROM precios_compra_diarios pcd 
+                     WHERE pcd.ingrediente_id = i.id AND pcd.restaurante_id = i.restaurante_id),
+                    CASE 
+                        WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
+                        THEN i.precio / i.cantidad_por_formato
+                        ELSE i.precio 
+                    END
+                ) as precio_medio
+            FROM ingredientes i
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
         `, [req.restauranteId]);
 
-            const ingMap = buildIngredientPriceMap(ingredientes.rows);
+            // Use real average purchase prices (precio_medio) instead of configured prices
+            const ingMap = {};
+            ingredientes.rows.forEach(i => {
+                ingMap[i.id] = parseFloat(i.precio_medio) || 0;
+            });
+            // 🔧 FIX: Map de rendimiento base para fallback
+            const rendimientoBaseMap = {};
+            ingredientes.rows.forEach(i => {
+                if (i.rendimiento) rendimientoBaseMap[i.id] = parseFloat(i.rendimiento);
+            });
 
             const recetasProblema = result.rows
                 .map(r => {
@@ -246,7 +267,14 @@ module.exports = function (pool) {
                     if (r.ingredientes && Array.isArray(r.ingredientes)) {
                         r.ingredientes.forEach(ing => {
                             const precioIng = ingMap[ing.ingredienteId] || 0;
-                            coste += precioIng * (ing.cantidad || 0);
+                            // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                            let rendimiento = parseFloat(ing.rendimiento);
+                            if (!rendimiento || rendimiento === 100) {
+                                rendimiento = rendimientoBaseMap[ing.ingredienteId] || 100;
+                            }
+                            const factorRendimiento = rendimiento / 100;
+                            const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
+                            coste += costeReal * (ing.cantidad || 0);
                         });
                     }
                     const precioVenta = parseFloat(r.precio_venta) || 0;

@@ -10,6 +10,9 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
     throw new Error('❌ FATAL: JWT_SECRET environment variable is required. Server cannot start without it.');
 }
+if (JWT_SECRET.length < 32) {
+    throw new Error('❌ FATAL: JWT_SECRET must be at least 32 characters long for security.');
+}
 
 // Logger simple (importar el real después)
 const log = (level, message, data = {}) => {
@@ -115,4 +118,15 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-module.exports = { authMiddleware, requireAdmin, tokenBlacklist };
+const requireSuperAdmin = (req, res, next) => {
+    if (!req.user || !req.user.isSuperAdmin) {
+        log('warn', 'Acceso denegado: requiere superadmin', {
+            user: req.user ? req.user.email : 'anon',
+            url: req.originalUrl
+        });
+        return res.status(403).json({ error: 'Acceso denegado: Requiere Super Admin' });
+    }
+    next();
+};
+
+module.exports = { authMiddleware, requireAdmin, requireSuperAdmin, tokenBlacklist };

@@ -42,6 +42,8 @@ jobs:
       PORT: 3001
       NODE_ENV: test
       API_URL: http://localhost:3001
+      ALLOWED_ORIGINS: http://localhost:3001
+      AUTH_RATE_LIMIT: 500
 
       # Test user (used by tests/setup.js)
       TEST_USER_EMAIL: ci-test@mindloop.dev
@@ -59,6 +61,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Lint code
+        run: npm run lint
 
       - name: Start server (background)
         run: node server.js &
@@ -91,8 +96,7 @@ jobs:
               -d '{
                 "nombre": "CI Test User",
                 "email": "ci-test@mindloop.dev",
-                "password": "CiTest123!",
-                "codigoInvitacion": "CI_TEST_INVITE_2026"
+                "password": "CiTest123!"
               }')
             HTTP_CODE=$(echo "$BODY" | tail -1)
             RESPONSE=$(echo "$BODY" | sed '$d')
@@ -108,4 +112,12 @@ jobs:
           exit 1
 
       - name: Run tests
-        run: npx jest --runInBand --forceExit --testPathIgnorePatterns='integration|e2e|unit|bulk-sales-import|inventory-consolidation|monthly-balance-pnl|rate-limiting-auth|average-cost-calculation|intelligence-endpoints|auth-flows'
+        run: npx jest --runInBand --forceExit --testPathIgnorePatterns='rate-limiting|auth-flows'
+
+      - name: Run auth-flows tests (isolated — logout revokes tokens)
+        run: npx jest tests/critical/auth-flows.test.js --runInBand --forceExit
+
+      - name: Run rate-limiting tests (last — triggers brute-force protection)
+        run: npx jest tests/critical/rate-limiting-auth.test.js --runInBand --forceExit
+
+

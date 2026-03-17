@@ -4,9 +4,10 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
-const { validateCantidad } = require('../utils/validators');
+const { validateCantidad, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -201,12 +202,16 @@ module.exports = function (pool) {
     router.delete('/sales/:id', authMiddleware, requireAdmin, async (req, res) => {
         const client = await pool.connect();
         try {
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: 'ID inválido' });
+            }
             await client.query('BEGIN');
 
             // 1. Obtener la venta antes de borrarla
             const ventaResult = await client.query(
                 'SELECT * FROM ventas WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL',
-                [req.params.id, req.restauranteId]
+                [idCheck.value, req.restauranteId]
             );
 
             if (ventaResult.rows.length === 0) {
@@ -268,20 +273,32 @@ module.exports = function (pool) {
 
             // 4. SOFT DELETE: marca como eliminado
             await client.query(
-                'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1',
-                [req.params.id]
+                'UPDATE ventas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2',
+                [req.params.id, req.restauranteId]
             );
 
             // 5. Actualizar ventas_diarias_resumen (restar la venta eliminada)
             const fechaVenta = new Date(venta.fecha).toISOString().split('T')[0];
+
+            // Calcular coste proporcional de la venta a borrar
+            let costeVentaBorrada = 0;
+            const resumenActual = await client.query(
+                'SELECT coste_ingredientes, cantidad_vendida FROM ventas_diarias_resumen WHERE receta_id = $1 AND fecha = $2 AND restaurante_id = $3',
+                [venta.receta_id, fechaVenta, req.restauranteId]
+            );
+            if (resumenActual.rows.length > 0 && resumenActual.rows[0].cantidad_vendida > 0) {
+                const costePorUnidad = parseFloat(resumenActual.rows[0].coste_ingredientes) / resumenActual.rows[0].cantidad_vendida;
+                costeVentaBorrada = costePorUnidad * venta.cantidad;
+            }
+
             await client.query(`
             UPDATE ventas_diarias_resumen 
             SET cantidad_vendida = GREATEST(0, cantidad_vendida - $1),
                 total_ingresos = GREATEST(0, total_ingresos - $2),
                 coste_ingredientes = GREATEST(0, coste_ingredientes - $3),
-                beneficio_bruto = GREATEST(0, total_ingresos - $2) - GREATEST(0, coste_ingredientes - $3)
+                beneficio_bruto = GREATEST(0, (total_ingresos - $2) - (coste_ingredientes - $3))
             WHERE receta_id = $4 AND fecha = $5 AND restaurante_id = $6
-        `, [venta.cantidad, parseFloat(venta.total) || 0, 0, venta.receta_id, fechaVenta, req.restauranteId]);
+        `, [venta.cantidad, parseFloat(venta.total) || 0, costeVentaBorrada, venta.receta_id, fechaVenta, req.restauranteId]);
 
             await client.query('COMMIT');
             log('info', 'Venta eliminada con stock restaurado', { id: req.params.id });
@@ -298,12 +315,18 @@ module.exports = function (pool) {
 
     // ========== ENDPOINT: PARSEAR PDF DE TPV CON IA ==========
     // Recibe un PDF del TPV y extrae los datos de ventas usando Claude API
-    router.post('/parse-pdf', authMiddleware, costlyApiLimiter, async (req, res) => {
+    router.post('/parse-pdf', authMiddleware, requirePlan('profesional'), costlyApiLimiter, async (req, res) => {
         try {
             const { pdfBase64, filename } = req.body;
 
             if (!pdfBase64) {
                 return res.status(400).json({ error: 'Se requiere pdfBase64' });
+            }
+
+            // Límite de tamaño: 10MB en base64 (~7.5MB archivo real)
+            const MAX_PDF_SIZE = 10 * 1024 * 1024;
+            if (pdfBase64.length > MAX_PDF_SIZE) {
+                return res.status(413).json({ error: 'PDF demasiado grande. Máximo 10MB.' });
             }
 
             // API Key de Anthropic (configurar en variables de entorno)
@@ -438,7 +461,6 @@ REGLAS:
             );
 
             if (parseInt(existingResult.rows[0].count) > 0) {
-                client.release();
                 return res.status(409).json({
                     error: 'Ya existen ventas para esta fecha',
                     fecha: fechaVenta,
@@ -497,15 +519,32 @@ REGLAS:
                 });
             });
 
-            // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
-            const ingredientesResult = await client.query('SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1', [req.restauranteId]);
+            // Precios de ingredientes + media de compras reales
+            const ingredientesResult = await client.query(
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [req.restauranteId]
+            );
             const ingredientesPrecios = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
-                const precio = parseFloat(i.precio) || 0;
-                const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
-                // Precio unitario = precio del formato / cantidad en el formato
-                const precioUnitario = precio / cantidadPorFormato;
-                ingredientesPrecios.set(i.id, precioUnitario);
+                if (i.precio_medio_compra) {
+                    ingredientesPrecios.set(i.id, parseFloat(i.precio_medio_compra));
+                } else {
+                    const precio = parseFloat(i.precio) || 0;
+                    const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
+                    ingredientesPrecios.set(i.id, precio / cantidadPorFormato);
+                }
+                if (i.rendimiento) {
+                    rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
+                }
             });
 
             // Acumulador para resumen diario
@@ -583,36 +622,47 @@ REGLAS:
                 if (Array.isArray(ingredientesReceta)) {
                     for (const ing of ingredientesReceta) {
                         const precioIng = ingredientesPrecios.get(ing.ingredienteId) || 0;
-                        costeIngredientes += precioIng * (ing.cantidad || 0) * cantidad * factorAplicado;
+                        // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                        let rendimiento = parseFloat(ing.rendimiento);
+                        if (!rendimiento || rendimiento === 100) {
+                            rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
+                        }
+                        const factorRendimiento = rendimiento / 100;
+                        const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
+                        costeIngredientes += costeReal * (ing.cantidad || 0) * cantidad * factorAplicado;
                     }
                 }
 
                 // Registrar venta individual
                 // ⚡ FIX Bug #5: Guardar factor_variante para restaurar stock correctamente al borrar
-                await client.query(
-                    'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante, variante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+                const ventaBulkResult = await client.query(
+                    'INSERT INTO ventas (receta_id, cantidad, precio_unitario, total, fecha, restaurante_id, factor_variante, variante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
                     [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId, factorAplicado, varianteEncontrada ? varianteEncontrada.variante_id : null]
                 );
 
                 // Descontar stock (aplicando factor de variante)
                 // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
                 const porciones = Math.max(1, parseInt(receta.porciones) || 1);
+                const bulkDeductions = []; // ⚡ FIX: Rastrear descuentos reales para restauración correcta
                 if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
                     for (const ing of ingredientesReceta) {
                         // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor
                         const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad * factorAplicado;
                         if (cantidadADescontar > 0 && ing.ingredienteId) {
                             // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
-                            await client.query(
-                                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            const lockRes = await client.query(
+                                'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                                 [ing.ingredienteId, req.restauranteId]
                             );
+                            const stockAntes = parseFloat(lockRes.rows[0]?.stock_actual) || 0;
                             // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
                             const updateResult = await client.query(
                                 'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
                                 [cantidadADescontar, ing.ingredienteId, req.restauranteId]
                             );
                             if (updateResult.rows.length > 0) {
+                                const stockDespues = parseFloat(updateResult.rows[0].stock_actual) || 0;
+                                bulkDeductions.push({ ingredienteId: ing.ingredienteId, real: stockAntes - stockDespues, calculado: cantidadADescontar });
                                 log('info', 'Stock descontado', {
                                     ingrediente: updateResult.rows[0].nombre,
                                     cantidad: cantidadADescontar,
@@ -621,6 +671,14 @@ REGLAS:
                             }
                         }
                     }
+                }
+
+                // ⚡ FIX: Guardar stock_deductions para restauración correcta al borrar
+                if (bulkDeductions.length > 0 && ventaBulkResult.rows[0]?.id) {
+                    await client.query(
+                        'UPDATE ventas SET stock_deductions = $1 WHERE id = $2',
+                        [JSON.stringify(bulkDeductions), ventaBulkResult.rows[0].id]
+                    );
                 }
 
                 // Acumular para resumen diario

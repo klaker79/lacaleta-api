@@ -1,6 +1,13 @@
 /**
  * orders Routes — Extracted from server.js
  * Orders CRUD with daily purchase tracking & stock rollback on delete
+ *
+ * ⚠️ STOCK OWNERSHIP RULE:
+ * The FRONTEND is the sole owner of stock adjustments (via bulkAdjustStock).
+ * POST/PUT in this file must NEVER modify stock_actual.
+ * They only record Diario (precios_compra_diarios) for cost tracking.
+ * DELETE is the exception: it MUST revert stock since there's no frontend trigger.
+ * See tests/critical/stock-no-double-count.test.js for validation.
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
@@ -81,19 +88,20 @@ module.exports = function (pool) {
                 [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId]
             );
 
-            // 📊 Registrar en Diario si pedido se crea como 'recibido' (compra mercado)
+            // 📊 Registrar en Diario y sumar stock si pedido se crea como 'recibido' (compra mercado)
             // NOTA: El frontend NO llama a /daily/purchases/bulk. Esta es la ÚNICA fuente.
             if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
                 const fechaCompra = fecha ? new Date(fecha) : new Date();
 
                 for (const item of ingredientes) {
+                    const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                     const totalItem = precioReal * cantidad;
 
                     // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                     await upsertCompraDiaria(client, {
-                        ingredienteId: item.ingredienteId || item.ingrediente_id,
+                        ingredienteId: ingId,
                         fecha: fechaCompra,
                         precioUnitario: precioReal,
                         cantidad, total: totalItem,
@@ -101,9 +109,12 @@ module.exports = function (pool) {
                         proveedorId: proveedorId || null,
                         pedidoId: result.rows[0].id
                     });
+
+                    // Stock adjustment handled by frontend via bulkAdjustStock — NOT here
+                    // (avoids double-counting since frontend already adjusts stock atomically)
                 }
 
-                log('info', 'Compras diarias registradas desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
+                log('info', 'Compras diarias y stock registrados desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
             }
 
             await client.query('COMMIT');
@@ -118,6 +129,9 @@ module.exports = function (pool) {
     });
 
     router.put('/orders/:id', authMiddleware, async (req, res) => {
+        const idCheck = validateId(req.params.id);
+        if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+
         const client = await pool.connect();
         try {
             const { id } = req.params;
@@ -142,11 +156,12 @@ module.exports = function (pool) {
                 [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinal || new Date(), id, req.restauranteId]
             );
 
-            // Si el pedido se marca como recibido Y no estaba ya recibido, registrar los precios de compra diarios
+            // Si el pedido se marca como recibido Y no estaba ya recibido, registrar precios y sumar stock
             if (estado === 'recibido' && !wasAlreadyReceived && ingredientes && Array.isArray(ingredientes)) {
                 const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
 
                 for (const item of ingredientes) {
+                    const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                     const total = precioReal * cantidad;
@@ -154,7 +169,7 @@ module.exports = function (pool) {
                     // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
                     // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                     await upsertCompraDiaria(client, {
-                        ingredienteId: item.ingredienteId || item.ingrediente_id,
+                        ingredienteId: ingId,
                         fecha: fechaCompra,
                         precioUnitario: precioReal,
                         cantidad, total,
@@ -162,9 +177,12 @@ module.exports = function (pool) {
                         proveedorId: result.rows[0]?.proveedor_id || null,
                         pedidoId: id
                     });
+
+                    // Stock adjustment handled by frontend via bulkAdjustStock — NOT here
+                    // (avoids double-counting since frontend already adjusts stock atomically)
                 }
 
-                log('info', 'Compras diarias registradas desde pedido', { pedidoId: id, items: ingredientes.length });
+                log('info', 'Compras diarias y stock registrados desde pedido', { pedidoId: id, items: ingredientes.length });
             }
 
             await client.query('COMMIT');
@@ -179,6 +197,9 @@ module.exports = function (pool) {
     });
 
     router.delete('/orders/:id', authMiddleware, requireAdmin, async (req, res) => {
+        const idCheck = validateId(req.params.id);
+        if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -198,9 +219,15 @@ module.exports = function (pool) {
 
             // 2. Si el pedido estaba recibido, borrar las compras diarias asociadas
             if (pedido.estado === 'recibido' && pedido.ingredientes) {
-                const ingredientes = typeof pedido.ingredientes === 'string'
-                    ? JSON.parse(pedido.ingredientes)
-                    : pedido.ingredientes;
+                let ingredientes;
+                try {
+                    ingredientes = typeof pedido.ingredientes === 'string'
+                        ? JSON.parse(pedido.ingredientes)
+                        : pedido.ingredientes;
+                } catch (parseErr) {
+                    log('error', 'Error parseando ingredientes de pedido', { id: pedido.id, error: parseErr.message });
+                    ingredientes = [];
+                }
 
                 const fechaRecepcion = pedido.fecha_recepcion || pedido.fecha;
 
@@ -256,19 +283,28 @@ module.exports = function (pool) {
                 }
 
                 // Revertir stock de cada ingrediente
+                // Frontend adds stock via bulkAdjustStock. For pedido recepción,
+                // delta = cantidadRecibida × cantPorFormato (already multiplied).
+                // For compra mercado, delta = cantidad (raw base units, no multiplication).
+                // So: only multiply by cantPorFormato when cantidadRecibida exists.
                 for (const item of ingredientes) {
                     const ingId = item.ingredienteId || item.ingrediente_id;
-                    const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                    const rawCantidad = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
-                    if (cantidadRecibida > 0) {
-                        // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                        await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
+                    if (rawCantidad > 0) {
+                        let stockARevertir = rawCantidad;
+                        // Only multiply by formato if this was a pedido recepción (has cantidadRecibida)
+                        if (item.cantidadRecibida) {
+                            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
+                            const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                            stockARevertir = rawCantidad * cantPorFormato;
+                        }
                         await client.query(
                             `UPDATE ingredientes
                          SET stock_actual = GREATEST(0, stock_actual - $1),
                              ultima_actualizacion_stock = NOW()
                          WHERE id = $2 AND restaurante_id = $3`,
-                            [cantidadRecibida, ingId, req.restauranteId]
+                            [stockARevertir, ingId, req.restauranteId]
                         );
                     }
                 }
@@ -281,8 +317,8 @@ module.exports = function (pool) {
 
             // 3. SOFT DELETE del pedido
             await client.query(
-                'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1',
-                [req.params.id]
+                'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2',
+                [req.params.id, req.restauranteId]
             );
 
             await client.query('COMMIT');

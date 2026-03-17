@@ -4,8 +4,9 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
-const { validatePrecio, sanitizeString } = require('../utils/validators');
+const { validatePrecio, sanitizeString, validateId } = require('../utils/validators');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -15,7 +16,7 @@ module.exports = function (pool) {
 
     // ========== GASTOS FIJOS (Fixed Expenses) ==========
     // GET all gastos fijos
-    router.get('/gastos-fijos', authMiddleware, async (req, res) => {
+    router.get('/gastos-fijos', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const result = await pool.query(
                 'SELECT * FROM gastos_fijos WHERE activo = true AND restaurante_id = $1 ORDER BY id',
@@ -29,7 +30,7 @@ module.exports = function (pool) {
     });
 
     // POST create gasto fijo
-    router.post('/gastos-fijos', authMiddleware, async (req, res) => {
+    router.post('/gastos-fijos', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { concepto, monto_mensual } = req.body;
 
@@ -56,14 +57,17 @@ module.exports = function (pool) {
     // PUT update gasto fijo
     router.put('/gastos-fijos/:id', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
             const { concepto, monto_mensual } = req.body;
 
+            const conceptoLimpio = concepto !== undefined ? sanitizeString(concepto, 255) : undefined;
             const montoValidado = monto_mensual !== undefined ? validatePrecio(monto_mensual) : undefined;
 
             const result = await pool.query(
                 'UPDATE gastos_fijos SET concepto = COALESCE($1, concepto), monto_mensual = COALESCE($2, monto_mensual), updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND restaurante_id = $4 RETURNING *',
-                [concepto, montoValidado, id, req.restauranteId]
+                [conceptoLimpio, montoValidado, id, req.restauranteId]
             );
 
             if (result.rows.length === 0) {
@@ -81,7 +85,9 @@ module.exports = function (pool) {
     // DELETE gasto fijo (soft delete)
     router.delete('/gastos-fijos/:id', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+            const id = idCheck.value;
 
             await pool.query(
                 'UPDATE gastos_fijos SET activo = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND restaurante_id = $2',

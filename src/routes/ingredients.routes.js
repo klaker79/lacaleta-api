@@ -240,6 +240,54 @@ module.exports = function (pool) {
                 'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
                 [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
             );
+
+            // ⚡ PROPAGACIÓN: Si cambió el rendimiento, actualizar TODAS las recetas que usan este ingrediente
+            const oldRendimiento = parseInt(existing.rendimiento) || 100;
+            if (finalRendimiento !== oldRendimiento) {
+                try {
+                    const recetasResult = await pool.query(
+                        'SELECT id, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                        [req.restauranteId]
+                    );
+
+                    let recetasActualizadas = 0;
+                    for (const receta of recetasResult.rows) {
+                        const ingredientes = receta.ingredientes || [];
+                        if (!Array.isArray(ingredientes)) continue;
+
+                        let changed = false;
+                        const updatedIngredientes = ingredientes.map(ing => {
+                            const ingId = ing.ingredienteId || ing.ingrediente_id || ing.id;
+                            if (ingId === id) {
+                                changed = true;
+                                return { ...ing, rendimiento: finalRendimiento };
+                            }
+                            return ing;
+                        });
+
+                        if (changed) {
+                            await pool.query(
+                                'UPDATE recetas SET ingredientes = $1 WHERE id = $2 AND restaurante_id = $3',
+                                [JSON.stringify(updatedIngredientes), receta.id, req.restauranteId]
+                            );
+                            recetasActualizadas++;
+                        }
+                    }
+
+                    if (recetasActualizadas > 0) {
+                        log('info', 'Rendimiento propagado a recetas', {
+                            ingredienteId: id,
+                            de: oldRendimiento,
+                            a: finalRendimiento,
+                            recetasActualizadas
+                        });
+                    }
+                } catch (propError) {
+                    // No fallar la operación principal si la propagación falla
+                    log('error', 'Error propagando rendimiento a recetas', { error: propError.message });
+                }
+            }
+
             res.json(result.rows[0] || {});
         } catch (err) {
             log('error', 'Error actualizando ingrediente', { error: err.message });
@@ -326,7 +374,9 @@ module.exports = function (pool) {
     });
 
     // Bulk atomic stock adjustment - Para operaciones con múltiples ingredientes (recepción, producción)
+    // ⚡ FIX W1: Wrapped in transaction — all adjustments succeed or none do
     router.post('/ingredients/bulk-adjust-stock', authMiddleware, async (req, res) => {
+        const client = await pool.connect();
         try {
             const { adjustments, reason } = req.body;
             // adjustments: [{ id: 123, delta: 5.0 }, { id: 456, delta: -2.0 }]
@@ -335,10 +385,11 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'Array de ajustes requerido' });
             }
 
+            await client.query('BEGIN');
+
             const results = [];
             const errors = [];
 
-            // Procesar secuencialmente para mantener integridad
             for (const adj of adjustments) {
                 if (!adj.id || adj.delta === undefined || isNaN(parseFloat(adj.delta))) {
                     errors.push({ id: adj.id, error: 'ID o delta inválido' });
@@ -346,7 +397,13 @@ module.exports = function (pool) {
                 }
 
                 try {
-                    const result = await pool.query(
+                    // FOR UPDATE lock to prevent race conditions
+                    await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                        [adj.id, req.restauranteId]
+                    );
+
+                    const result = await client.query(
                         `UPDATE ingredientes 
                      SET stock_actual = GREATEST(0, COALESCE(stock_actual, 0) + $1),
                          ultima_actualizacion_stock = NOW()
@@ -370,7 +427,9 @@ module.exports = function (pool) {
                 }
             }
 
-            log('info', 'Bulk stock adjustment', {
+            await client.query('COMMIT');
+
+            log('info', 'Bulk stock adjustment (transactional)', {
                 reason: reason || 'no especificado',
                 exitosos: results.length,
                 fallidos: errors.length
@@ -378,8 +437,11 @@ module.exports = function (pool) {
 
             res.json({ success: errors.length === 0, results, errors, reason });
         } catch (err) {
+            await client.query('ROLLBACK');
             log('error', 'Error en bulk adjust stock', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
+        } finally {
+            client.release();
         }
     });
 
@@ -390,7 +452,7 @@ module.exports = function (pool) {
             const { activo } = req.body;
 
             const result = await pool.query(
-                'UPDATE ingredientes SET activo = $1 WHERE id = $2 AND restaurante_id = $3 RETURNING *',
+                'UPDATE ingredientes SET activo = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL RETURNING *',
                 [activo, id, req.restauranteId]
             );
 
@@ -412,13 +474,14 @@ module.exports = function (pool) {
     router.get('/ingredients-suppliers', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(`
-            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio, 
+            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
                    ip.es_proveedor_principal, ip.created_at,
                    p.nombre as proveedor_nombre
             FROM ingredientes_proveedores ip
             JOIN proveedores p ON ip.proveedor_id = p.id
             JOIN ingredientes i ON ip.ingrediente_id = i.id
             WHERE i.restaurante_id = $1
+              AND p.deleted_at IS NULL
             ORDER BY ip.ingrediente_id, ip.es_proveedor_principal DESC
         `, [req.restauranteId]);
 
@@ -445,12 +508,13 @@ module.exports = function (pool) {
             }
 
             const result = await pool.query(`
-            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio, 
+            SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
                    ip.es_proveedor_principal, ip.created_at,
                    p.nombre as proveedor_nombre, p.contacto, p.telefono, p.email
             FROM ingredientes_proveedores ip
             JOIN proveedores p ON ip.proveedor_id = p.id
             WHERE ip.ingrediente_id = $1
+              AND p.deleted_at IS NULL
             ORDER BY ip.es_proveedor_principal DESC, p.nombre ASC
         `, [id]);
 

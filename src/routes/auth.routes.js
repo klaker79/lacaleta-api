@@ -9,6 +9,10 @@ const crypto = require('crypto');
 const { authMiddleware, requireAdmin, tokenBlacklist } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
+const { sanitizeString } = require('../utils/validators');
+// URLs parametrizadas (env vars con fallback para backwards-compat)
+const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
+const API_URL = process.env.API_URL || 'https://lacaleta-api.mindloop.cloud';
 
 // Helper: Escape HTML to prevent XSS
 function escapeHtml(str) {
@@ -39,7 +43,7 @@ function verifyPageHTML(title, message, success) {
 <div class="icon">${success ? '🎉' : '⚠️'}</div>
 <h1 class="title">${safeTitle}</h1>
 <p class="msg">${safeMessage}</p>
-<a href="https://app.mindloop.cloud" class="btn">Ir a MindLoop CostOS</a>
+<a href="${APP_URL}" class="btn">Ir a MindLoop CostOS</a>
 </div></body></html>`;
 }
 
@@ -76,34 +80,83 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Tu cuenta no está verificada. Revisa tu email.', needsVerification: true, email: user.email });
             }
 
-            const token = jwt.sign(
-                { userId: user.id, restauranteId: user.restaurante_id, email: user.email, rol: user.rol },
-                JWT_SECRET,
-                { expiresIn: '7d' }
+            // Multi-restaurant: check all restaurants this user has access to
+            // Exclude pending_payment (not yet paid) and suspended
+            const restResult = await pool.query(
+                `SELECT ur.restaurante_id, ur.rol, r.nombre, r.plan_status, r.trial_ends_at
+                 FROM usuario_restaurantes ur
+                 JOIN restaurantes r ON ur.restaurante_id = r.id
+                 WHERE ur.usuario_id = $1
+                   AND r.plan_status NOT IN ('pending_payment', 'suspended')
+                   AND NOT (r.plan_status = 'trialing' AND r.trial_ends_at < NOW())
+                 ORDER BY ur.created_at ASC`,
+                [user.id]
             );
 
-            log('info', 'Login exitoso', { userId: user.id, email });
+            // Fallback for users not yet in junction table (pre-migration)
+            let restaurants = restResult.rows;
+            if (restaurants.length === 0 && user.restaurante_id) {
+                // Check if fallback restaurant is valid (not expired trial / not suspended)
+                const fallbackCheck = await pool.query(
+                    `SELECT plan_status, trial_ends_at FROM restaurantes WHERE id = $1`,
+                    [user.restaurante_id]
+                );
+                const fb = fallbackCheck.rows[0];
+                if (fb && !['pending_payment', 'suspended'].includes(fb.plan_status) &&
+                    !(fb.plan_status === 'trialing' && fb.trial_ends_at && new Date(fb.trial_ends_at) < new Date())) {
+                    restaurants = [{ restaurante_id: user.restaurante_id, rol: user.rol, nombre: user.restaurante_nombre }];
+                }
+            }
+
+            if (restaurants.length === 0) {
+                return res.status(403).json({ error: 'Tu periodo de prueba ha expirado o tu cuenta está suspendida. Contacta con soporte o mejora tu plan.' });
+            }
 
             const isProduction = process.env.NODE_ENV === 'production';
-            res.cookie('auth_token', token, {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: 'lax',
-                maxAge: 7 * 24 * 60 * 60 * 1000,
-                path: '/'
-            });
 
-            res.json({
-                token,
-                user: {
-                    id: user.id,
-                    email: user.email,
-                    nombre: user.nombre,
-                    rol: user.rol,
-                    restaurante: user.restaurante_nombre,
-                    restauranteId: user.restaurante_id
-                }
-            });
+            if (restaurants.length === 1) {
+                // Single restaurant: auto-select (backward-compatible)
+                const rest = restaurants[0];
+                const token = jwt.sign(
+                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
+                    JWT_SECRET,
+                    { expiresIn: '7d' }
+                );
+
+                log('info', 'Login exitoso', { userId: user.id, email, restauranteId: rest.restaurante_id });
+
+                res.cookie('auth_token', token, {
+                    httpOnly: true, secure: isProduction, sameSite: 'lax',
+                    maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+                });
+
+                res.json({
+                    token,
+                    user: {
+                        id: user.id, email: user.email, nombre: user.nombre,
+                        rol: rest.rol, restaurante: rest.nombre,
+                        restauranteId: rest.restaurante_id,
+                        isSuperAdmin: user.is_superadmin || false
+                    },
+                    restaurants
+                });
+            } else {
+                // Multiple restaurants: require selection
+                const selectionToken = jwt.sign(
+                    { userId: user.id, email: user.email, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
+                    JWT_SECRET,
+                    { expiresIn: '5m' }
+                );
+
+                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email, count: restaurants.length });
+
+                res.json({
+                    needsSelection: true,
+                    selectionToken,
+                    restaurants,
+                    user: { id: user.id, nombre: user.nombre, email: user.email }
+                });
+            }
         } catch (err) {
             log('error', 'Error login', { error: err.message });
             res.status(500).json({ error: 'Error en el servidor' });
@@ -118,13 +171,282 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 id: req.user.userId,
                 email: req.user.email,
                 rol: req.user.rol,
-                restauranteId: req.restauranteId
+                restauranteId: req.restauranteId,
+                isSuperAdmin: req.user.isSuperAdmin || false
             },
             tokenInfo: {
                 issuedAt: new Date(req.user.iat * 1000).toISOString(),
                 expiresAt: new Date(req.user.exp * 1000).toISOString()
             }
         });
+    });
+
+    // ========== SELECT RESTAURANT (after multi-restaurant login) ==========
+    router.post('/auth/select-restaurant', authLimiter, async (req, res) => {
+        try {
+            const { selectionToken, restauranteId } = req.body;
+            if (!selectionToken || !restauranteId) {
+                return res.status(400).json({ error: 'selectionToken y restauranteId requeridos' });
+            }
+
+            const decoded = jwt.verify(selectionToken, JWT_SECRET);
+            if (decoded.type !== 'restaurant_selection') {
+                return res.status(401).json({ error: 'Token de selección inválido' });
+            }
+
+            // Verify user has access to this restaurant
+            const access = await pool.query(
+                'SELECT rol FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
+                [decoded.userId, restauranteId]
+            );
+            if (access.rows.length === 0) {
+                return res.status(403).json({ error: 'Sin acceso a este restaurante' });
+            }
+
+            const rest = await pool.query('SELECT nombre, plan_status FROM restaurantes WHERE id = $1', [restauranteId]);
+            if (rest.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            if (['pending_payment', 'suspended'].includes(rest.rows[0].plan_status)) {
+                return res.status(403).json({ error: 'Este restaurante no está activo' });
+            }
+
+            const token = jwt.sign(
+                { userId: decoded.userId, restauranteId: parseInt(restauranteId), email: decoded.email, rol: access.rows[0].rol, isSuperAdmin: decoded.isSuperAdmin || false },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            const isProduction = process.env.NODE_ENV === 'production';
+            res.cookie('auth_token', token, {
+                httpOnly: true, secure: isProduction, sameSite: 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+            });
+
+            log('info', 'Restaurante seleccionado', { userId: decoded.userId, restauranteId });
+
+            res.json({
+                token,
+                user: {
+                    id: decoded.userId, email: decoded.email,
+                    restaurante: rest.rows[0].nombre, restauranteId: parseInt(restauranteId),
+                    rol: access.rows[0].rol, isSuperAdmin: decoded.isSuperAdmin || false
+                }
+            });
+        } catch (err) {
+            if (err.name === 'TokenExpiredError') {
+                return res.status(401).json({ error: 'Token de selección expirado. Vuelve a iniciar sesión.' });
+            }
+            log('error', 'Error select-restaurant', { error: err.message });
+            res.status(500).json({ error: 'Error en el servidor' });
+        }
+    });
+
+    // ========== SWITCH RESTAURANT (when already logged in) ==========
+    router.post('/auth/switch-restaurant', authMiddleware, async (req, res) => {
+        try {
+            const { restauranteId } = req.body;
+            if (!restauranteId) {
+                return res.status(400).json({ error: 'restauranteId requerido' });
+            }
+
+            const access = await pool.query(
+                'SELECT rol FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
+                [req.user.userId, restauranteId]
+            );
+            if (access.rows.length === 0) {
+                return res.status(403).json({ error: 'Sin acceso a este restaurante' });
+            }
+
+            const rest = await pool.query('SELECT nombre, plan_status FROM restaurantes WHERE id = $1', [restauranteId]);
+            if (rest.rows.length > 0 && ['pending_payment', 'suspended'].includes(rest.rows[0].plan_status)) {
+                return res.status(403).json({ error: 'Este restaurante no está activo' });
+            }
+            if (rest.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+
+            const token = jwt.sign(
+                { userId: req.user.userId, restauranteId: parseInt(restauranteId), email: req.user.email, rol: access.rows[0].rol, isSuperAdmin: req.user.isSuperAdmin || false },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            const isProduction = process.env.NODE_ENV === 'production';
+            res.cookie('auth_token', token, {
+                httpOnly: true, secure: isProduction, sameSite: 'lax',
+                maxAge: 7 * 24 * 60 * 60 * 1000, path: '/'
+            });
+
+            log('info', 'Restaurante cambiado', { userId: req.user.userId, from: req.restauranteId, to: restauranteId });
+
+            res.json({
+                token,
+                user: {
+                    id: req.user.userId, email: req.user.email,
+                    restaurante: rest.rows[0].nombre, restauranteId: parseInt(restauranteId),
+                    rol: access.rows[0].rol, isSuperAdmin: req.user.isSuperAdmin || false
+                }
+            });
+        } catch (err) {
+            log('error', 'Error switch-restaurant', { error: err.message });
+            res.status(500).json({ error: 'Error en el servidor' });
+        }
+    });
+
+    // ========== MY RESTAURANTS (list accessible restaurants) ==========
+    router.get('/auth/my-restaurants', authMiddleware, async (req, res) => {
+        try {
+            const result = await pool.query(
+                `SELECT ur.restaurante_id as id, ur.rol, r.nombre, r.plan_status
+                 FROM usuario_restaurantes ur
+                 JOIN restaurantes r ON ur.restaurante_id = r.id
+                 WHERE ur.usuario_id = $1
+                   AND r.plan_status NOT IN ('pending_payment', 'suspended')
+                 ORDER BY ur.created_at ASC`,
+                [req.user.userId]
+            );
+            res.json({ restaurants: result.rows, current: req.restauranteId });
+        } catch (err) {
+            log('error', 'Error my-restaurants', { error: err.message });
+            res.status(500).json({ error: 'Error obteniendo restaurantes' });
+        }
+    });
+
+    // ========== CREATE ADDITIONAL RESTAURANT (for existing users) ==========
+    // Creates restaurant + Stripe customer + Checkout session.
+    // Restaurant starts as 'pending_payment'. Webhook activates it after payment.
+    const PLAN_ORDER = { starter: 1, trial: 2, profesional: 2, premium: 3 };
+    const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999 };
+
+    // Cleanup orphaned pending_payment restaurants for a user
+    router.delete('/auth/pending-restaurant/:id', authMiddleware, async (req, res) => {
+        try {
+            const id = parseInt(req.params.id);
+            if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
+
+            // Only delete if it's pending_payment AND belongs to this user
+            const result = await pool.query(
+                `DELETE FROM restaurantes
+                 WHERE id = $1 AND plan_status = 'pending_payment'
+                   AND id IN (SELECT restaurante_id FROM usuario_restaurantes WHERE usuario_id = $2)
+                 RETURNING id`,
+                [id, req.user.userId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'No encontrado o ya activado' });
+            }
+            // Junction table cleaned by ON DELETE CASCADE
+            log('info', 'Restaurante pending_payment limpiado', { userId: req.user.userId, restauranteId: id });
+            res.json({ success: true });
+        } catch (err) {
+            log('error', 'Error limpiando pending restaurant', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const { nombre, plan, billing } = req.body;
+            if (!nombre || !nombre.trim()) {
+                return res.status(400).json({ error: 'Nombre del restaurante requerido' });
+            }
+            const validPlans = ['starter', 'profesional', 'premium'];
+            if (!plan || !validPlans.includes(plan)) {
+                return res.status(400).json({ error: 'Plan requerido: starter, profesional, premium' });
+            }
+            if (!billing || !['monthly', 'annual'].includes(billing)) {
+                return res.status(400).json({ error: 'Billing requerido: monthly, annual' });
+            }
+
+            // Each restaurant chooses its own plan independently
+
+            // Stripe price ID from env
+            const priceKey = `${plan}_${billing}`;
+            const PRICE_MAP = {
+                starter_monthly: process.env.STRIPE_PRICE_STARTER_MONTHLY,
+                starter_annual: process.env.STRIPE_PRICE_STARTER_ANNUAL,
+                profesional_monthly: process.env.STRIPE_PRICE_PRO_MONTHLY,
+                profesional_annual: process.env.STRIPE_PRICE_PRO_ANNUAL,
+                premium_monthly: process.env.STRIPE_PRICE_PREMIUM_MONTHLY,
+                premium_annual: process.env.STRIPE_PRICE_PREMIUM_ANNUAL
+            };
+            const priceId = PRICE_MAP[priceKey];
+            if (!priceId) {
+                return res.status(400).json({ error: 'Precio no configurado para este plan' });
+            }
+
+            await client.query('BEGIN');
+
+            // Cleanup any previous orphaned pending_payment restaurants from this user
+            await client.query(
+                `DELETE FROM restaurantes
+                 WHERE plan_status = 'pending_payment'
+                   AND id IN (SELECT restaurante_id FROM usuario_restaurantes WHERE usuario_id = $1)`,
+                [req.user.userId]
+            );
+
+            // Create restaurant with pending_payment status
+            const restResult = await client.query(
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, max_users)
+                 VALUES ($1, $2, $3, 'pending_payment', $4) RETURNING id`,
+                [sanitizeString(nombre.trim()), req.user.email, plan, PLAN_MAX_USERS[plan] || 2]
+            );
+            const restauranteId = restResult.rows[0].id;
+
+            // Link current user as admin
+            await client.query(
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                [req.user.userId, restauranteId, 'admin']
+            );
+
+            // Create Stripe customer + Checkout session
+            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+            let checkoutUrl = null;
+
+            if (STRIPE_SECRET_KEY) {
+                const stripe = require('stripe')(STRIPE_SECRET_KEY);
+                const customer = await stripe.customers.create({
+                    email: req.user.email,
+                    name: sanitizeString(nombre.trim()),
+                    metadata: { restaurante_id: String(restauranteId) }
+                });
+
+                await client.query(
+                    'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
+                    [customer.id, restauranteId]
+                );
+
+                const frontendUrl = process.env.FRONTEND_URL || 'https://app.mindloop.cloud';
+                const session = await stripe.checkout.sessions.create({
+                    customer: customer.id,
+                    mode: 'subscription',
+                    line_items: [{ price: priceId, quantity: 1 }],
+                    success_url: `${frontendUrl}/index.html?checkout=success&plan=${plan}&new_restaurant=${restauranteId}`,
+                    cancel_url: `${frontendUrl}/index.html?checkout=canceled&new_restaurant=${restauranteId}`,
+                    metadata: { restaurante_id: String(restauranteId), plan },
+                    subscription_data: {
+                        metadata: { restaurante_id: String(restauranteId), plan }
+                    }
+                });
+                checkoutUrl = session.url;
+            }
+
+            await client.query('COMMIT');
+
+            log('info', 'Restaurante creado (pending_payment)', {
+                userId: req.user.userId, restauranteId, plan, billing
+            });
+
+            res.status(201).json({ checkoutUrl, restauranteId, plan });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            log('error', 'Error creando restaurante adicional', { error: err.message });
+            res.status(500).json({ error: 'Error creando restaurante' });
+        } finally {
+            client.release();
+        }
     });
 
     // ========== LOGOUT ==========
@@ -185,21 +507,22 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== REGISTER ==========
-    router.post('/auth/register', async (req, res) => {
+    router.post('/auth/register', authLimiter, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, email, password, codigoInvitacion } = req.body;
+            const { nombre, email, password } = req.body;
 
             if (!nombre || !email || !password) {
                 return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
             }
 
-            if (!codigoInvitacion || codigoInvitacion !== INVITATION_CODE) {
-                return res.status(403).json({ error: 'Código de invitación inválido' });
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return res.status(400).json({ error: 'Formato de email inválido' });
             }
 
-            if (password.length < 6) {
-                return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+            if (password.length < 8) {
+                return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
             }
 
             const existingUser = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
@@ -209,9 +532,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             await client.query('BEGIN');
 
+            // Create restaurant with 14-day trial
+            const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
             const restauranteResult = await client.query(
-                'INSERT INTO restaurantes (nombre, email) VALUES ($1, $2) RETURNING id',
-                [nombre, email]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users) 
+                 VALUES ($1, $2, 'trial', 'trialing', $3, 5) RETURNING id`,
+                [sanitizeString(nombre), email, trialEndsAt]
             );
             const restauranteId = restauranteResult.rows[0].id;
 
@@ -224,13 +550,38 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             const userResult = await client.query(
                 `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified, verification_token, verification_expires) 
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [restauranteId, email, passwordHash, nombre, 'admin', !canSendEmail, verificationToken, verificationExpires]
+                [restauranteId, email, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
+            );
+
+            // Create Stripe customer if configured
+            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+            if (STRIPE_SECRET_KEY) {
+                try {
+                    const stripe = require('stripe')(STRIPE_SECRET_KEY);
+                    const customer = await stripe.customers.create({
+                        email,
+                        name: sanitizeString(nombre),
+                        metadata: { restaurante_id: String(restauranteId) }
+                    });
+                    await client.query(
+                        'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
+                        [customer.id, restauranteId]
+                    );
+                } catch (stripeErr) {
+                    log('warn', 'Error creando Stripe customer (registro continúa)', { error: stripeErr.message });
+                }
+            }
+
+            // Multi-restaurant: add to junction table
+            await client.query(
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                [userResult.rows[0].id, restauranteId, 'admin']
             );
 
             await client.query('COMMIT');
 
             if (canSendEmail) {
-                const verifyUrl = `https://lacaleta-api.mindloop.cloud/api/auth/verify-email?token=${verificationToken}`;
+                const verifyUrl = `${API_URL}/api/auth/verify-email?token=${verificationToken}`;
                 try {
                     await resend.emails.send({
                         from: process.env.RESEND_FROM || 'MindLoop CostOS <onboarding@resend.dev>',
@@ -342,7 +693,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                     [resetToken, resetExpires, user.id]
                 );
 
-                const resetUrl = `https://app.mindloop.cloud/#/reset-password?token=${resetToken}`;
+                const resetUrl = `${APP_URL}/#/reset-password?token=${resetToken}`;
 
                 try {
                     await resend.emails.send({
@@ -389,8 +740,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Token y nueva contraseña requeridos' });
             }
 
-            if (newPassword.length < 6) {
-                return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+            if (newPassword.length < 8) {
+                return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
             }
 
             const result = await pool.query(
@@ -455,7 +806,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [verificationToken, verificationExpires, user.id]
             );
 
-            const verifyUrl = `https://lacaleta-api.mindloop.cloud/api/auth/verify-email?token=${verificationToken}`;
+            const verifyUrl = `${API_URL}/api/auth/verify-email?token=${verificationToken}`;
 
             await resend.emails.send({
                 from: process.env.RESEND_FROM || 'MindLoop CostOS <onboarding@resend.dev>',
@@ -508,16 +859,50 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Faltan datos requeridos (nombre, email, password)' });
             }
 
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return res.status(400).json({ error: 'Formato de email inválido' });
+            }
+
+            // Check plan status and user limits
+            const restInfo = await pool.query(
+                'SELECT plan_status, max_users FROM restaurantes WHERE id = $1',
+                [req.restauranteId]
+            );
+            if (restInfo.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            const { plan_status, max_users } = restInfo.rows[0];
+
+            if (['suspended', 'canceled', 'past_due'].includes(plan_status)) {
+                return res.status(403).json({ error: 'Tu suscripción no está activa. Renueva tu plan para añadir usuarios.' });
+            }
+
+            const userCount = await pool.query(
+                'SELECT COUNT(*)::int AS total FROM usuario_restaurantes WHERE restaurante_id = $1',
+                [req.restauranteId]
+            );
+            if (userCount.rows[0].total >= (max_users || 5)) {
+                return res.status(403).json({ error: `Has alcanzado el límite de ${max_users || 5} usuarios para tu plan. Mejora tu plan para añadir más.` });
+            }
+
             const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
             if (check.rows.length > 0) {
                 return res.status(400).json({ error: 'Este email ya está registrado' });
             }
 
             const passwordHash = await bcrypt.hash(password, 10);
-            const nuevoRol = rol || 'usuario';
+            const allowedRoles = ['usuario', 'admin'];
+            const nuevoRol = allowedRoles.includes(rol) ? rol : 'usuario';
             const result = await pool.query(
                 'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
-                [req.restauranteId, nombre, email, passwordHash, nuevoRol]
+                [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
+            );
+
+            // Multi-restaurant: add to junction table
+            await pool.query(
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                [result.rows[0].id, req.restauranteId, nuevoRol]
             );
 
             log('info', 'Nuevo usuario de equipo creado', { admin: req.user.email, newUser: email });
@@ -536,13 +921,27 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
             }
 
-            const result = await pool.query(
-                'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
+            // Remove from junction table first
+            await pool.query(
+                'DELETE FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
                 [userIdToDelete, req.restauranteId]
             );
 
-            if (result.rows.length === 0) {
-                return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
+            // Check if user still belongs to other restaurants
+            const otherRest = await pool.query(
+                'SELECT COUNT(*)::int AS total FROM usuario_restaurantes WHERE usuario_id = $1',
+                [userIdToDelete]
+            );
+
+            if (otherRest.rows[0].total === 0) {
+                // No other restaurants — delete user entirely
+                const result = await pool.query(
+                    'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
+                    [userIdToDelete, req.restauranteId]
+                );
+                if (result.rows.length === 0) {
+                    return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
+                }
             }
 
             log('info', 'Usuario eliminado del equipo', { admin: req.user.email, deletedId: userIdToDelete });

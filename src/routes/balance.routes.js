@@ -4,9 +4,132 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
+
+/**
+ * Duplicate albaran detection using resolved INGREDIENT IDs.
+ * OCR produces different text each scan, so comparing product names is unreliable.
+ * Compares ingredient IDs against 3 sources. Flags duplicate when:
+ *   1. Ingredient IDs overlap ≥ 70%
+ *   2. Dates within ±2 days
+ */
+async function checkDuplicateAlbaran(pool, restauranteId, ingredientIds, fecha) {
+    try {
+        const newIds = ingredientIds.filter(Boolean).map(Number).sort((a, b) => a - b);
+        if (newIds.length === 0) return null;
+
+        const newDate = fecha ? new Date(fecha) : null;
+
+        const isDateClose = (existingFecha) => {
+            if (!newDate || !existingFecha) return true;
+            const diffDays = Math.abs(newDate.getTime() - new Date(existingFecha).getTime()) / 86400000;
+            return diffDays <= 2;
+        };
+
+        const calcSimilarity = (existingIds) => {
+            const s = new Set(existingIds);
+            let m = 0;
+            for (const id of newIds) { if (s.has(id)) m++; }
+            return m / Math.max(newIds.length, existingIds.length);
+        };
+
+        // ── Source 1: compras_pendientes (ALL states — pendiente, aprobado, rechazado) ──
+        const pendingResult = await pool.query(
+            `SELECT batch_id, ingrediente_id, fecha, estado
+             FROM compras_pendientes
+             WHERE restaurante_id = $1
+               AND ingrediente_id IS NOT NULL
+               AND fecha >= (CURRENT_DATE - INTERVAL '60 days')
+             ORDER BY batch_id, id`,
+            [restauranteId]
+        );
+
+        if (pendingResult.rows.length > 0) {
+            const batches = new Map();
+            for (const row of pendingResult.rows) {
+                if (!batches.has(row.batch_id)) batches.set(row.batch_id, { ids: [], fecha: row.fecha, estado: row.estado });
+                batches.get(row.batch_id).ids.push(Number(row.ingrediente_id));
+            }
+            for (const [batchId, batch] of batches) {
+                if (!isDateClose(batch.fecha)) continue;
+                const similarity = calcSimilarity(batch.ids.sort((a, b) => a - b));
+                if (similarity >= 0.7) {
+                    const source = batch.estado === 'aprobado' ? 'approved' : 'pending';
+                    return { batchId, fecha: batch.fecha, itemCount: batch.ids.length, similarity: Math.round(similarity * 100), source };
+                }
+            }
+        }
+
+        // ── Source 2: precios_compra_diarios (consolidated purchases, last 60 days) ──
+        const approvedResult = await pool.query(
+            `SELECT pcd.fecha, pcd.proveedor_id, pcd.pedido_id, pcd.ingrediente_id
+             FROM precios_compra_diarios pcd
+             WHERE pcd.restaurante_id = $1
+               AND pcd.fecha >= (CURRENT_DATE - INTERVAL '60 days')
+             ORDER BY pcd.fecha, pcd.proveedor_id`,
+            [restauranteId]
+        );
+
+        if (approvedResult.rows.length > 0) {
+            const approvedBatches = new Map();
+            for (const row of approvedResult.rows) {
+                const key = `${row.fecha}_${row.pedido_id || row.proveedor_id || 0}`;
+                if (!approvedBatches.has(key)) approvedBatches.set(key, { ids: [], fecha: row.fecha });
+                approvedBatches.get(key).ids.push(Number(row.ingrediente_id));
+            }
+            for (const [key, batch] of approvedBatches) {
+                if (batch.ids.length < 2) continue;
+                if (!isDateClose(batch.fecha)) continue;
+                const similarity = calcSimilarity(batch.ids.sort((a, b) => a - b));
+                if (similarity >= 0.7) {
+                    return {
+                        batchId: key,
+                        fecha: batch.fecha,
+                        itemCount: batch.ids.length,
+                        similarity: Math.round(similarity * 100),
+                        source: 'approved'
+                    };
+                }
+            }
+        }
+
+        // ── Source 3: pedidos manuales (JSONB ingredientes, last 60 days) ──
+        const ordersResult = await pool.query(
+            `SELECT p.id, p.fecha, p.ingredientes
+             FROM pedidos p
+             WHERE p.restaurante_id = $1
+               AND p.deleted_at IS NULL
+               AND p.estado = 'recibido'
+               AND p.fecha >= (CURRENT_DATE - INTERVAL '60 days')`,
+            [restauranteId]
+        );
+
+        if (ordersResult.rows.length > 0) {
+            for (const order of ordersResult.rows) {
+                if (!isDateClose(order.fecha)) continue;
+                const ings = Array.isArray(order.ingredientes) ? order.ingredientes : [];
+                const orderIds = ings
+                    .map(ing => Number(ing.ingredienteId || ing.ingrediente_id))
+                    .filter(Boolean)
+                    .sort((a, b) => a - b);
+                if (orderIds.length < 2) continue;
+                const similarity = calcSimilarity(orderIds);
+                if (similarity >= 0.7) {
+                    return { batchId: `order_${order.id}`, fecha: order.fecha, itemCount: orderIds.length, similarity: Math.round(similarity * 100), source: 'manual_order' };
+                }
+            }
+        }
+
+        return null;
+    } catch (err) {
+        log('error', 'Error checking duplicate albaran', { error: err.message });
+        return null;
+    }
+}
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -15,7 +138,7 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== BALANCE Y ESTADÍSTICAS ==========
-    router.get('/balance/mes', authMiddleware, async (req, res) => {
+    router.get('/balance/mes', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { mes, ano } = req.query;
             const mesActual = parseInt(mes) || new Date().getMonth() + 1;
@@ -42,16 +165,32 @@ module.exports = function (pool) {
                 [startDate, endDate, req.restauranteId]
             );
 
-            // Precargar todos los precios de ingredientes en UNA query
+            // Precargar precios de ingredientes + media de compras reales
             const ingredientesResult = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
-                const precio = parseFloat(i.precio) || 0;
-                const cpf = parseFloat(i.cantidad_por_formato) || 1;
-                preciosMap.set(i.id, precio / cpf);
+                if (i.precio_medio_compra) {
+                    preciosMap.set(i.id, parseFloat(i.precio_medio_compra));
+                } else {
+                    const precio = parseFloat(i.precio) || 0;
+                    const cpf = parseFloat(i.cantidad_por_formato) || 1;
+                    preciosMap.set(i.id, precio / cpf);
+                }
+                if (i.rendimiento) {
+                    rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
+                }
             });
 
             // Calcular costos usando el Map (sin queries adicionales)
@@ -60,7 +199,14 @@ module.exports = function (pool) {
                 const ingredientes = venta.ingredientes || [];
                 for (const ing of ingredientes) {
                     const precio = preciosMap.get(ing.ingredienteId) || 0;
-                    costos += precio * (ing.cantidad || 0) * venta.cantidad;
+                    // 🔧 FIX: Rendimiento con fallback al ingrediente base
+                    let rendimiento = parseFloat(ing.rendimiento);
+                    if (!rendimiento || rendimiento === 100) {
+                        rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
+                    }
+                    const factorRendimiento = rendimiento / 100;
+                    const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
+                    costos += costeReal * (ing.cantidad || 0) * venta.cantidad;
                 }
             }
 
@@ -90,8 +236,8 @@ module.exports = function (pool) {
             );
 
             const valorInventario = await pool.query(
-                `SELECT COALESCE(SUM(stock_actual * precio), 0) as valor
-       FROM ingredientes WHERE restaurante_id = $1`,
+                `SELECT COALESCE(SUM(stock_actual * (precio / COALESCE(NULLIF(cantidad_por_formato, 0), 1))), 0) as valor
+       FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL`,
                 [req.restauranteId]
             );
 
@@ -111,7 +257,7 @@ module.exports = function (pool) {
         }
     });
 
-    router.get('/balance/comparativa', authMiddleware, async (req, res) => {
+    router.get('/balance/comparativa', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const meses = await pool.query(
                 `SELECT 
@@ -186,6 +332,439 @@ module.exports = function (pool) {
     });
 
     // ==========================================
+    // 📸 ESCANEO DE ALBARANES CON CLAUDE VISION
+    // ==========================================
+
+    router.post('/parse-albaran', authMiddleware, requirePlan('profesional'), costlyApiLimiter, async (req, res) => {
+        try {
+            const { imageBase64, mediaType, filename } = req.body;
+
+            if (!imageBase64) {
+                return res.status(400).json({ error: 'Se requiere imageBase64' });
+            }
+
+            // Validar tipo
+            const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+            const finalMediaType = mediaType || 'image/jpeg';
+            if (!validTypes.includes(finalMediaType)) {
+                return res.status(400).json({ error: `Tipo no soportado: ${finalMediaType}. Usa JPG, PNG, WebP o PDF.` });
+            }
+
+            // Límite de tamaño: 10MB en base64
+            const MAX_SIZE = 10 * 1024 * 1024;
+            if (imageBase64.length > MAX_SIZE) {
+                return res.status(413).json({ error: 'Archivo demasiado grande. Máximo 10MB.' });
+            }
+
+            // ── Image hash dedup: SHA-256 of the raw base64 content ──
+            const imageHash = crypto.createHash('sha256').update(imageBase64).digest('hex');
+
+            const hashCheck = await pool.query(
+                `SELECT batch_id, fecha, COUNT(*) as item_count
+                 FROM compras_pendientes
+                 WHERE restaurante_id = $1 AND image_hash = $2
+                   AND estado IN ('pendiente', 'aprobado')
+                 GROUP BY batch_id, fecha
+                 LIMIT 1`,
+                [req.restauranteId, imageHash]
+            );
+
+            if (hashCheck.rows.length > 0) {
+                const dup = hashCheck.rows[0];
+                log('warn', 'Duplicate albaran blocked by image hash', {
+                    existingBatchId: dup.batch_id, imageHash, restauranteId: req.restauranteId
+                });
+                return res.json({
+                    success: true,
+                    batchId: dup.batch_id,
+                    proveedor: null,
+                    fecha: dup.fecha,
+                    totalItems: parseInt(dup.item_count),
+                    matched: 0,
+                    unmatched: 0,
+                    totalImporte: 0,
+                    duplicateWarning: {
+                        batchId: dup.batch_id,
+                        fecha: dup.fecha,
+                        itemCount: parseInt(dup.item_count),
+                        similarity: 100,
+                        source: 'image_hash'
+                    }
+                });
+            }
+
+            // API Key
+            const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+            if (!ANTHROPIC_API_KEY) {
+                return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada en el servidor' });
+            }
+
+            log('info', 'Procesando albarán con Claude Vision', { filename, mediaType: finalMediaType, tamaño: imageBase64.length });
+
+            // Construir content según tipo
+            const documentContent = finalMediaType === 'application/pdf'
+                ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: imageBase64 } }
+                : { type: 'image', source: { type: 'base64', media_type: finalMediaType, data: imageBase64 } };
+
+            // Llamar Claude Vision
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': ANTHROPIC_API_KEY,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-sonnet-4-20250514',
+                    max_tokens: 4096,
+                    messages: [{
+                        role: 'user',
+                        content: [
+                            documentContent,
+                            {
+                                type: 'text',
+                                text: `Eres un sistema de OCR de alta precisión para albaranes y facturas de proveedores de hostelería en España.
+
+TAREA: Extrae TODOS los datos del documento con PRECISIÓN EXACTA. Copia el texto EXACTAMENTE como aparece impreso.
+
+Retorna ÚNICAMENTE un JSON válido (sin explicaciones, sin markdown):
+{
+  "proveedor": "nombre EXACTO de la empresa emisora tal como aparece en el documento",
+  "numero_factura": "número de serie/albarán/factura tal como aparece (ej: '426', 'A-7005900', 'F2024-001')",
+  "fecha": "YYYY-MM-DD",
+  "lineas": [
+    {
+      "producto": "nombre EXACTO del producto tal como aparece impreso",
+      "cantidad": 15.00,
+      "precio_unitario": 1.65,
+      "total": 24.75,
+      "unidad": "kg"
+    }
+  ]
+}
+
+REGLAS CRÍTICAS DE PRECISIÓN:
+
+1. PROVEEDOR: Copia el nombre de la empresa emisora EXACTAMENTE como aparece en la cabecera del documento. Incluye razón social completa (ej: "AS VACAS DA ULLOA SCG", no "Sen Mais").
+
+2. NÚMERO DE FACTURA/ALBARÁN: Busca en la cabecera campos como "Serie/Número", "Nº Albarán", "Nº Factura", "Serie", "Número". Copia el valor EXACTO.
+
+3. FECHA: 
+   - Busca la fecha en la cabecera del documento (no en caducidades ni lotes).
+   - Los documentos son RECIENTES (años 2024, 2025, 2026). Si ves "04/02/2026", la fecha es 2026-02-04.
+   - Si la fecha dice "04/02/26", el año es 2026 (NO 1926, NO 2006).
+   - Formato de salida SIEMPRE: YYYY-MM-DD.
+   - CUIDADO: En España las fechas son DD/MM/YYYY, no MM/DD/YYYY.
+
+4. PRODUCTOS:
+   - Copia el nombre del producto EXACTAMENTE como está impreso (respeta mayúsculas, tildes, abreviaturas).
+   - Incluye TODAS las líneas con productos, incluso devoluciones (cantidad negativa).
+   - "precio_unitario" = precio por UNA unidad/kg (NO el importe total de la línea).
+   - Si solo ves importe total y cantidad: precio_unitario = total / cantidad.
+   - "unidad": extrae la unidad si aparece (kg, ud, litro, caja, bandeja). Si no aparece, usa "ud".
+
+5. NO INCLUIR: líneas de totales, subtotales, IVA, bases imponibles, portes, recargos de equivalencia.
+
+6. Si un campo no es legible, usa null. NUNCA inventes datos.`
+                            }
+                        ]
+                    }]
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                log('error', 'Error de Claude API procesando albarán', errorData);
+                return res.status(500).json({ error: 'Error procesando albarán con IA' });
+            }
+
+            const claudeResponse = await response.json();
+            let textContent = claudeResponse.content?.[0]?.text || '';
+
+            // Limpiar respuesta (quitar markdown code blocks)
+            textContent = textContent.replace(/```json/g, '').replace(/```/g, '').trim();
+
+            // Extraer JSON
+            const startIdx = textContent.indexOf('{');
+            const endIdx = textContent.lastIndexOf('}');
+            if (startIdx === -1 || endIdx === -1) {
+                return res.status(500).json({ error: 'No se pudo extraer datos del albarán' });
+            }
+
+            let data;
+            try {
+                data = JSON.parse(textContent.substring(startIdx, endIdx + 1));
+            } catch (parseError) {
+                log('error', 'Error parseando JSON de albarán', { error: parseError.message, rawText: textContent.substring(0, 500) });
+                return res.status(500).json({ error: 'Error parseando respuesta de IA' });
+            }
+
+            if (!data.lineas || !Array.isArray(data.lineas) || data.lineas.length === 0) {
+                return res.status(400).json({ error: 'No se detectaron líneas de producto en el albarán' });
+            }
+
+            // ══════════════════════════════════════════════
+            // POST-PROCESSING: Validación y corrección de datos
+            // ══════════════════════════════════════════════
+
+            // ── Fecha: normalizar y validar ──
+            let fecha = data.fecha || new Date().toISOString().split('T')[0];
+
+            if (typeof fecha === 'string') {
+                // Normalizar separadores (/, ., -) 
+                const cleanFecha = fecha.replace(/[/.]/g, '-').trim();
+
+                // DD-MM-YY → YYYY-MM-DD
+                if (/^\d{2}-\d{2}-\d{2}$/.test(cleanFecha)) {
+                    const [dd, mm, yy] = cleanFecha.split('-');
+                    let year = parseInt(yy);
+                    year = year < 100 ? year + 2000 : year;
+                    fecha = `${year}-${mm}-${dd}`;
+                }
+                // DD-MM-YYYY → YYYY-MM-DD
+                else if (/^\d{2}-\d{2}-\d{4}$/.test(cleanFecha)) {
+                    const [dd, mm, yyyy] = cleanFecha.split('-');
+                    fecha = `${yyyy}-${mm}-${dd}`;
+                }
+                // Already YYYY-MM-DD — keep as is
+                else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanFecha)) {
+                    fecha = cleanFecha;
+                }
+
+                // Sanity check: year must be >= 2020
+                const yearMatch = fecha.match(/^(\d{4})/);
+                if (yearMatch) {
+                    const year = parseInt(yearMatch[1]);
+                    if (year < 2020) {
+                        // Common OCR error: 2008 instead of 2026, 2020 instead of 2026
+                        // Fix by using current year or inferring from context
+                        const currentYear = new Date().getFullYear();
+                        fecha = fecha.replace(/^\d{4}/, String(currentYear));
+                        log('warn', `Fecha del albarán corregida: año ${year} → ${currentYear}`, { original: data.fecha, corrected: fecha });
+                    }
+                }
+            }
+
+            // ── Dedup por numero_factura: mismo nº + mismo restaurante = duplicado seguro ──
+            // Solo bloquea si el batch sigue pendiente o aprobado (rechazados se pueden volver a subir)
+            const numFactura = (data.numero_factura || '').toString().trim();
+            if (numFactura) {
+                const facturaCheck = await pool.query(
+                    `SELECT batch_id, fecha, COUNT(*) as item_count
+                     FROM compras_pendientes
+                     WHERE restaurante_id = $1
+                       AND TRIM(numero_factura) = $2
+                       AND estado IN ('pendiente', 'aprobado')
+                     GROUP BY batch_id, fecha
+                     ORDER BY fecha DESC
+                     LIMIT 1`,
+                    [req.restauranteId, numFactura]
+                );
+
+                if (facturaCheck.rows.length > 0) {
+                    const dup = facturaCheck.rows[0];
+                    log('warn', 'Duplicate albaran blocked by numero_factura', {
+                        existingBatchId: dup.batch_id, numero_factura: numFactura, restauranteId: req.restauranteId
+                    });
+                    return res.json({
+                        success: false,
+                        duplicateWarning: {
+                            batchId: dup.batch_id,
+                            fecha: dup.fecha,
+                            itemCount: parseInt(dup.item_count),
+                            similarity: 100,
+                            source: 'numero_factura',
+                            numero_factura: numFactura
+                        }
+                    });
+                }
+            }
+
+            // ── Cantidades y precios: asegurar valores absolutos y numéricos ──
+            data.lineas = data.lineas.map(l => ({
+                ...l,
+                cantidad: Math.abs(parseFloat(l.cantidad)) || 0,
+                precio_unitario: Math.abs(parseFloat(l.precio_unitario)) || 0,
+                total: l.total != null ? parseFloat(l.total) : null
+            }));
+
+            // ── Matching de ingredientes (misma lógica que POST /purchases/pending) ──
+            const normalizar = (str) => {
+                return (str || '')
+                    .toLowerCase()
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9\s]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            };
+
+            const ingredientesResult = await pool.query(
+                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const ingredientesMap = new Map();
+            ingredientesResult.rows.forEach(i => {
+                ingredientesMap.set(normalizar(i.nombre), i.id);
+            });
+
+            const aliasResult = await pool.query(
+                `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a 
+                 JOIN ingredientes i ON a.ingrediente_id = i.id
+                 WHERE a.restaurante_id = $1`,
+                [req.restauranteId]
+            );
+            const aliasMap = new Map();
+            aliasResult.rows.forEach(a => {
+                aliasMap.set(normalizar(a.alias), a.ingrediente_id);
+            });
+
+            // ── Preparar INSERT en compras_pendientes ──
+            const batchId = crypto.randomUUID();
+
+            const values = [];
+            const placeholders = [];
+            let paramIdx = 1;
+            let matched = 0;
+            let totalImporte = 0;
+            const resolvedIngredientIds = [];
+
+            for (const linea of data.lineas) {
+                const nombreNorm = normalizar(linea.producto);
+                let ingredienteId = null;
+
+                // 4 niveles de búsqueda
+                ingredienteId = ingredientesMap.get(nombreNorm) || null;
+                if (!ingredienteId) {
+                    for (const [nombreDB, id] of ingredientesMap) {
+                        if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) {
+                            ingredienteId = id;
+                            break;
+                        }
+                    }
+                }
+                if (!ingredienteId) {
+                    ingredienteId = aliasMap.get(nombreNorm) || null;
+                }
+                if (!ingredienteId) {
+                    for (const [aliasNombre, id] of aliasMap) {
+                        if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) {
+                            ingredienteId = id;
+                            break;
+                        }
+                    }
+                }
+
+                if (ingredienteId) {
+                    matched++;
+                    resolvedIngredientIds.push(ingredienteId);
+                }
+
+                const precio = Math.abs(parseFloat(linea.precio_unitario)) || 0;
+                const cantidad = Math.abs(parseFloat(linea.cantidad)) || 0;
+                totalImporte += parseFloat(linea.total) || (precio * cantidad);
+
+                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9})`);
+                values.push(batchId, linea.producto, ingredienteId, precio, cantidad, fecha, req.restauranteId, data.proveedor || null, data.numero_factura || null, imageHash);
+                paramIdx += 10;
+            }
+
+            // 🔍 Check for duplicate albaran before inserting (using resolved ingredient IDs)
+            const duplicateWarning = await checkDuplicateAlbaran(
+                pool, req.restauranteId, resolvedIngredientIds, fecha
+            );
+
+            // 🔒 BLOCK insertion if duplicate detected (not just a warning)
+            if (duplicateWarning && duplicateWarning.similarity >= 70) {
+                log('warn', 'Duplicate albaran blocked by checkDuplicateAlbaran', {
+                    existingBatchId: duplicateWarning.batchId,
+                    newBatchId: batchId,
+                    similarity: duplicateWarning.similarity,
+                    source: duplicateWarning.source
+                });
+                return res.json({
+                    success: true,
+                    batchId: duplicateWarning.batchId,
+                    proveedor: data.proveedor || null,
+                    fecha,
+                    totalItems: data.lineas.length,
+                    matched,
+                    unmatched: data.lineas.length - matched,
+                    totalImporte: Math.round(totalImporte * 100) / 100,
+                    duplicateWarning
+                });
+            }
+
+            // 🔒 Server-side dedup: reject if ANY batch was created in last 2 minutes
+            // OCR produces different spellings each scan, so comparing names is unreliable.
+            // Physically impossible to scan 2 different albaranes in under 2 minutes.
+            const recentBatch = await pool.query(
+                `SELECT batch_id, COUNT(*) as item_count
+                 FROM compras_pendientes
+                 WHERE restaurante_id = $1
+                   AND created_at >= NOW() - INTERVAL '2 minutes'
+                 GROUP BY batch_id
+                 LIMIT 1`,
+                [req.restauranteId]
+            );
+
+            if (recentBatch.rows.length > 0) {
+                const existing = recentBatch.rows[0];
+                log('warn', 'Duplicate albaran rejected (cooldown 2 min)', {
+                    existingBatchId: existing.batch_id, newBatchId: batchId
+                });
+                return res.json({
+                    success: true,
+                    batchId: existing.batch_id,
+                    proveedor: data.proveedor || null,
+                    fecha,
+                    totalItems: data.lineas.length,
+                    matched,
+                    unmatched: data.lineas.length - matched,
+                    totalImporte: Math.round(totalImporte * 100) / 100,
+                    duplicateWarning: {
+                        batchId: existing.batch_id,
+                        fecha,
+                        itemCount: parseInt(existing.item_count),
+                        similarity: 100,
+                        source: 'recent_duplicate'
+                    }
+                });
+            }
+
+            if (placeholders.length > 0) {
+                await pool.query(
+                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id, proveedor, numero_factura, image_hash)
+                     VALUES ${placeholders.join(', ')}`,
+                    values
+                );
+            }
+
+            log('info', 'Albarán escaneado y pendientes creados', {
+                batchId, proveedor: data.proveedor, fecha, items: data.lineas.length, matched
+            });
+
+            const albaranResponse = {
+                success: true,
+                batchId,
+                proveedor: data.proveedor || null,
+                fecha,
+                totalItems: data.lineas.length,
+                matched,
+                unmatched: data.lineas.length - matched,
+                totalImporte: Math.round(totalImporte * 100) / 100
+            };
+            if (duplicateWarning) {
+                albaranResponse.duplicateWarning = duplicateWarning;
+                log('info', 'Duplicate albaran detected', { batchId, duplicate: duplicateWarning });
+            }
+            res.json(albaranResponse);
+        } catch (err) {
+            log('error', 'Error procesando albarán', { error: err.message });
+            res.status(500).json({ error: 'Error interno procesando albarán' });
+        }
+    });
+
+    // ==========================================
     // 🔔 COMPRAS PENDIENTES (Cola de revisión)
     // ==========================================
 
@@ -216,7 +795,7 @@ module.exports = function (pool) {
 
             // Obtener ingredientes y alias para matching
             const ingredientesResult = await pool.query(
-                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const ingredientesMap = new Map();
@@ -275,21 +854,67 @@ module.exports = function (pool) {
                 const precio = Math.abs(parseFloat(compra.precio)) || 0;
                 const cantidad = Math.abs(parseFloat(compra.cantidad)) || 0;
                 let fecha = compra.fecha || new Date().toISOString().split('T')[0];
-                // Smart date correction: detect DD/MM vs MM/DD swap
-                try {
-                    const pd = new Date(fecha + 'T00:00:00');
-                    const now = new Date(); now.setHours(0, 0, 0, 0);
-                    const diff = (pd - now) / 86400000;
-                    const pts = fecha.split('-');
-                    if (pts.length === 3 && parseInt(pts[2]) <= 12 && (diff > 7 || diff < -365)) {
-                        const sw = `${pts[0]}-${pts[2]}-${pts[1]}`;
-                        const sd = new Date(sw + 'T00:00:00');
-                        if (Math.abs((sd - now) / 86400000) < Math.abs(diff)) {
-                            log('info', 'Auto-corrected date DD/MM swap', { original: fecha, corrected: sw });
-                            fecha = sw;
-                        }
+
+                // ⚡ Robust date parsing: handles DD-MM-YY, YY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, etc.
+                if (typeof fecha === 'string') {
+                    const origFecha = fecha;
+                    // Normalize separators: / . → -
+                    fecha = fecha.replace(/[/.]/g, '-').trim();
+
+                    // Already YYYY-MM-DD — keep as is
+                    if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(fecha)) {
+                        // valid, keep
                     }
-                } catch (e) { /* keep original */ }
+                    // DD-MM-YYYY or D-M-YYYY
+                    else if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(fecha)) {
+                        const pts = fecha.split('-');
+                        fecha = `${pts[2]}-${pts[1].padStart(2, '0')}-${pts[0].padStart(2, '0')}`;
+                    }
+                    // Ambiguous XX-YY-ZZ (all 1-2 digits) — could be DD-MM-YY or YY-MM-DD
+                    else if (/^\d{1,2}-\d{1,2}-\d{1,2}$/.test(fecha)) {
+                        const pts = fecha.split('-');
+                        const a = parseInt(pts[0]), b = parseInt(pts[1]), c = parseInt(pts[2]);
+                        const now = new Date(); now.setHours(0, 0, 0, 0);
+
+                        const currentYear = now.getFullYear();
+
+                        // Interpretation 1: DD-MM-YY (European)
+                        let y1 = (c < 100 ? c + 2000 : c);
+                        if (y1 < currentYear - 1) y1 = currentYear; // correct old years
+                        const dmy = `${y1}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
+                        const dmyValid = b >= 1 && b <= 12 && a >= 1 && a <= 31;
+
+                        // Interpretation 2: YY-MM-DD (short ISO)
+                        let y2 = (a < 100 ? a + 2000 : a);
+                        if (y2 < currentYear - 1) y2 = currentYear; // correct old years
+                        const ymd = `${y2}-${String(b).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+                        const ymdValid = b >= 1 && b <= 12 && c >= 1 && c <= 31;
+
+                        if (dmyValid && ymdValid) {
+                            // Both valid — pick the one closest to today
+                            const dmyDiff = Math.abs(new Date(dmy + 'T00:00:00') - now);
+                            const ymdDiff = Math.abs(new Date(ymd + 'T00:00:00') - now);
+                            fecha = ymdDiff <= dmyDiff ? ymd : dmy;
+                        } else if (dmyValid) {
+                            fecha = dmy;
+                        } else if (ymdValid) {
+                            fecha = ymd;
+                        } else {
+                            // Fallback: DD-MM-YY
+                            fecha = dmy;
+                        }
+
+                        log('info', 'Date parsed from ambiguous format', { original: origFecha, result: fecha, dmyCandidate: dmy, ymdCandidate: ymd });
+                    }
+
+                    // Sanity: year must be >= 2020, otherwise use current year
+                    const ym = fecha.match(/^(\d{4})/);
+                    if (ym && parseInt(ym[1]) < 2020) {
+                        const currentYear = new Date().getFullYear();
+                        fecha = fecha.replace(/^\d{4}/, String(currentYear));
+                        log('warn', 'Date year corrected', { original: origFecha, corrected: fecha });
+                    }
+                }
 
 
                 placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
@@ -297,6 +922,7 @@ module.exports = function (pool) {
                 paramIdx += 7;
                 resultados.recibidos++;
             }
+
 
             // ══════════════════════════════════════════════════════════
             // 🔍 DEDUPLICATION: Block duplicate albaranes BEFORE insert
@@ -422,7 +1048,8 @@ module.exports = function (pool) {
         try {
             const { estado } = req.query;
             let query = `
-            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad
+            SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad, i.proveedor_id as ingrediente_proveedor_id,
+                   i.formato_compra as ingrediente_formato_compra, i.cantidad_por_formato as ingrediente_cantidad_por_formato
             FROM compras_pendientes cp
             LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
             WHERE cp.restaurante_id = $1`;
@@ -438,9 +1065,39 @@ module.exports = function (pool) {
             query += ' ORDER BY cp.created_at DESC, cp.batch_id, cp.ingrediente_nombre';
 
             const result = await pool.query(query, params);
-            res.json(result.rows);
+            const rows = result.rows;
+
+            // NOTE: Per-item duplicate detection removed — caused constant false positives
+            // for restaurants with multiple daily deliveries from the same supplier.
+            // Duplicate detection now ONLY happens at parse time via checkDuplicateAlbaran()
+            // which uses product-name fingerprinting (≥70% similarity) + date proximity (±2 days).
+
+            // Limpiar campo interno antes de enviar
+            rows.forEach(r => delete r.ingrediente_proveedor_id);
+            res.json(rows);
         } catch (err) {
             log('error', 'Error listando compras pendientes', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    // PATCH: Actualizar formato_override de un item pendiente
+    router.patch('/purchases/pending/:id/formato', authMiddleware, async (req, res) => {
+        try {
+            const { formato_override } = req.body;
+            if (formato_override === undefined || formato_override === null || Number(formato_override) <= 0) {
+                return res.status(400).json({ error: 'formato_override debe ser un número positivo' });
+            }
+            const result = await pool.query(
+                "UPDATE compras_pendientes SET formato_override = $1 WHERE id = $2 AND restaurante_id = $3 AND estado = 'pendiente' RETURNING id, formato_override",
+                [Number(formato_override), req.params.id, req.restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Item no encontrado o ya procesado' });
+            }
+            res.json(result.rows[0]);
+        } catch (err) {
+            log('error', 'Error actualizando formato_override', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         }
     });
@@ -481,13 +1138,12 @@ module.exports = function (pool) {
                 restauranteId: req.restauranteId
             });
 
-            // Actualizar stock
-            const ingResult = await client.query(
-                'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                [item.ingrediente_id, req.restauranteId]
-            );
-            const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
-            const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+            // Actualizar stock — usar formato_override si el usuario lo configuró,
+            // si no, usar cantidad_por_formato del ingrediente (consistente con pedidos manuales y n8n)
+            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+            const cantidadPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+            const formato = parseFloat(item.formato_override) || cantidadPorFormato;
+            const stockASumar = item.cantidad * formato;
 
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -554,13 +1210,12 @@ module.exports = function (pool) {
                     restauranteId: req.restauranteId
                 });
 
-                // Actualizar stock
-                const ingResult = await client.query(
-                    'SELECT cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                    [item.ingrediente_id, req.restauranteId]
-                );
-                const cantidadPorFormato = parseFloat(ingResult.rows[0]?.cantidad_por_formato) || 0;
-                const stockASumar = cantidadPorFormato > 0 ? item.cantidad * cantidadPorFormato : item.cantidad;
+                // Actualizar stock — usar formato_override si el usuario lo configuró,
+                // si no, usar cantidad_por_formato del ingrediente (consistente con pedidos manuales y n8n)
+                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+                const cantidadPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                const formato = parseFloat(item.formato_override) || cantidadPorFormato;
+                const stockASumar = item.cantidad * formato;
 
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -578,6 +1233,66 @@ module.exports = function (pool) {
 
             await client.query('COMMIT');
             log('info', 'Batch de compras aprobado', { batchId, aprobados: resultados.aprobados, omitidos: resultados.omitidos });
+
+            // ── Sync approved data to Google Sheets via n8n webhook (fire-and-forget) ──
+            // Only fires AFTER approval with final edited data
+            const webhookUrl = process.env.N8N_ALBARAN_WEBHOOK_URL;
+            if (webhookUrl && resultados.aprobados > 0) {
+                const approvedItems = itemsResult.rows.filter(i => i.ingrediente_id);
+
+                // Get proveedor and numero_factura from batch (stored at parse time)
+                const proveedor = approvedItems.find(i => i.proveedor)?.proveedor || '';
+                const numeroFactura = approvedItems.find(i => i.numero_factura)?.numero_factura || '';
+
+                // Format date as DD/MM/YYYY from the stored fecha
+                const fecha = approvedItems[0]?.fecha;
+                let fechaSheets = '';
+                if (fecha) {
+                    const d = new Date(fecha);
+                    const dd = String(d.getUTCDate()).padStart(2, '0');
+                    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+                    const yyyy = d.getUTCFullYear();
+                    fechaSheets = `${dd}/${mm}/${yyyy}`;
+                }
+
+                const totalImporte = approvedItems.reduce((sum, i) => sum + (i.precio * i.cantidad), 0);
+                const totalFactura = Math.round(totalImporte * 100) / 100;
+
+                // Build PRODUCTOS from final approved data
+                const productos = approvedItems.map(i => ({
+                    'Descripción': i.ingrediente_nombre || '',
+                    'Cantidad': String(i.cantidad || 0),
+                    'Unidad': 'ud',
+                    'Contenido': null,
+                    'Precio Unitario': String(i.precio || 0),
+                    'Descuento_Porcentaje': '0',
+                    'Importe_Descuento': '0.00',
+                    'Importe_Final': String(Math.round((i.precio * i.cantidad) * 100) / 100)
+                }));
+
+                const rows = [{
+                    'NUMERO DE FACTURA': numeroFactura,
+                    'FECHA DE FACTURA': fechaSheets,
+                    'REMITENTE': proveedor,
+                    'DESCRIPCION': `Albarán ${proveedor || 'aprobado'} - ${approvedItems.length} productos`,
+                    'CATEGORIA': '',
+                    'IMPORTE SIN IVA': totalFactura,
+                    'IVA': 0,
+                    'TOTAL': totalFactura,
+                    'MONEDA': 'EUR',
+                    'PRODUCTOS': JSON.stringify(productos),
+                    'LINK FACTURA': ''
+                }];
+
+                fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows })
+                }).catch(err => {
+                    log('warn', 'Error enviando batch aprobado a n8n webhook (no-blocking)', { error: err.message });
+                });
+            }
+
             res.json(resultados);
         } catch (err) {
             await client.query('ROLLBACK');
@@ -654,7 +1369,7 @@ module.exports = function (pool) {
     router.delete('/purchases/pending/:id', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(
-                "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado = 'pendiente' RETURNING id",
+                "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado IN ('pendiente', 'aprobado') RETURNING id",
                 [req.params.id, req.restauranteId]
             );
 
@@ -665,6 +1380,31 @@ module.exports = function (pool) {
             res.json({ success: true, message: 'Item rechazado' });
         } catch (err) {
             log('error', 'Error rechazando compra pendiente', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    // Admin: Corregir registro de compra diaria (precios_compra_diarios)
+    router.put('/daily/purchases/correct', authMiddleware, async (req, res) => {
+        try {
+            const { ingredienteId, fecha, cantidad, total } = req.body;
+            if (!ingredienteId || !fecha) {
+                return res.status(400).json({ error: 'ingredienteId y fecha son obligatorios' });
+            }
+            const result = await pool.query(
+                `UPDATE precios_compra_diarios 
+                 SET cantidad_comprada = $1, total_compra = $2
+                 WHERE ingrediente_id = $3 AND fecha = $4 AND restaurante_id = $5
+                 RETURNING *`,
+                [cantidad, total, ingredienteId, fecha, req.restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Registro no encontrado' });
+            }
+            log('info', 'Compra diaria corregida', { ingredienteId, fecha, cantidad, total });
+            res.json({ success: true, updated: result.rows[0] });
+        } catch (err) {
+            log('error', 'Error corrigiendo compra diaria', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         }
     });
@@ -698,7 +1438,7 @@ module.exports = function (pool) {
 
             // Obtener todos los ingredientes para búsqueda flexible (incluyendo cantidad_por_formato)
             const ingredientesResult = await client.query(
-                'SELECT id, nombre, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, nombre, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const ingredientesMap = new Map();
@@ -760,7 +1500,17 @@ module.exports = function (pool) {
                 const precio = parseFloat(compra.precio) || 0;
                 const cantidad = parseFloat(compra.cantidad) || 0;
                 const total = precio * cantidad;
-                const fecha = compra.fecha || new Date().toISOString().split('T')[0];
+                // 🛡️ Fecha validation: if OCR produced garbage, use today
+                let fecha = compra.fecha || null;
+                if (fecha) {
+                    const d = new Date(fecha);
+                    if (isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2030) {
+                        log('warn', 'Fecha inválida en compra bulk, usando hoy', { original: fecha, ingrediente: compra.ingrediente });
+                        fecha = new Date().toISOString().split('T')[0];
+                    }
+                } else {
+                    fecha = new Date().toISOString().split('T')[0];
+                }
 
                 // 🛡️ Deduplicación: si ya existe una compra de este ingrediente en esta fecha
                 // (por ejemplo, desde un pedido manual), SKIP para no duplicar
@@ -893,7 +1643,7 @@ module.exports = function (pool) {
             // Obtener precios de todos los ingredientes para calcular costes
             // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
             const ingredientesPrecios = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1',
+                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
             const preciosMap = {};

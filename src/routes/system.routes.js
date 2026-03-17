@@ -41,7 +41,7 @@ module.exports = function (pool) {
             // 3. Stock negativo
             const stockNegativo = await pool.query(`
             SELECT id, nombre, stock_actual, unidad FROM ingredientes 
-            WHERE restaurante_id = $1 AND stock_actual < 0
+            WHERE restaurante_id = $1 AND stock_actual < 0 AND deleted_at IS NULL
             ORDER BY stock_actual LIMIT 10
         `, [restauranteId]);
             results.stockNegativo = {
@@ -68,7 +68,7 @@ module.exports = function (pool) {
             SELECT 
                 SUM(stock_actual * (precio / COALESCE(NULLIF(cantidad_por_formato, 0), 1))) as valor,
                 COUNT(*) as items
-            FROM ingredientes WHERE restaurante_id = $1 AND stock_actual > 0
+            FROM ingredientes WHERE restaurante_id = $1 AND stock_actual > 0 AND deleted_at IS NULL
         `, [restauranteId]);
             results.valorStock = {
                 valor: parseFloat(valorStock.rows[0].valor) || 0,
