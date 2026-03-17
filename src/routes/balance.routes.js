@@ -923,15 +923,101 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 resultados.recibidos++;
             }
 
-            // 🔍 Check for duplicate albaran BEFORE inserting
-            const fechaCheck = compras[0]?.fecha || new Date().toISOString().split('T')[0];
-            const duplicateWarning = await checkDuplicateAlbaran(
-                pool, req.restauranteId,
-                compras.map(c => ({ ingrediente: c.ingrediente, cantidad: c.cantidad })),
-                fechaCheck
-            );
 
-            // 🔒 BLOCK: Si hay duplicado, NO insertar
+            // ══════════════════════════════════════════════════════════
+            // 🔍 DEDUPLICATION: Block duplicate albaranes BEFORE insert
+            // ══════════════════════════════════════════════════════════
+
+            // Collect resolved ingredient IDs from matching loop
+            const resolvedIds = values
+                .filter((_, i) => i % 7 === 2)  // ingredienteId is at position 2 in each 7-value group
+                .filter(Boolean);
+
+            let duplicateWarning = null;
+
+            // ── Layer 1: ID-based dedup (when ingredients were matched) ──
+            if (resolvedIds.length > 0) {
+                const pendingResult = await pool.query(
+                    `SELECT batch_id, ingrediente_id, fecha
+                     FROM compras_pendientes
+                     WHERE restaurante_id = $1
+                       AND ingrediente_id IS NOT NULL
+                       AND estado IN ('pendiente', 'aprobado')
+                       AND created_at >= NOW() - INTERVAL '7 days'
+                     ORDER BY batch_id, id`,
+                    [req.restauranteId]
+                );
+
+                if (pendingResult.rows.length > 0) {
+                    const batches = new Map();
+                    for (const row of pendingResult.rows) {
+                        if (!batches.has(row.batch_id)) batches.set(row.batch_id, { ids: [], fecha: row.fecha });
+                        batches.get(row.batch_id).ids.push(Number(row.ingrediente_id));
+                    }
+
+                    const newIdSet = new Set(resolvedIds.map(Number));
+                    for (const [existingBatchId, batch] of batches) {
+                        const existingSet = new Set(batch.ids);
+                        let overlap = 0;
+                        for (const id of newIdSet) { if (existingSet.has(id)) overlap++; }
+                        const similarity = overlap / Math.max(newIdSet.size, existingSet.size);
+                        if (similarity >= 0.7) {
+                            duplicateWarning = {
+                                batchId: existingBatchId, fecha: batch.fecha,
+                                itemCount: batch.ids.length,
+                                similarity: Math.round(similarity * 100),
+                                source: 'ingredient_ids'
+                            };
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // ── Layer 2: Text fingerprint dedup (when no IDs matched) ──
+            if (!duplicateWarning) {
+                const fingerprint = compras
+                    .map(c => `${normalizar(c.ingrediente)}|${Math.abs(parseFloat(c.cantidad)) || 0}|${Math.abs(parseFloat(c.precio)) || 0}`)
+                    .sort()
+                    .join(';;');
+
+                const recentPending = await pool.query(
+                    `SELECT batch_id, fecha, ingrediente_nombre, cantidad, precio
+                     FROM compras_pendientes
+                     WHERE restaurante_id = $1
+                       AND estado IN ('pendiente', 'aprobado')
+                       AND created_at >= NOW() - INTERVAL '7 days'
+                     ORDER BY batch_id`,
+                    [req.restauranteId]
+                );
+
+                if (recentPending.rows.length > 0) {
+                    const existingBatches = new Map();
+                    for (const row of recentPending.rows) {
+                        if (!existingBatches.has(row.batch_id)) existingBatches.set(row.batch_id, []);
+                        existingBatches.get(row.batch_id).push(row);
+                    }
+
+                    for (const [existingBatchId, items] of existingBatches) {
+                        const existingFingerprint = items
+                            .map(i => `${normalizar(i.ingrediente_nombre)}|${Number(i.cantidad)}|${Number(i.precio)}`)
+                            .sort()
+                            .join(';;');
+
+                        if (existingFingerprint === fingerprint) {
+                            duplicateWarning = {
+                                batchId: existingBatchId, fecha: items[0].fecha,
+                                itemCount: items.length,
+                                similarity: 100,
+                                source: 'text_fingerprint'
+                            };
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 🔒 BLOCK insertion if duplicate detected
             if (duplicateWarning) {
                 log('warn', 'Duplicate purchase BLOCKED (not inserted)', { batchId, duplicate: duplicateWarning });
                 return res.status(409).json({
