@@ -8,7 +8,7 @@ const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
-const { upsertCompraDiaria } = require('../utils/businessHelpers');
+const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio } = require('../utils/businessHelpers');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -1182,14 +1182,29 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             const total = item.precio * item.cantidad;
 
-            // Insertar en precios_compra_diarios
+            // Resolver proveedor: texto OCR → proveedor_id, fallback a proveedor principal
+            const proveedorId = await resolveProveedorId(client, {
+                proveedorTexto: item.proveedor,
+                ingredienteId: item.ingrediente_id,
+                restauranteId: req.restauranteId
+            });
+
+            // Insertar en precios_compra_diarios con proveedor
             await upsertCompraDiaria(client, {
                 ingredienteId: item.ingrediente_id,
                 fecha: item.fecha,
                 precioUnitario: item.precio,
                 cantidad: item.cantidad,
                 total,
-                restauranteId: req.restauranteId
+                restauranteId: req.restauranteId,
+                proveedorId
+            });
+
+            // Actualizar precio en ingredientes_proveedores para tracking de precios
+            await updateProveedorPrecio(client, {
+                ingredienteId: item.ingrediente_id,
+                proveedorId,
+                precio: item.precio
             });
 
             // Actualizar stock — usar formato_override si el usuario lo configuró,
@@ -1211,7 +1226,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             );
 
             await client.query('COMMIT');
-            log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id });
+            log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id, proveedorId });
             res.json({ success: true, message: 'Compra aprobada y registrada' });
         } catch (err) {
             await client.query('ROLLBACK');
@@ -1254,14 +1269,29 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
                 const total = item.precio * item.cantidad;
 
-                // Insertar en precios_compra_diarios
+                // Resolver proveedor: texto OCR → proveedor_id, fallback a proveedor principal
+                const proveedorId = await resolveProveedorId(client, {
+                    proveedorTexto: item.proveedor,
+                    ingredienteId: item.ingrediente_id,
+                    restauranteId: req.restauranteId
+                });
+
+                // Insertar en precios_compra_diarios con proveedor
                 await upsertCompraDiaria(client, {
                     ingredienteId: item.ingrediente_id,
                     fecha: item.fecha,
                     precioUnitario: item.precio,
                     cantidad: item.cantidad,
                     total,
-                    restauranteId: req.restauranteId
+                    restauranteId: req.restauranteId,
+                    proveedorId
+                });
+
+                // Actualizar precio en ingredientes_proveedores para tracking de precios
+                await updateProveedorPrecio(client, {
+                    ingredienteId: item.ingrediente_id,
+                    proveedorId,
+                    precio: item.precio
                 });
 
                 // Actualizar stock — usar formato_override si el usuario lo configuró,
