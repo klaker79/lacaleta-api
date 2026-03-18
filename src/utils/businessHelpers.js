@@ -62,4 +62,74 @@ function buildIngredientPriceMap(ingredientes) {
     return map;
 }
 
-module.exports = { calcularPrecioUnitario, upsertCompraDiaria, buildIngredientPriceMap };
+/**
+ * Resolves a proveedor_id from:
+ *   1. Fuzzy text match on compras_pendientes.proveedor → proveedores.nombre
+ *   2. Fallback: ingrediente's principal supplier from ingredientes_proveedores
+ *   3. Fallback: ingrediente.proveedor_id (legacy column)
+ *
+ * @param {object} client - PostgreSQL client
+ * @param {object} params
+ * @param {string|null} params.proveedorTexto - Provider name from OCR/albaran
+ * @param {number} params.ingredienteId - Ingredient ID
+ * @param {number} params.restauranteId - Restaurant ID
+ * @returns {number|null} proveedor_id or null
+ */
+async function resolveProveedorId(client, { proveedorTexto, ingredienteId, restauranteId }) {
+    // 1. Try matching proveedor text against proveedores table
+    if (proveedorTexto && proveedorTexto.trim()) {
+        const normalizado = proveedorTexto.trim();
+        const provResult = await client.query(
+            `SELECT id FROM proveedores
+             WHERE restaurante_id = $1 AND deleted_at IS NULL
+               AND LOWER(nombre) = LOWER($2)
+             LIMIT 1`,
+            [restauranteId, normalizado]
+        );
+        if (provResult.rows.length > 0) return provResult.rows[0].id;
+
+        // Fuzzy: check if proveedor name contains or is contained in the text
+        const provFuzzy = await client.query(
+            `SELECT id, nombre FROM proveedores
+             WHERE restaurante_id = $1 AND deleted_at IS NULL
+               AND (LOWER(nombre) LIKE '%' || LOWER($2) || '%' OR LOWER($2) LIKE '%' || LOWER(nombre) || '%')
+             ORDER BY LENGTH(nombre) DESC
+             LIMIT 1`,
+            [restauranteId, normalizado]
+        );
+        if (provFuzzy.rows.length > 0) return provFuzzy.rows[0].id;
+    }
+
+    // 2. Fallback: principal supplier from ingredientes_proveedores
+    const ipResult = await client.query(
+        `SELECT proveedor_id FROM ingredientes_proveedores
+         WHERE ingrediente_id = $1 AND es_proveedor_principal = true
+         LIMIT 1`,
+        [ingredienteId]
+    );
+    if (ipResult.rows.length > 0) return ipResult.rows[0].proveedor_id;
+
+    // 3. Fallback: legacy proveedor_id on ingredientes
+    const ingResult = await client.query(
+        'SELECT proveedor_id FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+        [ingredienteId, restauranteId]
+    );
+    if (ingResult.rows.length > 0 && ingResult.rows[0].proveedor_id) return ingResult.rows[0].proveedor_id;
+
+    return null;
+}
+
+/**
+ * Updates the price for a specific ingredient-provider relationship.
+ * Called after approving a purchase to keep ingredientes_proveedores prices current.
+ */
+async function updateProveedorPrecio(client, { ingredienteId, proveedorId, precio }) {
+    if (!proveedorId || !ingredienteId) return;
+    await client.query(
+        `UPDATE ingredientes_proveedores SET precio = $1
+         WHERE ingrediente_id = $2 AND proveedor_id = $3`,
+        [precio, ingredienteId, proveedorId]
+    );
+}
+
+module.exports = { calcularPrecioUnitario, upsertCompraDiaria, buildIngredientPriceMap, resolveProveedorId, updateProveedorPrecio };
