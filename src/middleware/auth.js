@@ -108,12 +108,23 @@ const authMiddleware = (req, res, next) => {
 };
 
 const requireAdmin = (req, res, next) => {
-    if (!req.user || (req.user.rol !== 'admin' && req.user.rol !== 'api')) {
+    if (!req.user || (req.user.rol !== 'admin' && req.user.rol !== 'api' && req.user.rol !== 'owner')) {
         log('warn', 'Acceso denegado a ruta protegida', {
             user: req.user ? req.user.email : 'anon',
             url: req.originalUrl
         });
         return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Administrador' });
+    }
+    next();
+};
+
+const requireOwner = (req, res, next) => {
+    if (!req.user || req.user.rol !== 'owner') {
+        log('warn', 'Acceso denegado: requiere owner', {
+            user: req.user ? req.user.email : 'anon',
+            url: req.originalUrl
+        });
+        return res.status(403).json({ error: 'Acceso denegado: Requiere rol de Propietario' });
     }
     next();
 };
@@ -129,4 +140,4 @@ const requireSuperAdmin = (req, res, next) => {
     next();
 };
 
-module.exports = { authMiddleware, requireAdmin, requireSuperAdmin, tokenBlacklist };
+module.exports = { authMiddleware, requireAdmin, requireOwner, requireSuperAdmin, tokenBlacklist };
