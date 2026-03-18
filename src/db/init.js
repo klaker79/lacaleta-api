@@ -621,6 +621,33 @@ async function initializeDatabase(pool) {
     log('info', 'Migración usuario_restaurantes completada (tabla + backfill)');
   } catch (e) { log('warn', 'Migración usuario_restaurantes', { error: e.message }); }
 
+  // ========== TRANSFERENCIAS INTER-RESTAURANTE ==========
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS transferencias_stock (
+        id SERIAL PRIMARY KEY,
+        origen_restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id),
+        destino_restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id),
+        ingrediente_nombre TEXT NOT NULL,
+        ingrediente_id_origen INTEGER REFERENCES ingredientes(id),
+        ingrediente_id_destino INTEGER REFERENCES ingredientes(id),
+        cantidad DECIMAL(10,2) NOT NULL,
+        precio_unitario DECIMAL(10,2) NOT NULL DEFAULT 0,
+        estado VARCHAR(20) DEFAULT 'pendiente',
+        notas TEXT,
+        solicitado_por INTEGER REFERENCES usuarios(id),
+        aprobado_por INTEGER REFERENCES usuarios(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        resuelto_at TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_transferencias_origen ON transferencias_stock(origen_restaurante_id);
+      CREATE INDEX IF NOT EXISTS idx_transferencias_destino ON transferencias_stock(destino_restaurante_id);
+      CREATE INDEX IF NOT EXISTS idx_transferencias_estado ON transferencias_stock(estado);
+    `);
+    log('info', 'Tabla transferencias_stock creada/verificada');
+  } catch (e) { log('warn', 'Migración transferencias_stock', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
