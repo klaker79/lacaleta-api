@@ -543,6 +543,13 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                         log('warn', `Fecha del albarán corregida: año ${year} → ${currentYear}`, { original: data.fecha, corrected: fecha });
                     }
                 }
+
+                // Sanity check: fecha cannot be in the future (OCR often reads expiry/lot dates instead of invoice date)
+                const today = new Date().toISOString().split('T')[0];
+                if (fecha > today) {
+                    log('warn', `Fecha del albarán es futura, usando fecha actual`, { original: data.fecha, parsed: fecha, replaced: today });
+                    fecha = today;
+                }
             }
 
             // ── Dedup por numero_factura: mismo nº + mismo restaurante = duplicado seguro ──
@@ -913,6 +920,13 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                         const currentYear = new Date().getFullYear();
                         fecha = fecha.replace(/^\d{4}/, String(currentYear));
                         log('warn', 'Date year corrected', { original: origFecha, corrected: fecha });
+                    }
+
+                    // Sanity: fecha cannot be in the future (OCR often reads expiry/lot dates)
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    if (fecha > todayStr) {
+                        log('warn', 'Future date corrected to today', { original: origFecha, parsed: fecha, replaced: todayStr });
+                        fecha = todayStr;
                     }
                 }
 
@@ -1588,9 +1602,13 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 let fecha = compra.fecha || null;
                 if (fecha) {
                     const d = new Date(fecha);
+                    const todayStr = new Date().toISOString().split('T')[0];
                     if (isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2030) {
                         log('warn', 'Fecha inválida en compra bulk, usando hoy', { original: fecha, ingrediente: compra.ingrediente });
-                        fecha = new Date().toISOString().split('T')[0];
+                        fecha = todayStr;
+                    } else if (fecha > todayStr) {
+                        log('warn', 'Fecha futura en compra bulk, usando hoy', { original: fecha, ingrediente: compra.ingrediente });
+                        fecha = todayStr;
                     }
                 } else {
                     fecha = new Date().toISOString().split('T')[0];
