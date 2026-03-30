@@ -615,9 +615,9 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             });
 
             const aliasResult = await pool.query(
-                `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a 
+                `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a
                  JOIN ingredientes i ON a.ingrediente_id = i.id
-                 WHERE a.restaurante_id = $1`,
+                 WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const aliasMap = new Map();
@@ -811,9 +811,9 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             });
 
             const aliasResult = await pool.query(
-                `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a 
+                `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a
              JOIN ingredientes i ON a.ingrediente_id = i.id
-             WHERE a.restaurante_id = $1`,
+             WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const aliasMap = new Map();
@@ -1221,11 +1221,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 precio: item.precio
             });
 
-            // Actualizar stock — usar formato_override si el usuario lo configuró,
-            // si no, usar cantidad_por_formato del ingrediente (consistente con pedidos manuales y n8n)
-            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
-            const cantidadPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
-            const formato = parseFloat(item.formato_override) || cantidadPorFormato;
+            // Actualizar stock — formato_override indica la conversión elegida por el usuario:
+            // - Si el usuario eligió formato (ej: CAJA ×24), formato_override = 24
+            // - Si el usuario eligió unidad suelta (×1) o no tocó el selector, formato_override = 1 o NULL
+            // DEFAULT = 1 (unidad suelta), NO cantidad_por_formato, porque el frontend muestra ×1 por defecto
+            const formato = parseFloat(item.formato_override) || 1;
             const stockASumar = item.cantidad * formato;
 
             await client.query(
@@ -1308,11 +1308,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     precio: item.precio
                 });
 
-                // Actualizar stock — usar formato_override si el usuario lo configuró,
-                // si no, usar cantidad_por_formato del ingrediente (consistente con pedidos manuales y n8n)
-                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
-                const cantidadPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
-                const formato = parseFloat(item.formato_override) || cantidadPorFormato;
+                // Actualizar stock — DEFAULT = 1 (unidad suelta), consistente con UI que muestra ×1 por defecto
+                const formato = parseFloat(item.formato_override) || 1;
                 const stockASumar = item.cantidad * formato;
 
                 await client.query(
