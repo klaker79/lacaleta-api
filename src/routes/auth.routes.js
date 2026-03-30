@@ -83,7 +83,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             // Multi-restaurant: check all restaurants this user has access to
             // Exclude pending_payment (not yet paid) and suspended
             const restResult = await pool.query(
-                `SELECT ur.restaurante_id, ur.rol, r.nombre, r.plan_status, r.trial_ends_at
+                `SELECT ur.restaurante_id, ur.rol, r.nombre, r.plan_status, r.trial_ends_at, r.moneda
                  FROM usuario_restaurantes ur
                  JOIN restaurantes r ON ur.restaurante_id = r.id
                  WHERE ur.usuario_id = $1
@@ -136,7 +136,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                         id: user.id, email: user.email, nombre: user.nombre,
                         rol: rest.rol, restaurante: rest.nombre,
                         restauranteId: rest.restaurante_id,
-                        isSuperAdmin: user.is_superadmin || false
+                        isSuperAdmin: user.is_superadmin || false,
+                        moneda: rest.moneda || '€'
                     },
                     restaurants
                 });
@@ -203,7 +204,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Sin acceso a este restaurante' });
             }
 
-            const rest = await pool.query('SELECT nombre, plan_status FROM restaurantes WHERE id = $1', [restauranteId]);
+            const rest = await pool.query('SELECT nombre, plan_status, moneda FROM restaurantes WHERE id = $1', [restauranteId]);
             if (rest.rows.length === 0) {
                 return res.status(404).json({ error: 'Restaurante no encontrado' });
             }
@@ -230,7 +231,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 user: {
                     id: decoded.userId, email: decoded.email,
                     restaurante: rest.rows[0].nombre, restauranteId: parseInt(restauranteId),
-                    rol: access.rows[0].rol, isSuperAdmin: decoded.isSuperAdmin || false
+                    rol: access.rows[0].rol, isSuperAdmin: decoded.isSuperAdmin || false,
+                    moneda: rest.rows[0].moneda || '€'
                 }
             });
         } catch (err) {
@@ -258,7 +260,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: 'Sin acceso a este restaurante' });
             }
 
-            const rest = await pool.query('SELECT nombre, plan_status FROM restaurantes WHERE id = $1', [restauranteId]);
+            const rest = await pool.query('SELECT nombre, plan_status, moneda FROM restaurantes WHERE id = $1', [restauranteId]);
             if (rest.rows.length > 0 && ['pending_payment', 'suspended'].includes(rest.rows[0].plan_status)) {
                 return res.status(403).json({ error: 'Este restaurante no está activo' });
             }
@@ -285,7 +287,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 user: {
                     id: req.user.userId, email: req.user.email,
                     restaurante: rest.rows[0].nombre, restauranteId: parseInt(restauranteId),
-                    rol: access.rows[0].rol, isSuperAdmin: req.user.isSuperAdmin || false
+                    rol: access.rows[0].rol, isSuperAdmin: req.user.isSuperAdmin || false,
+                    moneda: rest.rows[0].moneda || '€'
                 }
             });
         } catch (err) {
