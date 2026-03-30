@@ -261,6 +261,12 @@ module.exports = function (pool) {
 
             const transfer = transferResult.rows[0];
 
+            // Lock source ingredient before deducting (prevent race condition on concurrent transfers)
+            await client.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                [transfer.ingrediente_id_origen, transfer.origen_restaurante_id]
+            );
+
             // Deduct stock from origin (GREATEST(0, ...) — business rule: no negative stock)
             await client.query(
                 `UPDATE ingredientes
