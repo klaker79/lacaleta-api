@@ -83,7 +83,7 @@ module.exports = function (pool) {
 
             await client.query('BEGIN');
 
-            const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2', [recetaId, req.restauranteId]);
+            const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL', [recetaId, req.restauranteId]);
             if (recetaResult.rows.length === 0) {
                 await client.query('ROLLBACK');
                 return res.status(404).json({ error: 'Receta no encontrada' });
@@ -242,7 +242,7 @@ module.exports = function (pool) {
             } else {
                 // Fallback para ventas antiguas sin stock_deductions
                 const recetaResult = await client.query(
-                    'SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2',
+                    'SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                     [venta.receta_id, req.restauranteId]
                 );
 
@@ -591,8 +591,8 @@ REGLAS:
                 // Si se pasó varianteId explícitamente, usarlo para obtener factor
                 if (varianteId && !varianteEncontrada) {
                     const varianteResult = await client.query(
-                        'SELECT factor FROM recetas_variantes WHERE id = $1 AND receta_id = $2',
-                        [varianteId, receta.id]
+                        'SELECT factor FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3',
+                        [varianteId, receta.id, req.restauranteId]
                     );
                     if (varianteResult.rows.length > 0) {
                         factorAplicado = parseFloat(varianteResult.rows[0].factor) || 1;
