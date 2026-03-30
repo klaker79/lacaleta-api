@@ -1221,11 +1221,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 precio: item.precio
             });
 
-            // Actualizar stock — formato_override indica la conversión elegida por el usuario:
-            // - Si el usuario eligió formato (ej: CAJA ×24), formato_override = 24
-            // - Si el usuario eligió unidad suelta (×1) o no tocó el selector, formato_override = 1 o NULL
-            // DEFAULT = 1 (unidad suelta), NO cantidad_por_formato, porque el frontend muestra ×1 por defecto
-            const formato = parseFloat(item.formato_override) || 1;
+            // Actualizar stock — usar formato_override si el usuario lo configuró,
+            // si no, usar cantidad_por_formato del ingrediente (la compra viene en formato de compra: cajas, lotes, etc.)
+            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+            const cantidadPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+            const formato = parseFloat(item.formato_override) || cantidadPorFormato;
             const stockASumar = item.cantidad * formato;
 
             await client.query(
@@ -1308,8 +1308,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     precio: item.precio
                 });
 
-                // Actualizar stock — DEFAULT = 1 (unidad suelta), consistente con UI que muestra ×1 por defecto
-                const formato = parseFloat(item.formato_override) || 1;
+                // Actualizar stock — usar formato_override si el usuario lo configuró,
+                // si no, usar cantidad_por_formato del ingrediente (la compra viene en formato de compra)
+                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+                const cantidadPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
+                const formato = parseFloat(item.formato_override) || cantidadPorFormato;
                 const stockASumar = item.cantidad * formato;
 
                 await client.query(
