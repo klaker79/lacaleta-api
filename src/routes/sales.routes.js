@@ -617,6 +617,7 @@ REGLAS:
                 }
 
                 // Calcular coste de ingredientes para esta venta (aplicando factor de variante)
+                const porciones = Math.max(1, parseInt(receta.porciones) || 1);
                 let costeIngredientes = 0;
                 const ingredientesReceta = receta.ingredientes || [];
                 if (Array.isArray(ingredientesReceta)) {
@@ -629,7 +630,7 @@ REGLAS:
                         }
                         const factorRendimiento = rendimiento / 100;
                         const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
-                        costeIngredientes += costeReal * (ing.cantidad || 0) * cantidad * factorAplicado;
+                        costeIngredientes += costeReal * ((ing.cantidad || 0) / porciones) * cantidad * factorAplicado;
                     }
                 }
 
@@ -641,8 +642,6 @@ REGLAS:
                 );
 
                 // Descontar stock (aplicando factor de variante)
-                // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
-                const porciones = Math.max(1, parseInt(receta.porciones) || 1);
                 const bulkDeductions = []; // ⚡ FIX: Rastrear descuentos reales para restauración correcta
                 if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
                     for (const ing of ingredientesReceta) {

@@ -77,7 +77,7 @@ module.exports = function (pool) {
                 pool.query('SELECT COUNT(*) as total FROM usuarios'),
                 pool.query("SELECT COUNT(*) as total FROM recetas WHERE deleted_at IS NULL AND (ingredientes IS NULL OR ingredientes::text = '[]')"),
                 pool.query('SELECT COUNT(*) as total FROM ingredientes WHERE stock_actual < 0 AND deleted_at IS NULL'),
-                pool.query('SELECT COALESCE(SUM(stock_actual * COALESCE(precio, 0)), 0) as total FROM ingredientes WHERE stock_actual > 0 AND deleted_at IS NULL'),
+                pool.query('SELECT COALESCE(SUM(stock_actual * (COALESCE(precio, 0) / GREATEST(COALESCE(cantidad_por_formato, 1), 1))), 0) as total FROM ingredientes WHERE stock_actual > 0 AND deleted_at IS NULL'),
                 pool.query("SELECT COALESCE(SUM(total), 0) as total FROM ventas WHERE fecha::date = CURRENT_DATE AND deleted_at IS NULL")
             ]);
 

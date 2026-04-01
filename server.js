@@ -332,13 +332,8 @@ app.get('/api/debug/routes', authMiddleware, requireAdmin, (req, res) => {
     });
 });
 
-// ========== 404 CATCH-ALL ==========
-app.use((req, res) => {
-    res.status(404).json({ error: 'Ruta no encontrada' });
-});
-
 // ========== SENTRY ERROR HANDLER ==========
-// Debe ir ANTES del error handler custom para capturar errores no manejados
+// Debe ir ANTES del 404 y del error handler custom para capturar errores no manejados
 Sentry.setupExpressErrorHandler(app);
 
 // ========== ERROR HANDLER GLOBAL ==========
@@ -352,6 +347,12 @@ app.use((err, req, res, next) => {
         error: 'Error interno del servidor',
         message: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
+});
+
+// ========== 404 CATCH-ALL ==========
+// Debe ir DESPUÉS de los error handlers para no interceptar errores
+app.use((req, res) => {
+    res.status(404).json({ error: 'Ruta no encontrada' });
 });
 
 // ========== INICIAR SERVIDOR ==========
