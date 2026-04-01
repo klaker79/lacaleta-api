@@ -158,7 +158,7 @@ module.exports = function (pool) {
             );
 
             const ventasDetalle = await pool.query(
-                `SELECT v.cantidad, r.ingredientes
+                `SELECT v.cantidad, r.ingredientes, r.porciones
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
        WHERE v.fecha >= $1 AND v.fecha < $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL`,
@@ -197,6 +197,7 @@ module.exports = function (pool) {
             let costos = 0;
             for (const venta of ventasDetalle.rows) {
                 const ingredientes = venta.ingredientes || [];
+                const porciones = Math.max(1, parseInt(venta.porciones) || 1);
                 for (const ing of ingredientes) {
                     const precio = preciosMap.get(ing.ingredienteId) || 0;
                     // 🔧 FIX: Rendimiento con fallback al ingrediente base
@@ -206,7 +207,7 @@ module.exports = function (pool) {
                     }
                     const factorRendimiento = rendimiento / 100;
                     const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
-                    costos += costeReal * (ing.cantidad || 0) * venta.cantidad;
+                    costos += (costeReal * (ing.cantidad || 0) * venta.cantidad) / porciones;
                 }
             }
 
@@ -236,8 +237,14 @@ module.exports = function (pool) {
             );
 
             const valorInventario = await pool.query(
-                `SELECT COALESCE(SUM(stock_actual * (precio / COALESCE(NULLIF(cantidad_por_formato, 0), 1))), 0) as valor
-       FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL`,
+                `SELECT COALESCE(SUM(i.stock_actual * COALESCE(pcd.precio_medio_compra, i.precio / COALESCE(NULLIF(i.cantidad_por_formato, 0), 1))), 0) as valor
+       FROM ingredientes i
+       LEFT JOIN (
+           SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+           FROM precios_compra_diarios WHERE restaurante_id = $1
+           GROUP BY ingrediente_id
+       ) pcd ON pcd.ingrediente_id = i.id
+       WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
 

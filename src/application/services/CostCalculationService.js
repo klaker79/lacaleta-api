@@ -38,7 +38,7 @@ class CostCalculationService {
         const breakdown = this.costCalculator.calculate(recipe, ingredientPrices);
 
         // 4. Persistir resultado
-        await this.updateRecipeCost(recipeId, breakdown);
+        await this.updateRecipeCost(recipeId, breakdown, restaurantId);
 
         // 5. Emitir evento si hay event bus
         if (this.eventBus) {
@@ -166,7 +166,7 @@ class CostCalculationService {
      * Actualiza los costes calculados en la receta
      * @private
      */
-    async updateRecipeCost(recipeId, breakdown) {
+    async updateRecipeCost(recipeId, breakdown, restaurantId) {
         const query = `
             UPDATE recetas
             SET
@@ -176,7 +176,7 @@ class CostCalculationService {
                 food_cost = $4,
                 last_cost_calculation = NOW(),
                 updated_at = NOW()
-            WHERE id = $5
+            WHERE id = $5 AND restaurante_id = $6
         `;
 
         await this.pool.query(query, [
@@ -184,7 +184,8 @@ class CostCalculationService {
             breakdown.costPerPortion,
             breakdown.marginPercentage,
             breakdown.foodCostPercentage,
-            recipeId
+            recipeId,
+            restaurantId
         ]);
     }
 

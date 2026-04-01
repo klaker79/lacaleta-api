@@ -10,7 +10,7 @@ class KPIController {
      */
     static async getDaily(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const { date } = req.query;
 
             const kpiService = new KPIService();
@@ -30,7 +30,7 @@ class KPIController {
      */
     static async getMonthly(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const { year, month } = req.query;
 
             const now = new Date();
@@ -52,7 +52,7 @@ class KPIController {
      */
     static async getComparison(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const { months } = req.query;
 
             const kpiService = new KPIService();
@@ -72,7 +72,7 @@ class KPIController {
      */
     static async getTopRecipes(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const { limit } = req.query;
 
             const kpiService = new KPIService();
@@ -93,7 +93,7 @@ class KPIController {
      */
     static async getDailyRange(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const { days = 7 } = req.query;
 
             const kpiService = new KPIService();

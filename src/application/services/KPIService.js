@@ -22,6 +22,7 @@ class KPIService {
             FROM ventas
             WHERE restaurante_id = $1
               AND DATE(fecha) = $2
+              AND deleted_at IS NULL
         `;
 
         const result = await this.pool.query(query, [restaurantId, dateStr]);
@@ -61,6 +62,7 @@ class KPIService {
             WHERE restaurante_id = $1
               AND DATE(fecha) >= $2
               AND DATE(fecha) <= $3
+              AND deleted_at IS NULL
             GROUP BY DATE(fecha)
             ORDER BY fecha
         `;
@@ -104,6 +106,12 @@ class KPIService {
      * Obtiene comparativa de últimos N meses
      */
     async getMonthlyComparison(restaurantId, months = 6) {
+        const sinceDate = new Date();
+        sinceDate.setMonth(sinceDate.getMonth() - months);
+        sinceDate.setDate(1);
+        sinceDate.setHours(0, 0, 0, 0);
+        const sinceDateStr = sinceDate.toISOString().split('T')[0];
+
         const query = `
             SELECT
                 DATE_TRUNC('month', fecha) as month,
@@ -111,12 +119,13 @@ class KPIService {
                 COUNT(*) as sale_count
             FROM ventas
             WHERE restaurante_id = $1
-              AND fecha >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${months} months'
+              AND fecha >= $2
+              AND deleted_at IS NULL
             GROUP BY DATE_TRUNC('month', fecha)
             ORDER BY month
         `;
 
-        const result = await this.pool.query(query, [restaurantId]);
+        const result = await this.pool.query(query, [restaurantId, sinceDateStr]);
 
         return result.rows.map(row => {
             const revenue = parseFloat(row.revenue) || 0;
@@ -150,7 +159,9 @@ class KPIService {
             LEFT JOIN ventas v ON r.id = v.receta_id
                 AND v.restaurante_id = $1
                 AND v.fecha >= CURRENT_DATE - INTERVAL '30 days'
+                AND v.deleted_at IS NULL
             WHERE r.restaurante_id = $1
+              AND r.deleted_at IS NULL
             GROUP BY r.id, r.nombre, r.precio_venta
             ORDER BY ingresos DESC
             LIMIT $2
@@ -170,6 +181,10 @@ class KPIService {
      * Obtiene KPIs de los últimos N días
      */
     async getDailyRange(restaurantId, days = 7) {
+        const sinceDate = new Date();
+        sinceDate.setDate(sinceDate.getDate() - days);
+        const sinceDateStr = sinceDate.toISOString().split('T')[0];
+
         const query = `
             SELECT
                 DATE(fecha) as date,
@@ -177,13 +192,14 @@ class KPIService {
                 COUNT(*) as sale_count
             FROM ventas
             WHERE restaurante_id = $1
-              AND DATE(fecha) >= CURRENT_DATE - INTERVAL '${days} days'
+              AND DATE(fecha) >= $2
               AND DATE(fecha) <= CURRENT_DATE
+              AND deleted_at IS NULL
             GROUP BY DATE(fecha)
             ORDER BY date ASC
         `;
 
-        const result = await this.pool.query(query, [restaurantId]);
+        const result = await this.pool.query(query, [restaurantId, sinceDateStr]);
 
         return result.rows.map(row => {
             const revenue = parseFloat(row.revenue) || 0;

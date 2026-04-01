@@ -61,7 +61,7 @@ module.exports = function (pool) {
 
             // Verificar que la receta existe
             const checkReceta = await pool.query(
-                'SELECT id FROM recetas WHERE id = $1 AND restaurante_id = $2',
+                'SELECT id FROM recetas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
             if (checkReceta.rows.length === 0) {
