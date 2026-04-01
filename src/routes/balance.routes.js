@@ -1729,6 +1729,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 r.id as receta_id,
                 r.nombre as receta,
                 r.ingredientes as receta_ingredientes,
+                r.porciones,
                 SUM(v.cantidad) as cantidad_vendida,
                 AVG(v.precio_unitario) as precio_venta_unitario,
                 SUM(v.total) as total_ingresos
@@ -1736,32 +1737,56 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             JOIN recetas r ON v.receta_id = r.id
             WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
               AND v.fecha >= $2 AND v.fecha < $3
-            GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes
+            GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes, r.porciones
             ORDER BY DATE(v.fecha), r.nombre
         `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
 
             // Obtener precios de todos los ingredientes para calcular costes
-            // CORREGIDO: Incluir cantidad_por_formato para calcular precio UNITARIO
+            // Incluye precio_medio_compra (prioridad) y rendimiento (misma lógica que /balance/mes)
             const ingredientesPrecios = await pool.query(
-                'SELECT id, precio, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const preciosMap = {};
+            const rendimientoBaseMap = {};
             ingredientesPrecios.rows.forEach(ing => {
-                const precio = parseFloat(ing.precio) || 0;
-                const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
-                // Precio unitario = precio del formato / cantidad en el formato
-                preciosMap[ing.id] = precio / cantidadPorFormato;
+                if (ing.precio_medio_compra) {
+                    preciosMap[ing.id] = parseFloat(ing.precio_medio_compra);
+                } else {
+                    const precio = parseFloat(ing.precio) || 0;
+                    const cpf = parseFloat(ing.cantidad_por_formato) || 1;
+                    preciosMap[ing.id] = precio / cpf;
+                }
+                if (ing.rendimiento) {
+                    rendimientoBaseMap[ing.id] = parseFloat(ing.rendimiento);
+                }
             });
 
-            // Función para calcular coste de una receta
-            const calcularCosteReceta = (ingredientesReceta) => {
+            // Función para calcular coste de una receta (con rendimiento y porciones)
+            // Misma lógica que /balance/mes
+            const calcularCosteReceta = (ingredientesReceta, porciones) => {
                 if (!ingredientesReceta || !Array.isArray(ingredientesReceta)) return 0;
-                return ingredientesReceta.reduce((sum, item) => {
+                const porcionesVal = Math.max(1, parseInt(porciones) || 1);
+                const costeTotal = ingredientesReceta.reduce((sum, item) => {
                     const precio = preciosMap[item.ingredienteId] || 0;
                     const cantidad = parseFloat(item.cantidad) || 0;
-                    return sum + (precio * cantidad);
+                    let rendimiento = parseFloat(item.rendimiento);
+                    if (!rendimiento || rendimiento === 100) {
+                        rendimiento = rendimientoBaseMap[item.ingredienteId] || 100;
+                    }
+                    const factorRendimiento = rendimiento / 100;
+                    const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
+                    return sum + (costeReal * cantidad);
                 }, 0);
+                return costeTotal / porcionesVal;
             };
 
             // Procesar datos en formato tipo Excel
@@ -1821,8 +1846,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const cantidadVendida = parseInt(row.cantidad_vendida);
                 const totalIngresos = parseFloat(row.total_ingresos);
 
-                // Calcular coste real desde ingredientes de la receta
-                const costePorUnidad = calcularCosteReceta(row.receta_ingredientes);
+                // Calcular coste real desde ingredientes de la receta (con rendimiento y porciones)
+                const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones);
                 const costeTotal = costePorUnidad * cantidadVendida;
                 const beneficio = totalIngresos - costeTotal;
 

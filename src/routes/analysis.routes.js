@@ -117,7 +117,7 @@ module.exports = function (pool) {
             const resultado = analisis.map(p => {
                 const esPopular = p.popularidad >= (promedioPopularidad * 0.7);
                 const esRentable = p.margen >= promedioMargen;
-                const foodCostAlto = p.foodCost > 33; // Umbral industria
+                const foodCostAlto = p.foodCost > 38; // >38% = alerta (umbral unificado 33/38)
 
                 let clasificacion = 'perro';
                 if (esPopular && esRentable) clasificacion = 'estrella';

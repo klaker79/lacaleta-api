@@ -241,7 +241,9 @@ module.exports = function (pool) {
     // POST /transfers/:id/approve — Approve incoming transfer
     // ==========================================
     router.post('/transfers/:id/approve', authMiddleware, requireAdmin, async (req, res) => {
-        if (!validateId(req.params.id, res)) return;
+        const idCheck = validateId(req.params.id);
+        if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+        const transferId = idCheck.value;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -251,7 +253,7 @@ module.exports = function (pool) {
                 `SELECT * FROM transferencias_stock
                  WHERE id = $1 AND destino_restaurante_id = $2 AND estado = 'pendiente'
                  FOR UPDATE`,
-                [req.params.id, req.restauranteId]
+                [transferId, req.restauranteId]
             );
 
             if (transferResult.rows.length === 0) {
@@ -339,14 +341,16 @@ module.exports = function (pool) {
     // POST /transfers/:id/reject — Reject incoming transfer
     // ==========================================
     router.post('/transfers/:id/reject', authMiddleware, requireAdmin, async (req, res) => {
-        if (!validateId(req.params.id, res)) return;
+        const idCheck = validateId(req.params.id);
+        if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
+        const transferId = idCheck.value;
         try {
             const result = await pool.query(
                 `UPDATE transferencias_stock
                  SET estado = 'rechazada', aprobado_por = $1, resuelto_at = NOW()
                  WHERE id = $2 AND destino_restaurante_id = $3 AND estado = 'pendiente'
                  RETURNING id`,
-                [req.user.userId, req.params.id, req.restauranteId]
+                [req.user.userId, transferId, req.restauranteId]
             );
 
             if (result.rows.length === 0) {

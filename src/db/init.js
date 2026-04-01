@@ -648,6 +648,47 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla transferencias_stock creada/verificada');
   } catch (e) { log('warn', 'Migración transferencias_stock', { error: e.message }); }
 
+  // ========== MIGRACIÓN: Tabla alerts para sistema de alertas ==========
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS alerts (
+        id SERIAL PRIMARY KEY,
+        restaurant_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
+        title TEXT NOT NULL,
+        message TEXT,
+        entity_type VARCHAR(50),
+        entity_id INTEGER,
+        data JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        acknowledged_at TIMESTAMP,
+        acknowledged_by INTEGER,
+        resolved_at TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_alerts_restaurant ON alerts(restaurant_id, status);
+    `);
+    log('info', 'Tabla alerts creada/verificada');
+  } catch (e) { log('warn', 'Migración alerts', { error: e.message }); }
+
+  // ========== MIGRACIÓN: Columnas faltantes en ventas ==========
+  try {
+    await pool.query(`
+      ALTER TABLE ventas ADD COLUMN IF NOT EXISTS factor_variante DECIMAL(5, 3) DEFAULT 1;
+      ALTER TABLE ventas ADD COLUMN IF NOT EXISTS variante_id INTEGER REFERENCES recetas_variantes(id) ON DELETE SET NULL;
+    `);
+    log('info', 'Migración ventas factor_variante/variante_id completada');
+  } catch (e) { log('warn', 'Migración ventas columns', { error: e.message }); }
+
+  // ========== MIGRACIÓN: Moneda en restaurantes ==========
+  try {
+    await pool.query(`
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS moneda VARCHAR(10) DEFAULT '€';
+    `);
+    log('info', 'Migración restaurantes.moneda completada');
+  } catch (e) { log('warn', 'Migración moneda', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).

@@ -53,10 +53,11 @@ module.exports = function (pool) {
             // 1. Buscar por nombre exacto (case insensitive)
             let result = await pool.query(`
             SELECT id, nombre, unidad, precio, cantidad_por_formato, formato_compra, stock_actual
-            FROM ingredientes 
-            WHERE restaurante_id = $1 
+            FROM ingredientes
+            WHERE restaurante_id = $1
               AND LOWER(nombre) = LOWER($2)
               AND (activo IS NULL OR activo = TRUE)
+              AND deleted_at IS NULL
             LIMIT 1
         `, [req.restauranteId, nombreLimpio]);
 
@@ -82,9 +83,10 @@ module.exports = function (pool) {
             SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.formato_compra, i.stock_actual, a.alias
             FROM ingredientes_alias a
             JOIN ingredientes i ON a.ingrediente_id = i.id
-            WHERE a.restaurante_id = $1 
+            WHERE a.restaurante_id = $1
               AND LOWER(a.alias) = LOWER($2)
               AND (i.activo IS NULL OR i.activo = TRUE)
+              AND i.deleted_at IS NULL
             LIMIT 1
         `, [req.restauranteId, nombreLimpio]);
 
@@ -109,10 +111,11 @@ module.exports = function (pool) {
             // 3. Buscar por coincidencia parcial (LIKE)
             result = await pool.query(`
             SELECT id, nombre, unidad, precio, cantidad_por_formato, formato_compra, stock_actual
-            FROM ingredientes 
-            WHERE restaurante_id = $1 
+            FROM ingredientes
+            WHERE restaurante_id = $1
               AND LOWER(nombre) LIKE LOWER($2)
               AND (activo IS NULL OR activo = TRUE)
+              AND deleted_at IS NULL
             ORDER BY LENGTH(nombre) ASC
             LIMIT 1
         `, [req.restauranteId, `%${nombreLimpio.replace(/[%_]/g, '\\$&')}%`]);
@@ -190,7 +193,7 @@ module.exports = function (pool) {
             // 🔒 FIX CRÍTICO: Primero obtener valores ACTUALES del ingrediente
             // Esto previene sobrescribir campos con valores por defecto cuando no vienen en el request
             const existingResult = await pool.query(
-                'SELECT * FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+                'SELECT * FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
 
@@ -499,7 +502,7 @@ module.exports = function (pool) {
 
             // Verificar que el ingrediente pertenece al restaurante
             const checkIng = await pool.query(
-                'SELECT id, nombre FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+                'SELECT id, nombre FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
 
@@ -542,7 +545,7 @@ module.exports = function (pool) {
 
             // Verificar ingrediente
             const checkIng = await pool.query(
-                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
             if (checkIng.rows.length === 0) {
@@ -551,7 +554,7 @@ module.exports = function (pool) {
 
             // Verificar proveedor
             const checkProv = await pool.query(
-                'SELECT id FROM proveedores WHERE id = $1 AND restaurante_id = $2',
+                'SELECT id FROM proveedores WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [proveedor_id, req.restauranteId]
             );
             if (checkProv.rows.length === 0) {
