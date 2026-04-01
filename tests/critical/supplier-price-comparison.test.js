@@ -116,8 +116,8 @@ describe('Supplier Price Comparison — Multi-supplier pricing and alerts', () =
         expect(Array.isArray(res.body.recetas_problema)).toBe(true);
 
         // Business rules
-        expect(res.body.objetivo).toBe(35); // 35% target food cost
-        expect(res.body.umbral_alerta).toBe(40); // alert at 40%
+        expect(res.body.objetivo).toBe(33); // 33% target food cost (unified threshold)
+        expect(res.body.umbral_alerta).toBe(38); // alert at 38% (unified threshold)
 
         console.log(`✅ Price-check: target=${res.body.objetivo}%, alert=${res.body.umbral_alerta}%`);
         console.log(`   Recipes above threshold: ${res.body.recetas_problema.length}`);
