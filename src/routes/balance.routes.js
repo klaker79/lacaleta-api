@@ -1636,8 +1636,9 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 });
 
                 // Solo actualizar stock, NO el precio (el precio solo se cambia manualmente)
-                // Si tiene cantidad_por_formato, multiplicar: cantidad × cantidad_por_formato
-                const stockASumar = cantidadPorFormato > 0 ? cantidad * cantidadPorFormato : cantidad;
+                // La cantidad del albarán ya viene en unidades base (el OCR parsea "40 servilletas", no "1 caja")
+                // NO multiplicar por cantidad_por_formato — eso infla el stock
+                const stockASumar = cantidad;
                 // ⚡ FIX Bug #8: Lock row before update to prevent race condition
                 await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
                 await client.query(
