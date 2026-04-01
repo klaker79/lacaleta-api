@@ -26,8 +26,8 @@ module.exports = function (pool) {
              JOIN usuario_restaurantes ur2 ON ur1.usuario_id = ur2.usuario_id
              WHERE ur1.restaurante_id = $1
                AND ur2.restaurante_id = $2
-               AND ur1.rol = 'owner'
-               AND ur2.rol = 'owner'
+               AND ur1.rol = 'admin'
+               AND ur2.rol = 'admin'
              LIMIT 1`,
             [restauranteId1, restauranteId2]
         );
@@ -264,10 +264,17 @@ module.exports = function (pool) {
             const transfer = transferResult.rows[0];
 
             // Lock source ingredient before deducting (prevent race condition on concurrent transfers)
-            await client.query(
-                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+            const stockCheck = await client.query(
+                'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
                 [transfer.ingrediente_id_origen, transfer.origen_restaurante_id]
             );
+
+            // Reject if origin doesn't have enough stock
+            const stockDisponible = parseFloat(stockCheck.rows[0]?.stock_actual) || 0;
+            if (stockDisponible < transfer.cantidad) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: `Stock insuficiente. Disponible: ${stockDisponible}, solicitado: ${transfer.cantidad}` });
+            }
 
             // Deduct stock from origin (GREATEST(0, ...) — business rule: no negative stock)
             await client.query(
@@ -299,6 +306,12 @@ module.exports = function (pool) {
                     error: `No se encontró "${transfer.ingrediente_nombre}" en tu restaurante. Créalo primero o asígnalo manualmente.`
                 });
             }
+
+            // Lock destination ingredient before adding stock
+            await client.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                [destinoIngId, req.restauranteId]
+            );
 
             // Add stock to destination
             await client.query(
@@ -392,7 +405,7 @@ module.exports = function (pool) {
                 `SELECT r.id, r.nombre, r.plan, r.plan_status, ur.rol
                  FROM usuario_restaurantes ur
                  JOIN restaurantes r ON ur.restaurante_id = r.id
-                 WHERE ur.usuario_id = $1 AND ur.rol = 'owner'
+                 WHERE ur.usuario_id = $1 AND ur.rol = 'admin'
                  ORDER BY r.nombre`,
                 [req.user.userId]
             );

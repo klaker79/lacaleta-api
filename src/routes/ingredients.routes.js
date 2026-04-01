@@ -168,7 +168,7 @@ module.exports = function (pool) {
             const finalFamilia = sanitizeString(familia, 50) || 'alimento';
             const finalFormatoCompra = sanitizeString(formato_compra, 50) || null;
             const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;
-            const finalRendimiento = parseInt(rendimiento) || 100;
+            const finalRendimiento = parseFloat(rendimiento) || 100;
 
             const result = await pool.query(
                 'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato, rendimiento) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
@@ -229,7 +229,7 @@ module.exports = function (pool) {
                 ? (body.cantidad_por_formato ? validateCantidad(body.cantidad_por_formato) : null)
                 : existing.cantidad_por_formato;
             const finalRendimiento = body.rendimiento !== undefined
-                ? (parseInt(body.rendimiento) || 100)
+                ? (parseFloat(body.rendimiento) || 100)
                 : (existing.rendimiento || 100);
 
             // Log para debug (remover en producción)

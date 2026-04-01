@@ -10,7 +10,7 @@ class AlertController {
      */
     static async list(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const alertService = new AlertService();
 
             const alerts = await alertService.getActiveAlerts(restaurante_id);
@@ -30,7 +30,7 @@ class AlertController {
      */
     static async getStats(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const alertService = new AlertService();
 
             const stats = await alertService.getAlertStats(restaurante_id);
@@ -50,7 +50,8 @@ class AlertController {
     static async acknowledge(req, res, next) {
         try {
             const { id } = req.params;
-            const { restaurante_id, userId } = req.user;
+            const restaurante_id = req.restauranteId;
+            const { userId } = req.user;
             const alertService = new AlertService();
 
             const alert = await alertService.acknowledgeAlert(id, userId, restaurante_id);
@@ -77,7 +78,7 @@ class AlertController {
     static async resolve(req, res, next) {
         try {
             const { id } = req.params;
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const alertService = new AlertService();
 
             const alert = await alertService.resolveAlert(id, restaurante_id);
@@ -104,7 +105,7 @@ class AlertController {
      */
     static async history(req, res, next) {
         try {
-            const { restaurante_id } = req.user;
+            const restaurante_id = req.restauranteId;
             const { status, type, limit = 50, offset = 0 } = req.query;
 
             const alertService = new AlertService();

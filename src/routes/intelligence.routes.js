@@ -41,6 +41,7 @@ module.exports = function (pool) {
                 FROM pedidos p
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
                 WHERE p.restaurante_id = $1
+                  AND p.deleted_at IS NULL
                   AND p.estado = 'recibido'
                   AND p.fecha_recepcion IS NOT NULL
                   AND p.fecha_recepcion >= CURRENT_DATE - INTERVAL '7 days'
