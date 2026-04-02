@@ -173,5 +173,43 @@ module.exports = function (pool) {
     });
 
 
+    // 🛡️ Stock health monitor — for n8n daily check
+    router.get('/system/stock-health', authMiddleware, async (req, res) => {
+        try {
+            const totalResult = await pool.query(`
+                SELECT
+                    ROUND(SUM(stock_actual * (precio / GREATEST(COALESCE(cantidad_por_formato, 1), 1))), 2) as valor_total,
+                    COUNT(*) FILTER (WHERE stock_actual > 10000 AND cantidad_por_formato > 1) as sospechosos,
+                    COUNT(*) FILTER (WHERE stock_actual < 0) as negativos
+                FROM ingredientes
+                WHERE restaurante_id = $1 AND deleted_at IS NULL AND stock_actual > 0
+            `, [req.restauranteId]);
+
+            const topResult = await pool.query(`
+                SELECT nombre, stock_actual, cantidad_por_formato,
+                    ROUND(stock_actual * (precio / GREATEST(COALESCE(cantidad_por_formato, 1), 1)), 2) as valor
+                FROM ingredientes
+                WHERE restaurante_id = $1 AND deleted_at IS NULL AND stock_actual > 0
+                ORDER BY stock_actual * (precio / GREATEST(COALESCE(cantidad_por_formato, 1), 1)) DESC
+                LIMIT 5
+            `, [req.restauranteId]);
+
+            const data = totalResult.rows[0];
+            const valorTotal = parseFloat(data.valor_total) || 0;
+            const sospechosos = parseInt(data.sospechosos) || 0;
+
+            res.json({
+                valor_total: valorTotal,
+                sospechosos,
+                negativos: parseInt(data.negativos) || 0,
+                top_5: topResult.rows,
+                alerta: sospechosos > 0 || valorTotal > 100000
+            });
+        } catch (err) {
+            log('error', 'Error en stock health check', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     return router;
 };

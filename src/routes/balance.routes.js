@@ -867,6 +867,14 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
                 const precio = Math.abs(parseFloat(compra.precio)) || 0;
                 const cantidad = Math.abs(parseFloat(compra.cantidad)) || 0;
+
+                // 🛡️ Guardrail: flag suspicious OCR values
+                if (precio < 0.05 && cantidad > 100) {
+                    log('warn', 'OCR data suspicious — very low price with high quantity', {
+                        ingrediente: compra.ingrediente || compra.nombre, precio, cantidad
+                    });
+                }
+
                 let fecha = compra.fecha || new Date().toISOString().split('T')[0];
 
                 // ⚡ Robust date parsing: handles DD-MM-YY, YY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, etc.
@@ -1646,6 +1654,17 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 // La cantidad del albarán ya viene en unidades base (el OCR parsea "40 servilletas", no "1 caja")
                 // NO multiplicar por cantidad_por_formato — eso infla el stock
                 const stockASumar = cantidad;
+
+                // 🛡️ Guardrail: reject absurd stock additions (OCR garbage)
+                if (stockASumar > 10000) {
+                    log('warn', 'Stock addition rejected — absurd value', {
+                        ingrediente: compra.ingrediente, cantidad: stockASumar, ingredienteId
+                    });
+                    resultados.fallidos++;
+                    resultados.errores.push(`${compra.ingrediente}: cantidad ${stockASumar} absurda (>10000)`);
+                    continue;
+                }
+
                 // ⚡ FIX Bug #8: Lock row before update to prevent race condition
                 await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
                 await client.query(

@@ -40,3 +40,59 @@ La Caleta 102 API is a Node.js/Express monolith backend for restaurant cost mana
 - Bug-focused rules only. No style rules, no Prettier, no formatting enforcement.
 - `no-unused-vars` is warn (not error) — warnings do not fail CI.
 - Do not add style rules (semicolons, quotes, indentation).
+
+## Critical Business Rules
+
+### Stock Operations
+Every route that modifies `stock_actual` must follow these exact formulas:
+
+**Adding stock:**
+| Route | Formula | Why |
+|-------|---------|-----|
+| `PUT /purchases/pending/:id` (approve) | `cantidad × (formato_override \|\| 1)` | User sets format via selector; NULL = ×1 |
+| `POST /purchases/pending/approve-batch` | `cantidad × (formato_override \|\| 1)` | Same as single approve |
+| `POST /daily/purchases/bulk` (n8n/OCR) | `cantidad` (raw, NO multiplication) | OCR parses in albaran units |
+| Frontend pedido reception (bulkAdjustStock) | `cantidadRecibida × cantidad_por_formato` | User says "2 cajas" |
+
+**Subtracting stock:**
+| Route | Formula |
+|-------|---------|
+| `POST /sales` | `(ing.cantidad / porciones) × vendidas × factor_variante` |
+| `DELETE /orders/:id` | `cantidadRecibida × cantidad_por_formato` (reverses frontend) |
+| `POST /mermas` | `cantidad` (direct, base units) |
+| Transfers | `cantidad` (direct). REJECTS if origin has insufficient stock |
+
+**Safety rules:**
+- `GREATEST(0, ...)` on ALL subtractions (prevent negative stock)
+- `FOR UPDATE` lock on ALL stock operations (prevent race conditions)
+- `restaurante_id` in EVERY query (multi-tenant)
+- `deleted_at IS NULL` on soft-deletable tables: ingredientes, recetas, ventas, pedidos, mermas, proveedores
+
+### Price Priority (MUST be consistent everywhere)
+1. `precio_medio_compra` — average from `precios_compra_diarios` (real purchase prices)
+2. `precio_medio` — `precio / cantidad_por_formato` (configured price per unit)
+3. `precio / cantidad_por_formato` — fallback
+
+**WARNING:** `precio_medio_compra` may contain FORMAT prices (per caja/garrafa), not unit prices. Only use in backend calculations where the data is known to be normalized. The frontend memoized function intentionally uses `precio_medio` only.
+
+### Food Cost Thresholds
+- **Food (comida):** ≤28% excellent, 29-33% target, 34-38% watch, >38% alert
+- **Wine (vinos):** target 45% — DO NOT apply food thresholds to wine
+- **Margin equivalents:** ≥67% OK, 62-66% warn, <62% alert
+
+### Formulas (Jack Miller method)
+- Food Cost % = (coste_porcion / precio_venta) × 100
+- Margen % = ((precio_venta - coste) / precio_venta) × 100
+- Coste por porción = suma_ingredientes / porciones
+- Rendimiento: costeReal = precio / (rendimiento / 100)
+
+### Multi-tenant
+- `restaurante_id` in EVERY query. No exceptions.
+- Frontend owns stock adjustments. Backend orders POST/PUT NEVER touch stock_actual.
+
+### OCR/Purchase Flow
+- n8n + Gemini → POST /purchases/pending → user reviews → approve
+- App scanner endpoint exists but is disabled
+- Dedup: fuzzy matching (7 days for n8n, 60 days for scanner)
+- Guardrail: stock additions > 10,000 units are auto-rejected
+- Guardrail: precio < 0.05 + cantidad > 100 flagged as suspicious
