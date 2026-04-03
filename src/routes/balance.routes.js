@@ -785,12 +785,12 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     // POST: n8n envía compras aquí (van a cola de revisión, NO directamente al diario)
     router.post('/purchases/pending', authMiddleware, async (req, res) => {
         try {
-            const { compras } = req.body;
+            const { compras, proveedor: proveedorAlbaran } = req.body;
 
             if (!Array.isArray(compras) || compras.length === 0) {
                 return res.status(400).json({
                     error: 'Formato inválido: se esperaba un array "compras" no vacío',
-                    ejemplo: { compras: [{ ingrediente: "Pulpo", precio: 26, cantidad: 10, fecha: "2025-12-17" }] }
+                    ejemplo: { compras: [{ ingrediente: "Pulpo", precio: 26, cantidad: 10, fecha: "2025-12-17" }], proveedor: "CASH RECORD" }
                 });
             }
 
@@ -946,9 +946,12 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 }
 
 
-                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6})`);
-                values.push(batchId, compra.ingrediente, ingredienteId, precio, cantidad, fecha, req.restauranteId);
-                paramIdx += 7;
+                // Proveedor: per-item > top-level albaran > null
+                const proveedorItem = compra.proveedor || proveedorAlbaran || null;
+
+                placeholders.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7})`);
+                values.push(batchId, compra.ingrediente, ingredienteId, precio, cantidad, fecha, req.restauranteId, proveedorItem);
+                paramIdx += 8;
                 resultados.recibidos++;
             }
 
@@ -1040,7 +1043,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
                     // ── Layer 3: Ingredient ID overlap (when both batches have matched IDs) ──
                     const resolvedIds = values
-                        .filter((_, i) => i % 7 === 2)
+                        .filter((_, i) => i % 8 === 2)
                         .filter(Boolean)
                         .map(Number);
                     const existingIds = batch.items
@@ -1079,7 +1082,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             if (placeholders.length > 0) {
                 await pool.query(
-                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id)
+                    `INSERT INTO compras_pendientes (batch_id, ingrediente_nombre, ingrediente_id, precio, cantidad, fecha, restaurante_id, proveedor)
                  VALUES ${placeholders.join(', ')}`,
                     values
                 );
