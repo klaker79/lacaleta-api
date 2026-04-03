@@ -970,7 +970,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                  FROM compras_pendientes
                  WHERE restaurante_id = $1
                    AND estado IN ('pendiente', 'aprobado')
-                   AND created_at >= NOW() - INTERVAL '7 days'
+                   AND created_at >= NOW() - INTERVAL '60 days'
                  ORDER BY batch_id`,
                 [req.restauranteId]
             );
@@ -997,7 +997,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     // ── Layer 1: Item count + total amount (fast pre-filter) ──
                     // If item count differs by more than 1 or total differs by more than 15%, skip
                     const existingTotal = batch.items.reduce((sum, i) => sum + Number(i.precio) * Number(i.cantidad), 0);
-                    if (Math.abs(batch.size - newItemCount) > 1) continue;
+                    // Allow partial matches: new batch could be a subset of existing
+                    if (newItemCount > batch.size + 3) continue;
                     if (existingTotal > 0 && newTotal > 0) {
                         const totalDiff = Math.abs(existingTotal - newTotal) / Math.max(existingTotal, newTotal);
                         if (totalDiff > 0.15) continue;
@@ -1055,8 +1056,9 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                         const existingIdSet = new Set(existingIds);
                         let overlap = 0;
                         for (const id of newIdSet) { if (existingIdSet.has(id)) overlap++; }
-                        const idSimilarity = overlap / Math.max(newIdSet.size, existingIdSet.size);
-                        if (idSimilarity >= 0.7) {
+                        // Use min instead of max to catch subsets (6 of 10 items = 60% of new, should trigger)
+                        const idSimilarity = overlap / Math.min(newIdSet.size, existingIdSet.size);
+                        if (idSimilarity >= 0.5) {
                             duplicateWarning = {
                                 batchId: existingBatchId,
                                 fecha: batch.fecha,
