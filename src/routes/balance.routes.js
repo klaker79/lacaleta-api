@@ -1422,7 +1422,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     // PUT: Editar un item pendiente (cambiar ingrediente_id, precio, cantidad)
     router.put('/purchases/pending/:id', authMiddleware, async (req, res) => {
         try {
-            const { ingrediente_id, precio, cantidad, fecha } = req.body;
+            const { ingrediente_id, precio, cantidad, fecha, proveedor } = req.body;
 
             // Verificar que el item existe y es pendiente
             const existing = await pool.query(
@@ -1462,6 +1462,10 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             if (fecha !== undefined) {
                 updates.push(`fecha = $${paramIdx++}`);
                 values.push(fecha);
+            }
+            if (proveedor !== undefined) {
+                updates.push(`proveedor = $${paramIdx++}`);
+                values.push(proveedor);
             }
 
             if (updates.length === 0) {
