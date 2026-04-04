@@ -958,10 +958,44 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             // ══════════════════════════════════════════════════════════
             // 🔍 DEDUPLICATION: Block duplicate albaranes BEFORE insert
-            // Uses 3 layers — tolerant of OCR variations from Gemini
+            // Uses 4 layers — tolerant of OCR variations from Gemini
             // ══════════════════════════════════════════════════════════
 
             let duplicateWarning = null;
+
+            // ── Layer 0: Single-item dedup (small tickets like Caylo) ──
+            // If albaran has 1-2 items, check if same ingredient was purchased in last 3 days
+            if (compras.length <= 2) {
+                const resolvedIds = values
+                    .filter((_, i) => i % 8 === 2)
+                    .filter(Boolean)
+                    .map(Number);
+
+                if (resolvedIds.length > 0) {
+                    const recentSame = await pool.query(
+                        `SELECT cp.id, cp.ingrediente_nombre, cp.fecha, cp.precio
+                         FROM compras_pendientes cp
+                         WHERE cp.restaurante_id = $1
+                           AND cp.ingrediente_id = ANY($2)
+                           AND cp.estado IN ('pendiente', 'aprobado')
+                           AND cp.created_at >= NOW() - INTERVAL '3 days'
+                         LIMIT 1`,
+                        [req.restauranteId, resolvedIds]
+                    );
+
+                    if (recentSame.rows.length > 0) {
+                        const dup = recentSame.rows[0];
+                        duplicateWarning = {
+                            batchId: null,
+                            fecha: dup.fecha,
+                            itemCount: 1,
+                            similarity: 100,
+                            source: 'single_item_3day',
+                            detail: `${dup.ingrediente_nombre} ya registrado el ${dup.fecha} (${dup.precio}€)`
+                        };
+                    }
+                }
+            }
 
             // Get ALL recent pending/approved items for comparison
             const recentPending = await pool.query(
