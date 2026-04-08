@@ -1281,6 +1281,12 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             const formato = parseFloat(item.formato_override) || 1;
             const stockASumar = item.cantidad * formato;
 
+            // 🛡️ Guardrail: reject absurd stock additions
+            if (stockASumar > 10000) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
+            }
+
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
                 [stockASumar, item.ingrediente_id, req.restauranteId]
@@ -1366,6 +1372,15 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
                 const formato = parseFloat(item.formato_override) || 1;
                 const stockASumar = item.cantidad * formato;
+
+                // 🛡️ Guardrail: skip absurd stock additions
+                if (stockASumar > 10000) {
+                    log('warn', 'Batch approve: stock addition rejected — absurd value', {
+                        ingrediente: item.ingrediente_nombre, cantidad: stockASumar, itemId: item.id
+                    });
+                    resultados.omitidos = (resultados.omitidos || 0) + 1;
+                    continue;
+                }
 
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
