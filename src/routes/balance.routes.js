@@ -1248,7 +1248,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 return res.status(400).json({ error: 'El item no tiene ingrediente asignado. Edítalo primero.' });
             }
 
-            const total = item.precio * item.cantidad;
+            const totalAlbaran = item.precio * item.cantidad;
 
             // Resolver proveedor: texto OCR → proveedor_id, fallback a proveedor principal
             const proveedorId = await resolveProveedorId(client, {
@@ -1257,13 +1257,26 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 restauranteId: req.restauranteId
             });
 
-            // Insertar en precios_compra_diarios con proveedor
+            // Actualizar stock — formato_override indica cuántas unidades por formato eligió el usuario
+            // Si no eligió nada (NULL), el frontend muestra ×1 por defecto, así que usamos 1
+            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+            const formato = parseFloat(item.formato_override) || 1;
+            const stockASumar = item.cantidad * formato;
+
+            // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
+            // total_albarán / unidades_base = precio por unidad (€/kg, €/litro, etc.)
+            // Ejemplo: 2 cajas @ 30€, formato ×5 → total=60€, stock=10, unit_price=60/10=6€/ud
+            const precioUnitarioNormalizado = stockASumar > 0
+                ? +(totalAlbaran / stockASumar).toFixed(4)
+                : item.precio;
+
+            // Insertar en precios_compra_diarios con precio UNITARIO normalizado
             await upsertCompraDiaria(client, {
                 ingredienteId: item.ingrediente_id,
                 fecha: item.fecha,
-                precioUnitario: item.precio,
-                cantidad: item.cantidad,
-                total,
+                precioUnitario: precioUnitarioNormalizado,
+                cantidad: stockASumar,
+                total: totalAlbaran,
                 restauranteId: req.restauranteId,
                 proveedorId
             });
@@ -1272,14 +1285,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             await updateProveedorPrecio(client, {
                 ingredienteId: item.ingrediente_id,
                 proveedorId,
-                precio: item.precio
+                precio: precioUnitarioNormalizado
             });
-
-            // Actualizar stock — formato_override indica cuántas unidades por formato eligió el usuario
-            // Si no eligió nada (NULL), el frontend muestra ×1 por defecto, así que usamos 1
-            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
-            const formato = parseFloat(item.formato_override) || 1;
-            const stockASumar = item.cantidad * formato;
 
             // 🛡️ Guardrail: reject absurd stock additions
             if (stockASumar > 10000) {
@@ -1340,7 +1347,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     continue;
                 }
 
-                const total = item.precio * item.cantidad;
+                const totalAlbaran = item.precio * item.cantidad;
 
                 // Resolver proveedor: texto OCR → proveedor_id, fallback a proveedor principal
                 const proveedorId = await resolveProveedorId(client, {
@@ -1349,13 +1356,24 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     restauranteId: req.restauranteId
                 });
 
-                // Insertar en precios_compra_diarios con proveedor
+                // Actualizar stock — formato_override indica cuántas unidades por formato eligió el usuario
+                // Si no eligió nada (NULL), el frontend muestra ×1 por defecto, así que usamos 1
+                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+                const formato = parseFloat(item.formato_override) || 1;
+                const stockASumar = item.cantidad * formato;
+
+                // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
+                const precioUnitarioNormalizado = stockASumar > 0
+                    ? +(totalAlbaran / stockASumar).toFixed(4)
+                    : item.precio;
+
+                // Insertar en precios_compra_diarios con precio UNITARIO normalizado
                 await upsertCompraDiaria(client, {
                     ingredienteId: item.ingrediente_id,
                     fecha: item.fecha,
-                    precioUnitario: item.precio,
-                    cantidad: item.cantidad,
-                    total,
+                    precioUnitario: precioUnitarioNormalizado,
+                    cantidad: stockASumar,
+                    total: totalAlbaran,
                     restauranteId: req.restauranteId,
                     proveedorId
                 });
@@ -1364,14 +1382,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 await updateProveedorPrecio(client, {
                     ingredienteId: item.ingrediente_id,
                     proveedorId,
-                    precio: item.precio
+                    precio: precioUnitarioNormalizado
                 });
-
-                // Actualizar stock — formato_override indica cuántas unidades por formato eligió el usuario
-                // Si no eligió nada (NULL), el frontend muestra ×1 por defecto, así que usamos 1
-                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
-                const formato = parseFloat(item.formato_override) || 1;
-                const stockASumar = item.cantidad * formato;
 
                 // 🛡️ Guardrail: skip absurd stock additions
                 if (stockASumar > 10000) {

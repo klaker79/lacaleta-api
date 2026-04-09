@@ -73,7 +73,7 @@ Every route that modifies `stock_actual` must follow these exact formulas:
 2. `precio_medio` — `precio / cantidad_por_formato` (configured price per unit)
 3. `precio / cantidad_por_formato` — fallback
 
-**WARNING:** `precio_medio_compra` may contain FORMAT prices (per caja/garrafa), not unit prices. Only use in backend calculations where the data is known to be normalized. The frontend memoized function intentionally uses `precio_medio` only.
+**NOTE:** As of 2026-04-09, both approve endpoints (single + batch) normalize `precio_unitario` to unit price before storing in `precios_compra_diarios`. Formula: `total_albaran / (cantidad × formato_override)`. This ensures `precio_medio_compra` is always a true unit price. Frontend uses `getIngredientUnitPrice()` from `cost-calculator.js` with priority: `precio_medio_compra > precio_medio > precio/cpf`.
 
 ### Food Cost Thresholds
 - **Food (comida):** ≤28% excellent, 29-33% target, 34-38% watch, >38% alert
