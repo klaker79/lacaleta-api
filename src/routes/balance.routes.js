@@ -1821,7 +1821,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             // Obtener ventas directamente de la tabla ventas (agrupadas por día y receta)
             const ventasDiarias = await pool.query(`
-            SELECT 
+            SELECT
                 DATE(v.fecha) as fecha,
                 r.id as receta_id,
                 r.nombre as receta,
@@ -1829,7 +1829,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 r.porciones,
                 SUM(v.cantidad) as cantidad_vendida,
                 AVG(v.precio_unitario) as precio_venta_unitario,
-                SUM(v.total) as total_ingresos
+                SUM(v.total) as total_ingresos,
+                SUM(v.cantidad * COALESCE(v.factor_variante, 1)) as cantidad_ponderada
             FROM ventas v
             JOIN recetas r ON v.receta_id = r.id
             WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
@@ -1944,8 +1945,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const totalIngresos = parseFloat(row.total_ingresos);
 
                 // Calcular coste real desde ingredientes de la receta (con rendimiento y porciones)
+                // 🔧 FIX: Usar cantidad_ponderada (suma de cantidad × factor_variante) para costes
+                // Ejemplo: 5 botellas (factor 1.0) + 10 copas (factor 0.2) = 5+2 = 7 unidades de coste
                 const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones);
-                const costeTotal = costePorUnidad * cantidadVendida;
+                const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
+                const costeTotal = costePorUnidad * cantidadPonderada;
                 const beneficio = totalIngresos - costeTotal;
 
                 if (!recetasData[row.receta]) {
