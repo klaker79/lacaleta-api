@@ -75,6 +75,14 @@ Every route that modifies `stock_actual` must follow these exact formulas:
 
 **NOTE:** As of 2026-04-09, both approve endpoints (single + batch) normalize `precio_unitario` to unit price before storing in `precios_compra_diarios`. Formula: `total_albaran / (cantidad × formato_override)`. This ensures `precio_medio_compra` is always a true unit price. Frontend uses `getIngredientUnitPrice()` from `cost-calculator.js` with priority: `precio_medio_compra > precio_medio > precio/cpf`.
 
+**⛔ STABILITY WARNING (baseline 2026-04-09):**
+Full audit verified frontend (10 tabs), backend (all routes), and chat (n8n) are consistent.
+DO NOT change price normalization in approve endpoints without verifying:
+- Frontend getIngredientUnitPrice() still works with the data
+- P&L monthly/summary factor_variante via cantidad_ponderada still correct
+- Chat n8n query for precio_unitario_real still returns correct values
+- All cost calculations across balance, sales, analysis, intelligence routes match
+
 ### Food Cost Thresholds
 - **Food (comida):** ≤28% excellent, 29-33% target, 34-38% watch, >38% alert
 - **Wine (vinos):** target 45% — DO NOT apply food thresholds to wine
