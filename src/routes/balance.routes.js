@@ -1307,6 +1307,35 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             await client.query('COMMIT');
             log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id, proveedorId });
+
+            // ── InvoiceFlow webhook (fire-and-forget, NEVER blocks approval) ──
+            const invoiceFlowUrl = process.env.INVOICEFLOW_WEBHOOK_URL;
+            if (invoiceFlowUrl) {
+                const totalAlbaranFinal = item.precio * item.cantidad;
+                fetch(invoiceFlowUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Webhook-Secret': process.env.INVOICEFLOW_WEBHOOK_SECRET || ''
+                    },
+                    body: JSON.stringify({
+                        webhook_user_id: process.env.INVOICEFLOW_USER_ID || '',
+                        reference: `ALB-${item.batch_id || item.id}`,
+                        delivery_date: item.fecha ? new Date(item.fecha).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                        supplier_name: item.proveedor || '',
+                        supplier_cif: null,
+                        description: `${item.ingrediente_nombre || 'Producto'} x${item.cantidad}`,
+                        category: 'alimentacion',
+                        subtotal: Math.round(totalAlbaranFinal * 100) / 100,
+                        vat_rate: 0,
+                        total: Math.round(totalAlbaranFinal * 100) / 100,
+                        currency: 'EUR'
+                    })
+                }).catch(err => {
+                    log('warn', 'InvoiceFlow webhook failed (non-blocking)', { error: err.message, itemId: item.id });
+                });
+            }
+
             res.json({ success: true, message: 'Compra aprobada y registrada' });
         } catch (err) {
             await client.query('ROLLBACK');
@@ -1467,6 +1496,38 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     body: JSON.stringify({ rows })
                 }).catch(err => {
                     log('warn', 'Error enviando batch aprobado a n8n webhook (no-blocking)', { error: err.message });
+                });
+            }
+
+            // ── InvoiceFlow webhook (fire-and-forget, NEVER blocks approval) ──
+            const invoiceFlowUrl = process.env.INVOICEFLOW_WEBHOOK_URL;
+            if (invoiceFlowUrl && resultados.aprobados > 0) {
+                const approvedForInvoice = itemsResult.rows.filter(i => i.ingrediente_id);
+                const proveedorBatch = approvedForInvoice.find(i => i.proveedor)?.proveedor || '';
+                const fechaBatch = approvedForInvoice[0]?.fecha;
+                const totalBatch = approvedForInvoice.reduce((sum, i) => sum + (i.precio * i.cantidad), 0);
+
+                fetch(invoiceFlowUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Webhook-Secret': process.env.INVOICEFLOW_WEBHOOK_SECRET || ''
+                    },
+                    body: JSON.stringify({
+                        webhook_user_id: process.env.INVOICEFLOW_USER_ID || '',
+                        reference: `ALB-BATCH-${batchId}`,
+                        delivery_date: fechaBatch ? new Date(fechaBatch).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                        supplier_name: proveedorBatch,
+                        supplier_cif: null,
+                        description: `Albarán ${proveedorBatch} - ${approvedForInvoice.length} productos`,
+                        category: 'alimentacion',
+                        subtotal: Math.round(totalBatch * 100) / 100,
+                        vat_rate: 0,
+                        total: Math.round(totalBatch * 100) / 100,
+                        currency: 'EUR'
+                    })
+                }).catch(err => {
+                    log('warn', 'InvoiceFlow webhook failed (non-blocking)', { error: err.message, batchId });
                 });
             }
 
