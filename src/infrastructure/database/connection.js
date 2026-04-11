@@ -11,9 +11,9 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'lacaleta',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000
+    max: parseInt(process.env.DB_POOL_MAX_SECONDARY) || 20,
+    idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_MS) || 10000,
+    connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECT_MS) || 10000
 });
 
 // Log de conexión

@@ -31,9 +31,9 @@ const config = {
         name: process.env.DB_NAME,
         user: process.env.DB_USER,
         password: process.env.DB_PASSWORD,
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
+        max: parseInt(process.env.DB_POOL_MAX) || 40,
+        idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_MS) || 10000,
+        connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECT_MS) || 10000,
         keepAlive: true,
         keepAliveInitialDelayMillis: 10000
     },
