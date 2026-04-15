@@ -144,6 +144,50 @@ module.exports = function (pool) {
 
     // ========== RECETAS ==========
     // ✅ PRODUCCIÓN: Rutas inline activas. Controllers deshabilitados.
+
+    /**
+     * Valida que todos los ingredientes de una receta existen, pertenecen al tenant
+     * y no están borrados. Soporta subrecetas (ingredienteId >= 100000). Devuelve
+     * { valid: true } o { valid: false, error, details }.
+     */
+    async function validarIngredientesReceta(items, restauranteId) {
+        if (!Array.isArray(items) || items.length === 0) return { valid: true };
+        const ingredienteIds = new Set();
+        const recetaIds = new Set();
+        for (const it of items) {
+            const rawId = it.ingredienteId ?? it.ingrediente_id ?? it.id;
+            const id = parseInt(rawId);
+            if (!Number.isFinite(id) || id <= 0) {
+                return { valid: false, error: 'Ingrediente sin ID válido en la receta' };
+            }
+            if (id >= 100000) recetaIds.add(id - 100000);
+            else ingredienteIds.add(id);
+        }
+        if (ingredienteIds.size > 0) {
+            const r = await pool.query(
+                'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
+                [Array.from(ingredienteIds), restauranteId]
+            );
+            const encontrados = new Set(r.rows.map(row => row.id));
+            const faltan = [...ingredienteIds].filter(id => !encontrados.has(id));
+            if (faltan.length > 0) {
+                return { valid: false, error: 'Hay ingredientes inexistentes, de otro restaurante o borrados', details: { ingredientes: faltan } };
+            }
+        }
+        if (recetaIds.size > 0) {
+            const r = await pool.query(
+                'SELECT id FROM recetas WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
+                [Array.from(recetaIds), restauranteId]
+            );
+            const encontradas = new Set(r.rows.map(row => row.id));
+            const faltan = [...recetaIds].filter(id => !encontradas.has(id));
+            if (faltan.length > 0) {
+                return { valid: false, error: 'Subrecetas inexistentes, de otro restaurante o borradas', details: { subrecetas: faltan } };
+            }
+        }
+        return { valid: true };
+    }
+
     router.get('/recipes', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query('SELECT * FROM recetas WHERE restaurante_id=$1 AND deleted_at IS NULL ORDER BY id', [req.restauranteId]);
@@ -160,6 +204,12 @@ module.exports = function (pool) {
 
             if (!nombre || !nombre.trim()) {
                 return res.status(400).json({ error: 'El nombre de la receta es requerido' });
+            }
+
+            // 🔒 Validación: cada ingrediente/subreceta debe existir y ser del mismo tenant
+            const vIngs = await validarIngredientesReceta(ingredientes, req.restauranteId);
+            if (!vIngs.valid) {
+                return res.status(400).json({ error: vIngs.error, details: vIngs.details });
             }
 
             const result = await pool.query(
@@ -179,11 +229,22 @@ module.exports = function (pool) {
             if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
             const id = idCheck.value;
             const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
+
+            // 🔒 Validación: cada ingrediente/subreceta debe existir y ser del mismo tenant
+            const vIngs = await validarIngredientesReceta(ingredientes, req.restauranteId);
+            if (!vIngs.valid) {
+                return res.status(400).json({ error: vIngs.error, details: vIngs.details });
+            }
+
+            // 🔒 deleted_at IS NULL: no revivir recetas borradas via PUT
             const result = await pool.query(
-                'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6 WHERE id=$7 AND restaurante_id=$8 RETURNING *',
+                'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6 WHERE id=$7 AND restaurante_id=$8 AND deleted_at IS NULL RETURNING *',
                 [sanitizeString(nombre), sanitizeString(categoria), validatePrecio(precio_venta), validateNumber(porciones, 1, 1, 1000), JSON.stringify(ingredientes || []), sanitizeString(codigo) || null, id, req.restauranteId]
             );
-            res.json(result.rows[0] || {});
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Receta no encontrada' });
+            }
+            res.json(result.rows[0]);
         } catch (err) {
             log('error', 'Error actualizando receta', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
