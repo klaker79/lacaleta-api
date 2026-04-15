@@ -125,6 +125,12 @@ class SupplierController {
                 message: 'Proveedor eliminado'
             });
         } catch (error) {
+            if (error?.code === 'SUPPLIER_HAS_DEPENDENCIES') {
+                return res.status(409).json({
+                    success: false,
+                    error: { code: error.code, message: error.message, details: error.details }
+                });
+            }
             next(error);
         }
     }

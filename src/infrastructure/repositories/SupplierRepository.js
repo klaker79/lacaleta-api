@@ -144,11 +144,33 @@ class SupplierRepository {
     }
 
     /**
-     * Soft delete de un proveedor
+     * Soft delete de un proveedor. Bloquea si aún hay ingredientes activos apuntando al
+     * proveedor o pedidos pendientes — evita dejar huérfanos y referencias fantasma
+     * en Pedidos/Diario.
      */
     async delete(id, restaurantId) {
+        const deps = await this.pool.query(
+            `SELECT
+                (SELECT COUNT(*) FROM ingredientes
+                   WHERE proveedor_id = $1 AND restaurante_id = $2 AND deleted_at IS NULL) AS ingredientes_activos,
+                (SELECT COUNT(*) FROM pedidos
+                   WHERE proveedor_id = $1 AND restaurante_id = $2 AND deleted_at IS NULL AND estado = 'pendiente') AS pedidos_pendientes`,
+            [id, restaurantId]
+        );
+        const ingredientesActivos = parseInt(deps.rows[0]?.ingredientes_activos) || 0;
+        const pedidosPendientes = parseInt(deps.rows[0]?.pedidos_pendientes) || 0;
+        if (ingredientesActivos > 0 || pedidosPendientes > 0) {
+            const err = new Error(
+                `No se puede eliminar el proveedor: ${ingredientesActivos} ingrediente(s) activo(s) y ${pedidosPendientes} pedido(s) pendiente(s) lo referencian`
+            );
+            err.code = 'SUPPLIER_HAS_DEPENDENCIES';
+            err.status = 409;
+            err.details = { ingredientesActivos, pedidosPendientes };
+            throw err;
+        }
+
         const query = `
-            UPDATE proveedores 
+            UPDATE proveedores
             SET deleted_at = NOW()
             WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL
             RETURNING *
