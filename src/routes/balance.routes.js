@@ -137,6 +137,20 @@ async function checkDuplicateAlbaran(pool, restauranteId, ingredientIds, fecha) 
 module.exports = function (pool) {
     const router = Router();
 
+    // 🔒 Middleware para bloquear endpoints OCR cuando OCR_ENABLED !== 'true'
+    // Por defecto (env var no definida o false) → OCR DESACTIVADO en producción
+    // En entorno de test (NODE_ENV=test) siempre dejamos pasar para que los tests funcionen
+    // Para reactivar OCR en producción: poner OCR_ENABLED=true en env vars del backend
+    const ocrDisabledGuard = (req, res, next) => {
+        if (process.env.OCR_ENABLED === 'true' || process.env.NODE_ENV === 'test') return next();
+        log('warn', 'Intento de uso de endpoint OCR con OCR_ENABLED=false', {
+            method: req.method, path: req.path, ip: req.ip
+        });
+        return res.status(410).json({
+            error: 'OCR purchases are disabled. Use manual orders via /api/orders.'
+        });
+    };
+
     // ========== BALANCE Y ESTADÍSTICAS ==========
     router.get('/balance/mes', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
@@ -783,7 +797,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     // ==========================================
 
     // POST: n8n envía compras aquí (van a cola de revisión, NO directamente al diario)
-    router.post('/purchases/pending', authMiddleware, async (req, res) => {
+    router.post('/purchases/pending', ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const { compras, proveedor: proveedorAlbaran } = req.body;
 
@@ -1133,7 +1147,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // GET: Listar compras pendientes
-    router.get('/purchases/pending', authMiddleware, async (req, res) => {
+    router.get('/purchases/pending', ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const { estado } = req.query;
             let query = `
@@ -1171,7 +1185,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // PATCH: Actualizar formato_override de un item pendiente + recalcular precio
-    router.patch('/purchases/pending/:id/formato', authMiddleware, async (req, res) => {
+    router.patch('/purchases/pending/:id/formato', ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const { formato_override } = req.body;
             if (formato_override === undefined || formato_override === null || Number(formato_override) <= 0) {
@@ -1225,7 +1239,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // POST: Aprobar un item pendiente → insertar en precios_compra_diarios + actualizar stock
-    router.post('/purchases/pending/:id/approve', authMiddleware, async (req, res) => {
+    router.post('/purchases/pending/:id/approve', ocrDisabledGuard, authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1347,7 +1361,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // POST: Aprobar todos los items de un batch
-    router.post('/purchases/pending/approve-batch', authMiddleware, requireAdmin, async (req, res) => {
+    router.post('/purchases/pending/approve-batch', ocrDisabledGuard, authMiddleware, requireAdmin, async (req, res) => {
         const client = await pool.connect();
         try {
             const { batchId } = req.body;
@@ -1542,7 +1556,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // PUT: Editar un item pendiente (cambiar ingrediente_id, precio, cantidad)
-    router.put('/purchases/pending/:id', authMiddleware, async (req, res) => {
+    router.put('/purchases/pending/:id', ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const { ingrediente_id, precio, cantidad, fecha, proveedor } = req.body;
 
@@ -1608,7 +1622,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // DELETE: Rechazar/eliminar un item pendiente
-    router.delete('/purchases/pending/:id', authMiddleware, async (req, res) => {
+    router.delete('/purchases/pending/:id', ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(
                 "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado IN ('pendiente', 'aprobado') RETURNING id",
@@ -1652,7 +1666,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // Registrar compras diarias (bulk - para n8n, LEGACY — mantenido por compatibilidad)
-    router.post('/daily/purchases/bulk', authMiddleware, async (req, res) => {
+    router.post('/daily/purchases/bulk', ocrDisabledGuard, authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
             const { compras } = req.body;
@@ -1861,7 +1875,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             // Obtener días del mes con compras (incluye proveedor con fallback a proveedor principal del ingrediente)
             const comprasDiarias = await pool.query(`
-            SELECT 
+            SELECT
                 p.fecha,
                 i.id as ingrediente_id,
                 i.nombre as ingrediente,
@@ -1875,8 +1889,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
             LEFT JOIN ingredientes_proveedores ip ON ip.ingrediente_id = p.ingrediente_id AND ip.es_proveedor_principal = true
             LEFT JOIN proveedores pr_fallback ON ip.proveedor_id = pr_fallback.id AND p.proveedor_id IS NULL
+            LEFT JOIN pedidos ped ON p.pedido_id = ped.id
             WHERE p.restaurante_id = $1
               AND p.fecha >= $2 AND p.fecha < $3
+              AND i.deleted_at IS NULL
+              AND (p.pedido_id IS NULL OR ped.deleted_at IS NULL)
             ORDER BY p.fecha, i.nombre
         `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
 
