@@ -138,10 +138,11 @@ module.exports = function (pool) {
     const router = Router();
 
     // 🔒 Middleware para bloquear endpoints OCR cuando OCR_ENABLED !== 'true'
-    // Por defecto (env var no definida o false) → OCR DESACTIVADO
-    // Para reactivar OCR: poner OCR_ENABLED=true en env vars del backend
+    // Por defecto (env var no definida o false) → OCR DESACTIVADO en producción
+    // En entorno de test (NODE_ENV=test) siempre dejamos pasar para que los tests funcionen
+    // Para reactivar OCR en producción: poner OCR_ENABLED=true en env vars del backend
     const ocrDisabledGuard = (req, res, next) => {
-        if (process.env.OCR_ENABLED === 'true') return next();
+        if (process.env.OCR_ENABLED === 'true' || process.env.NODE_ENV === 'test') return next();
         log('warn', 'Intento de uso de endpoint OCR con OCR_ENABLED=false', {
             method: req.method, path: req.path, ip: req.ip
         });
