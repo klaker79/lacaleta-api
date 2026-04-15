@@ -146,8 +146,27 @@ module.exports = function (pool) {
                     log('info', 'Venta con variante', { varianteId, precio: precioUnitario, factor: factorVariante });
                 }
             } else if (precioVariante && precioVariante > 0) {
-                // Fallback: usar precio enviado desde frontend
+                // Fallback defensivo: el frontend mandó un precio distinto al de la receta
+                // pero sin varianteId. Intentamos encontrar la variante por precio_venta
+                // para aplicar su factor (copa 0.2 vs botella 1.0). Si no la encontramos
+                // conservamos factor=1 pero registramos warning: vender copa sin varianteId
+                // descontaría stock como botella → bug potencial.
                 precioUnitario = precioVariante;
+                const probableVariante = await client.query(
+                    'SELECT id, factor FROM recetas_variantes WHERE receta_id = $1 AND restaurante_id = $2 AND ABS(precio_venta - $3) < 0.01 LIMIT 1',
+                    [recetaId, req.restauranteId, precioVariante]
+                );
+                if (probableVariante.rows.length > 0) {
+                    factorVariante = parseFloat(probableVariante.rows[0].factor) || 1;
+                    log('info', 'Venta con precio de variante (sin id) — factor inferido', {
+                        recetaId, precio: precioUnitario, factor: factorVariante,
+                        varianteInferida: probableVariante.rows[0].id
+                    });
+                } else if (Math.abs(precioVariante - parseFloat(receta.precio_venta)) > 0.01) {
+                    log('warn', 'Venta con precioVariante sin varianteId y sin match — factor=1 aplicado', {
+                        recetaId, precioEnviado: precioVariante, precioReceta: receta.precio_venta
+                    });
+                }
             }
 
             const total = precioUnitario * cantidadValidada;
