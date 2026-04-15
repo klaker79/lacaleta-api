@@ -94,6 +94,8 @@ module.exports = function (pool) {
                 const fechaCompra = fecha ? new Date(fecha) : new Date();
 
                 for (const item of ingredientes) {
+                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
+                    if (item.tipo === 'ajuste') continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
@@ -161,6 +163,8 @@ module.exports = function (pool) {
                 const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
 
                 for (const item of ingredientes) {
+                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
+                    if (item.tipo === 'ajuste') continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
@@ -252,6 +256,8 @@ module.exports = function (pool) {
                     // Usar UPDATE-subtract + DELETE-if-≤0 como fallback
                     log('warn', 'Pedido sin filas con pedido_id, usando fallback legacy', { pedidoId: pedido.id });
                     for (const item of ingredientes) {
+                        // 🔒 Saltar items de tipo 'ajuste' (no están en el Diario)
+                        if (item.tipo === 'ajuste') continue;
                         const ingId = item.ingredienteId || item.ingrediente_id;
                         const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
                         const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
