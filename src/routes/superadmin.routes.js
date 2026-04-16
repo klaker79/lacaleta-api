@@ -250,11 +250,6 @@ module.exports = function (pool, config = {}) {
                 return res.status(400).json({ error: 'Nombre y email requeridos' });
             }
 
-            const existing = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
-            if (existing.rows.length > 0) {
-                return res.status(400).json({ error: 'Email ya registrado' });
-            }
-
             await client.query('BEGIN');
 
             const validPlan = ['trial', 'starter', 'profesional', 'premium'].includes(plan) ? plan : 'trial';
@@ -268,25 +263,35 @@ module.exports = function (pool, config = {}) {
             );
             const restauranteId = restResult.rows[0].id;
 
-            // Create admin user with temp password
-            const tempPassword = crypto.randomBytes(8).toString('hex');
-            const passwordHash = await bcrypt.hash(tempPassword, 10);
+            // Si el usuario ya existe, vincularlo al nuevo restaurante sin crear uno nuevo.
+            // Esto permite que un owner tenga N restaurantes bajo la misma cuenta.
+            const existing = await client.query('SELECT id, nombre, email FROM usuarios WHERE email = $1', [email]);
+            let userId;
+            let tempPassword = null;
 
-            const userResult = await client.query(
-                `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified)
-                 VALUES ($1, $2, $3, $4, 'admin', TRUE) RETURNING id`,
-                [restauranteId, email, passwordHash, sanitizeString(nombre)]
-            );
+            if (existing.rows.length > 0) {
+                userId = existing.rows[0].id;
+                log('info', 'Usuario existente vinculado a nuevo restaurante desde superadmin', { email, restauranteId });
+            } else {
+                tempPassword = crypto.randomBytes(8).toString('hex');
+                const passwordHash = await bcrypt.hash(tempPassword, 10);
+                const userResult = await client.query(
+                    `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified)
+                     VALUES ($1, $2, $3, $4, 'admin', TRUE) RETURNING id`,
+                    [restauranteId, email, passwordHash, sanitizeString(nombre)]
+                );
+                userId = userResult.rows[0].id;
+            }
 
             // Multi-restaurant junction table
             await client.query(
-                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
-                [userResult.rows[0].id, restauranteId, 'admin']
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+                [userId, restauranteId, 'admin']
             );
 
             await client.query('COMMIT');
 
-            log('info', 'Superadmin creó restaurante', { admin: req.user.email, restauranteId, nombre });
+            log('info', 'Superadmin creó restaurante', { admin: req.user.email, restauranteId, nombre, linkedExisting: !!existing.rows.length });
             res.status(201).json({ id: restauranteId, nombre, email, tempPassword, plan: validPlan });
         } catch (err) {
             await client.query('ROLLBACK');
