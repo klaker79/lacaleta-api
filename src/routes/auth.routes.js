@@ -845,8 +845,15 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     // ========== TEAM MANAGEMENT ==========
     router.get('/team', authMiddleware, async (req, res) => {
         try {
+            // Lee de la junction table (fuente de verdad) en vez de usuarios.restaurante_id
+            // (legacy). Así aparecen TODOS los usuarios vinculados, incluidos los que
+            // fueron añadidos a este restaurante como segundo/tercer restaurante.
             const result = await pool.query(
-                'SELECT id, nombre, email, rol, created_at FROM usuarios WHERE restaurante_id = $1 ORDER BY created_at DESC',
+                `SELECT u.id, u.nombre, u.email, ur.rol, ur.created_at
+                 FROM usuario_restaurantes ur
+                 JOIN usuarios u ON u.id = ur.usuario_id
+                 WHERE ur.restaurante_id = $1
+                 ORDER BY ur.created_at DESC`,
                 [req.restauranteId]
             );
             res.json(result.rows);
@@ -891,20 +898,46 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(403).json({ error: `Has alcanzado el límite de ${max_users || 5} usuarios para tu plan. Mejora tu plan para añadir más.` });
             }
 
-            const check = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
-            if (check.rows.length > 0) {
-                return res.status(400).json({ error: 'Este email ya está registrado' });
-            }
-
-            const passwordHash = await bcrypt.hash(password, 10);
             const allowedRoles = ['usuario', 'admin'];
             const nuevoRol = allowedRoles.includes(rol) ? rol : 'usuario';
+
+            const check = await pool.query('SELECT id, nombre, email FROM usuarios WHERE email = $1', [email]);
+
+            if (check.rows.length > 0) {
+                // Usuario YA existe → vincularlo a este restaurante sin crear usuario nuevo.
+                // Esto permite que un usuario pertenezca a múltiples restaurantes.
+                const existingUser = check.rows[0];
+
+                // Comprobar que no esté ya vinculado a este restaurante
+                const yaVinculado = await pool.query(
+                    'SELECT id FROM usuario_restaurantes WHERE usuario_id = $1 AND restaurante_id = $2',
+                    [existingUser.id, req.restauranteId]
+                );
+                if (yaVinculado.rows.length > 0) {
+                    return res.status(400).json({ error: 'Este usuario ya pertenece a este restaurante' });
+                }
+
+                await pool.query(
+                    'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
+                    [existingUser.id, req.restauranteId, nuevoRol]
+                );
+
+                log('info', 'Usuario existente vinculado a restaurante', {
+                    admin: req.user.email, linkedUser: email, restauranteId: req.restauranteId, rol: nuevoRol
+                });
+                return res.json({ id: existingUser.id, nombre: existingUser.nombre, email: existingUser.email, rol: nuevoRol, linked: true });
+            }
+
+            // Usuario NO existe → crear nuevo (flujo original)
+            if (!password) {
+                return res.status(400).json({ error: 'Password requerido para usuarios nuevos' });
+            }
+            const passwordHash = await bcrypt.hash(password, 10);
             const result = await pool.query(
                 'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
                 [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
             );
 
-            // Multi-restaurant: add to junction table
             await pool.query(
                 'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
                 [result.rows[0].id, req.restauranteId, nuevoRol]
@@ -939,14 +972,9 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             );
 
             if (otherRest.rows[0].total === 0) {
-                // No other restaurants — delete user entirely
-                const result = await pool.query(
-                    'DELETE FROM usuarios WHERE id = $1 AND restaurante_id = $2 RETURNING id',
-                    [userIdToDelete, req.restauranteId]
-                );
-                if (result.rows.length === 0) {
-                    return res.status(404).json({ error: 'Usuario no encontrado en tu equipo' });
-                }
+                // No other restaurants — delete user entirely (por id, sin depender de
+                // usuarios.restaurante_id que puede apuntar a otro restaurante)
+                await pool.query('DELETE FROM usuarios WHERE id = $1', [userIdToDelete]);
             }
 
             log('info', 'Usuario eliminado del equipo', { admin: req.user.email, deletedId: userIdToDelete });
