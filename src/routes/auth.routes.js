@@ -351,7 +351,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, plan, billing } = req.body;
+            const { nombre, plan, billing, moneda } = req.body;
             if (!nombre || !nombre.trim()) {
                 return res.status(400).json({ error: 'Nombre del restaurante requerido' });
             }
@@ -391,10 +391,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             );
 
             // Create restaurant with pending_payment status
+            const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restResult = await client.query(
-                `INSERT INTO restaurantes (nombre, email, plan, plan_status, max_users)
-                 VALUES ($1, $2, $3, 'pending_payment', $4) RETURNING id`,
-                [sanitizeString(nombre.trim()), req.user.email, plan, PLAN_MAX_USERS[plan] || 2]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, max_users, moneda)
+                 VALUES ($1, $2, $3, 'pending_payment', $4, $5) RETURNING id`,
+                [sanitizeString(nombre.trim()), req.user.email, plan, PLAN_MAX_USERS[plan] || 2, safeMoneda]
             );
             const restauranteId = restResult.rows[0].id;
 
@@ -513,7 +514,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     router.post('/auth/register', authLimiter, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, email, password } = req.body;
+            const { nombre, email, password, moneda } = req.body;
 
             if (!nombre || !email || !password) {
                 return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
@@ -537,10 +538,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             // Create restaurant with 14-day trial
             const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+            const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restauranteResult = await client.query(
-                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users) 
-                 VALUES ($1, $2, 'trial', 'trialing', $3, 5) RETURNING id`,
-                [sanitizeString(nombre), email, trialEndsAt]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users, moneda)
+                 VALUES ($1, $2, 'trial', 'trialing', $3, 5, $4) RETURNING id`,
+                [sanitizeString(nombre), email, trialEndsAt, safeMoneda]
             );
             const restauranteId = restauranteResult.rows[0].id;
 

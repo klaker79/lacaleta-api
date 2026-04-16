@@ -148,7 +148,7 @@ module.exports = function (pool, config = {}) {
                 return res.status(400).json({ error: 'ID de restaurante inválido' });
             }
 
-            const { plan, plan_status, max_users } = req.body;
+            const { plan, plan_status, max_users, moneda } = req.body;
             const updates = [];
             const params = [];
             let paramIndex = 1;
@@ -182,6 +182,11 @@ module.exports = function (pool, config = {}) {
                 const maxUsersVal = validateNumber(max_users, 2, 1, 999);
                 updates.push(`max_users = $${paramIndex++}`);
                 params.push(maxUsersVal);
+            }
+            if (moneda !== undefined) {
+                const safeMoneda = sanitizeString(String(moneda).slice(0, 10)) || '€';
+                updates.push(`moneda = $${paramIndex++}`);
+                params.push(safeMoneda);
             }
 
             if (updates.length === 0) {
@@ -240,7 +245,7 @@ module.exports = function (pool, config = {}) {
     router.post('/superadmin/restaurants', async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, email, plan } = req.body;
+            const { nombre, email, plan, moneda } = req.body;
             if (!nombre || !email) {
                 return res.status(400).json({ error: 'Nombre y email requeridos' });
             }
@@ -255,10 +260,11 @@ module.exports = function (pool, config = {}) {
             const validPlan = ['trial', 'starter', 'profesional', 'premium'].includes(plan) ? plan : 'trial';
             const trialEndsAt = validPlan === 'trial' ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null;
 
+            const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restResult = await client.query(
-                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users)
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-                [sanitizeString(nombre), email, validPlan, validPlan === 'trial' ? 'trialing' : 'active', trialEndsAt, PLAN_MAX_USERS[validPlan] || 5]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users, moneda)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [sanitizeString(nombre), email, validPlan, validPlan === 'trial' ? 'trialing' : 'active', trialEndsAt, PLAN_MAX_USERS[validPlan] || 5, safeMoneda]
             );
             const restauranteId = restResult.rows[0].id;
 
