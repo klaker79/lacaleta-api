@@ -302,6 +302,28 @@ module.exports = function (pool, config = {}) {
         }
     });
 
+    // ========== RESET USER PASSWORD ==========
+    router.post('/superadmin/users/:id/reset-password', async (req, res) => {
+        try {
+            const userId = parseInt(req.params.id);
+            if (isNaN(userId) || userId <= 0) {
+                return res.status(400).json({ error: 'ID inválido' });
+            }
+            const user = await pool.query('SELECT id, email, nombre FROM usuarios WHERE id = $1', [userId]);
+            if (user.rows.length === 0) {
+                return res.status(404).json({ error: 'Usuario no encontrado' });
+            }
+            const newPassword = crypto.randomBytes(8).toString('hex');
+            const hash = await bcrypt.hash(newPassword, 10);
+            await pool.query('UPDATE usuarios SET password_hash = $1 WHERE id = $2', [hash, userId]);
+            log('info', 'Superadmin reseteó password', { admin: req.user.email, targetUser: user.rows[0].email });
+            res.json({ success: true, email: user.rows[0].email, tempPassword: newPassword });
+        } catch (err) {
+            log('error', 'Error reseteando password', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     // ========== SUSPEND RESTAURANT ==========
     router.delete('/superadmin/restaurants/:id', async (req, res) => {
         try {
