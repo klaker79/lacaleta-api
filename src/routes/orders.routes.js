@@ -302,6 +302,10 @@ module.exports = function (pool) {
 
                     if (stockARevertir > 0 && ingId) {
                         await client.query(
+                            'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            [ingId, req.restauranteId]
+                        );
+                        await client.query(
                             `UPDATE ingredientes
                          SET stock_actual = GREATEST(0, stock_actual - $1),
                              ultima_actualizacion_stock = NOW()
