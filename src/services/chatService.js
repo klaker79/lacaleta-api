@@ -652,7 +652,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
 // Runs the agent loop: ask model → execute tools it requests → loop until
 // it produces a final text response. Returns plain text (preserves n8n contract).
 
-async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '' }) {
+async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€' }) {
     if (!client) {
         throw new Error('Claude API not configured: ANTHROPIC_API_KEY missing');
     }
@@ -672,7 +672,7 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         },
         {
             type: 'text',
-            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}`
+            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
         }
     ];
 

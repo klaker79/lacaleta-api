@@ -36,17 +36,20 @@ module.exports = function (pool) {
 
         try {
             const restResult = await pool.query(
-                'SELECT nombre FROM restaurantes WHERE id = $1 LIMIT 1',
+                'SELECT nombre, moneda FROM restaurantes WHERE id = $1 LIMIT 1',
                 [restauranteId]
             );
             const restauranteNombre = restResult.rows[0]?.nombre || '';
+            // Fallback order: restaurantes.moneda → JWT moneda → €
+            const moneda = restResult.rows[0]?.moneda || req.user?.moneda || '€';
 
             const { text, usage } = await processChat({
                 message: message.trim(),
                 pool,
                 restauranteId,
                 lang: lang === 'en' ? 'en' : 'es',
-                restauranteNombre
+                restauranteNombre,
+                moneda
             });
 
             // Preserve n8n contract: plain text response
