@@ -52,7 +52,8 @@ Soy tu Chef Ejecutivo y CFO virtual. Gestiono costes, recetas, inventario y oper
 ═══════════════════════════════════════════════════════════
 🔧 HERRAMIENTAS (usar SIEMPRE antes de responder)
 ═══════════════════════════════════════════════════════════
-- obtener_ingredientes → Lista con precios reales (precio_unitario_real), stock y rendimiento
+- obtener_ingredientes → Lista detallada con precios reales (precio_unitario_real), stock y rendimiento
+- resumen_inventario → Números AGREGADOS del inventario (valor total, nº ingredientes con stock, sin stock, stock bajo, activos/inactivos). USA ESTA para preguntas de "cuánto vale", "cuántos tengo". NO sumes tú sobre obtener_ingredientes.
 - obtener_recetas → Recetas Y VINOS con precio venta
 - obtener_ventas → Historial ventas (últimas 300)
 - obtener_gastos → Gastos fijos mensuales
@@ -221,6 +222,11 @@ const TOOLS = [
         input_schema: { type: 'object', properties: {}, required: [] }
     },
     {
+        name: 'resumen_inventario',
+        description: 'Devuelve números agregados y EXACTOS del inventario (SQL SUM/COUNT hecho en base de datos, NO suma en JS). Usa esta tool SIEMPRE que el usuario pregunte por "cuánto vale mi inventario", "cuántos ingredientes tengo", "cuántos con stock", "cuántos sin stock", "cuántos stock bajo". Los números coinciden exactamente con el dashboard. NUNCA intentes sumar manualmente los resultados de obtener_ingredientes para estas preguntas.',
+        input_schema: { type: 'object', properties: {}, required: [] }
+    },
+    {
         name: 'obtener_recetas',
         description: 'Lista todas las recetas y vinos del restaurante con su precio de venta, porciones e ingredientes.',
         input_schema: { type: 'object', properties: {}, required: [] }
@@ -376,6 +382,33 @@ async function runTool(name, pool, restauranteId) {
                 WHERE h.restaurante_id = $1
                 ORDER BY e.nombre, h.dia_semana
             `, [restauranteId])).rows;
+
+        case 'resumen_inventario':
+            // Aggregated numbers matching the dashboard formulas exactly.
+            // The model must NOT sum over obtener_ingredientes to answer
+            // these questions — aritmética de lista larga es imprecisa.
+            return (await pool.query(`
+                SELECT
+                    COUNT(*) FILTER (WHERE stock_actual > 0) AS items_con_stock,
+                    ROUND(COALESCE(SUM(
+                        CASE WHEN stock_actual > 0 THEN
+                            stock_actual * CASE
+                                WHEN cantidad_por_formato IS NOT NULL AND cantidad_por_formato > 0
+                                THEN precio / cantidad_por_formato
+                                ELSE precio
+                            END
+                        ELSE 0 END
+                    ), 0)::numeric, 2) AS valor_stock_total,
+                    COUNT(*) FILTER (WHERE activo IS NULL OR activo = TRUE) AS ingredientes_activos,
+                    COUNT(*) FILTER (WHERE activo = FALSE) AS ingredientes_inactivos,
+                    COUNT(*) FILTER (WHERE stock_actual = 0) AS ingredientes_sin_stock,
+                    COUNT(*) FILTER (
+                        WHERE stock_minimo > 0 AND stock_actual <= stock_minimo
+                    ) AS ingredientes_stock_bajo_por_minimo,
+                    COUNT(*) AS total_ingredientes
+                FROM ingredientes
+                WHERE restaurante_id = $1 AND deleted_at IS NULL
+            `, [restauranteId])).rows[0];
 
         case 'stock_critico':
             return (await pool.query(`
