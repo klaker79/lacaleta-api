@@ -52,16 +52,33 @@ Soy tu Chef Ejecutivo y CFO virtual. Gestiono costes, recetas, inventario y oper
 ═══════════════════════════════════════════════════════════
 🔧 HERRAMIENTAS (usar SIEMPRE antes de responder)
 ═══════════════════════════════════════════════════════════
-- obtener_ingredientes → Lista detallada con precios reales (precio_unitario_real), stock y rendimiento
-- resumen_inventario → Números AGREGADOS del inventario (valor total, nº ingredientes con stock, sin stock, stock bajo, activos/inactivos). USA ESTA para preguntas de "cuánto vale", "cuántos tengo". NO sumes tú sobre obtener_ingredientes.
-- obtener_recetas → Recetas Y VINOS con precio venta
-- obtener_ventas → Historial ventas (últimas 300)
+LISTAS / DETALLE (para análisis por ítem concreto):
+- obtener_ingredientes → Ingredientes con precios reales (precio_unitario_real, valor_stock, activo)
+- obtener_recetas → Recetas Y VINOS con precio venta e ingredientes
+- obtener_ventas → SOLO últimas 300 ventas. NO uses para totales del mes.
+- obtener_pedidos → SOLO últimos 300 pedidos. NO uses para totales del mes.
 - obtener_gastos → Gastos fijos mensuales
 - obtener_proveedores → Lista proveedores
-- obtener_pedidos → Compras a proveedores
-- obtener_resumen_ventas → KPIs ventas últimos 7 días
 - obtener_horarios → Turnos de trabajo
-- stock_critico → Ingredientes con stock bajo (bajo mínimos o <5 días de stock)
+
+AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "mejor"):
+- resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
+- resumen_ventas_periodo(fecha_desde, fecha_hasta) → Total ingresos, nº tickets, ticket medio, top recetas.
+- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, compras del periodo, gastos fijos, margen aprox.
+- resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
+- resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
+- obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
+- stock_critico → Ingredientes que hay que reponer.
+
+⚠️ RANGO DE FECHAS para tools que lo piden:
+- Formato: YYYY-MM-DD
+- hasta es EXCLUSIVE (primer día del MES SIGUIENTE).
+- Abril 2026 completo → fecha_desde='2026-04-01', fecha_hasta='2026-05-01'
+- Marzo 2026 → '2026-03-01' a '2026-04-01'
+- NUNCA uses '2026-04-30' como hasta. Siempre usa el 1º del mes siguiente con '<'.
+
+🚨 PROHIBIDO sumar totales manualmente sobre obtener_ventas u obtener_pedidos.
+  Siempre usa la tool de resumen_*_periodo correspondiente.
 
 ═══════════════════════════════════════════════════════════
 📐 FÓRMULAS (CRÍTICO - USAR CORRECTAMENTE)
@@ -265,6 +282,47 @@ const TOOLS = [
         name: 'stock_critico',
         description: 'Ingredientes con stock bajo (<5 días de consumo estimado o bajo el mínimo configurado).',
         input_schema: { type: 'object', properties: {}, required: [] }
+    },
+    {
+        name: 'resumen_ventas_periodo',
+        description: 'Ventas AGREGADAS EXACTAS de un rango de fechas: total ingresos, número de tickets, ticket medio y top recetas ordenadas por ingresos. Usa esto SIEMPRE para preguntas de "cuánto facturé este mes", "top platos del mes", "ventas de abril", etc. NO sumes manualmente sobre obtener_ventas (solo trae 300). Para todo abril 2026: fecha_desde=2026-04-01, fecha_hasta=2026-05-01 (el rango es [desde, hasta), hasta NO se incluye).',
+        input_schema: {
+            type: 'object',
+            properties: {
+                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
+                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive, usa el 1º del mes siguiente)' }
+            },
+            required: ['fecha_desde', 'fecha_hasta']
+        }
+    },
+    {
+        name: 'resumen_pyg',
+        description: 'P&L (Pérdidas y Ganancias) AGREGADO EXACTO de un rango de fechas: ingresos totales, coste productos (COGS), margen bruto, gastos fijos del mes, beneficio neto, food cost %. Usa esto para preguntas de P&L, "cuenta de resultados", "beneficio del mes".',
+        input_schema: {
+            type: 'object',
+            properties: {
+                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
+                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
+            },
+            required: ['fecha_desde', 'fecha_hasta']
+        }
+    },
+    {
+        name: 'resumen_food_cost_recetas',
+        description: 'Food cost calculado por cada receta (con precio_unitario_real y rendimiento) ordenado de peor a mejor. Usa esto para preguntas de "qué recetas tienen peor food cost", "recetas fuera de rango", etc. Devuelve también margen y precio venta.',
+        input_schema: { type: 'object', properties: {}, required: [] }
+    },
+    {
+        name: 'resumen_compras_periodo',
+        description: 'Compras AGREGADAS EXACTAS a proveedores en un rango: total gastado, por proveedor, y por ingrediente. Usa esto para preguntas de "cuánto gasté en compras este mes", "a qué proveedor le compro más".',
+        input_schema: {
+            type: 'object',
+            properties: {
+                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
+                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
+            },
+            required: ['fecha_desde', 'fecha_hasta']
+        }
     }
 ];
 
@@ -272,7 +330,15 @@ const TOOLS = [
 // TOOL HANDLERS (SQL queries equivalent to n8n flow, with restauranteId)
 // ============================================================================
 
-async function runTool(name, pool, restauranteId) {
+// Helper: validate YYYY-MM-DD date string; throws if invalid
+function parseIsoDate(value, fieldName) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new Error(`${fieldName} debe ser YYYY-MM-DD, recibido: ${value}`);
+    }
+    return value;
+}
+
+async function runTool(name, pool, restauranteId, args = {}) {
     switch (name) {
         case 'obtener_ingredientes':
             // Consistency rule (see CLAUDE.md of this project):
@@ -382,6 +448,136 @@ async function runTool(name, pool, restauranteId) {
                 WHERE h.restaurante_id = $1
                 ORDER BY e.nombre, h.dia_semana
             `, [restauranteId])).rows;
+
+        case 'resumen_ventas_periodo': {
+            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
+            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const totals = (await pool.query(`
+                SELECT
+                    COALESCE(SUM(total), 0)::numeric(12,2) AS total_ingresos,
+                    COUNT(*) AS num_tickets,
+                    ROUND(COALESCE(AVG(total), 0)::numeric, 2) AS ticket_medio
+                FROM ventas
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+            `, [restauranteId, desde, hasta])).rows[0];
+            const topRecetas = (await pool.query(`
+                SELECT r.nombre, r.categoria,
+                       SUM(v.cantidad)::int AS vendidas,
+                       ROUND(SUM(v.total)::numeric, 2) AS ingresos
+                FROM ventas v
+                LEFT JOIN recetas r ON v.receta_id = r.id
+                WHERE v.restaurante_id = $1 AND v.fecha >= $2 AND v.fecha < $3 AND v.deleted_at IS NULL
+                GROUP BY r.nombre, r.categoria
+                ORDER BY ingresos DESC NULLS LAST
+                LIMIT 20
+            `, [restauranteId, desde, hasta])).rows;
+            return { periodo: { desde, hasta }, totales: totals, top_recetas: topRecetas };
+        }
+
+        case 'resumen_pyg': {
+            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
+            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const ventas = (await pool.query(`
+                SELECT COALESCE(SUM(total), 0)::numeric(12,2) AS ingresos,
+                       COUNT(*) AS num_tickets
+                FROM ventas
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+            `, [restauranteId, desde, hasta])).rows[0];
+            const compras = (await pool.query(`
+                SELECT COALESCE(SUM(total), 0)::numeric(12,2) AS total_compras
+                FROM pedidos
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+            `, [restauranteId, desde, hasta])).rows[0];
+            const gastos = (await pool.query(`
+                SELECT COALESCE(SUM(
+                    CASE
+                        WHEN frecuencia = 'mensual' OR frecuencia IS NULL THEN monto
+                        WHEN frecuencia = 'anual' THEN monto / 12.0
+                        WHEN frecuencia = 'trimestral' THEN monto / 3.0
+                        WHEN frecuencia = 'semanal' THEN monto * 4.333
+                        ELSE monto
+                    END
+                ), 0)::numeric(12,2) AS gastos_fijos_mes
+                FROM gastos_fijos
+                WHERE restaurante_id = $1 AND deleted_at IS NULL
+            `, [restauranteId])).rows[0];
+            const ingresos = parseFloat(ventas.ingresos) || 0;
+            const compras_periodo = parseFloat(compras.total_compras) || 0;
+            const gastos_fijos_mes = parseFloat(gastos.gastos_fijos_mes) || 0;
+            // COGS exact (cost of goods sold) cannot be calculated precisely here
+            // without replicating the full recipe expansion from the frontend.
+            // Exposed numbers are honest: sales, purchases in period, fixed costs.
+            // The model should explain compras_periodo is "purchases", not "COGS".
+            return {
+                periodo: { desde, hasta },
+                ingresos,
+                compras_periodo,
+                gastos_fijos_mes,
+                margen_aproximado_sin_cogs_exacto: ingresos - compras_periodo - gastos_fijos_mes,
+                num_tickets: parseInt(ventas.num_tickets) || 0,
+                nota: 'compras_periodo es lo comprado en el periodo (albaranes/pedidos). No es COGS exacto, pero es una aproximación útil. Para COGS exacto haría falta expandir las recetas de cada venta.'
+            };
+        }
+
+        case 'resumen_food_cost_recetas':
+            return (await pool.query(`
+                WITH recetas_coste AS (
+                    SELECT
+                        r.id, r.nombre, r.categoria, r.precio_venta, r.porciones,
+                        COALESCE(SUM(
+                            (ing->>'cantidad')::numeric *
+                            COALESCE(pcd.precio_medio_compra,
+                                CASE WHEN i.cantidad_por_formato > 0
+                                     THEN i.precio / i.cantidad_por_formato
+                                     ELSE i.precio END
+                            ) /
+                            NULLIF(COALESCE(i.rendimiento, 100) / 100.0, 0)
+                        ), 0) AS coste_lote
+                    FROM recetas r
+                    LEFT JOIN LATERAL jsonb_array_elements(COALESCE(r.ingredientes::jsonb, '[]'::jsonb)) ing ON true
+                    LEFT JOIN ingredientes i ON i.id = (ing->>'ingredienteId')::int
+                      AND i.restaurante_id = $1 AND i.deleted_at IS NULL
+                    LEFT JOIN (
+                        SELECT ingrediente_id, AVG(precio_unitario) AS precio_medio_compra
+                        FROM precios_compra_diarios WHERE restaurante_id = $1
+                        GROUP BY ingrediente_id
+                    ) pcd ON pcd.ingrediente_id = i.id
+                    WHERE r.restaurante_id = $1 AND r.deleted_at IS NULL
+                    GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.porciones
+                )
+                SELECT nombre, categoria,
+                       ROUND(precio_venta::numeric, 2) AS precio_venta,
+                       porciones,
+                       ROUND((coste_lote / NULLIF(porciones, 0))::numeric, 2) AS coste_porcion,
+                       ROUND(((coste_lote / NULLIF(porciones, 0)) / NULLIF(precio_venta, 0) * 100)::numeric, 1) AS food_cost_pct,
+                       ROUND((precio_venta - (coste_lote / NULLIF(porciones, 0)))::numeric, 2) AS margen
+                FROM recetas_coste
+                WHERE precio_venta > 0 AND porciones > 0 AND coste_lote > 0
+                ORDER BY food_cost_pct DESC NULLS LAST
+            `, [restauranteId])).rows;
+
+        case 'resumen_compras_periodo': {
+            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
+            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const total = (await pool.query(`
+                SELECT COALESCE(SUM(total), 0)::numeric(12,2) AS total_compras,
+                       COUNT(*) AS num_pedidos
+                FROM pedidos
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+            `, [restauranteId, desde, hasta])).rows[0];
+            const porProveedor = (await pool.query(`
+                SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
+                       COALESCE(SUM(p.total), 0)::numeric(12,2) AS gasto,
+                       COUNT(*) AS num_pedidos
+                FROM pedidos p
+                LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+                WHERE p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL
+                GROUP BY pr.nombre
+                ORDER BY gasto DESC
+                LIMIT 20
+            `, [restauranteId, desde, hasta])).rows;
+            return { periodo: { desde, hasta }, total, por_proveedor: porProveedor };
+        }
 
         case 'resumen_inventario':
             // Aggregated numbers matching the dashboard formulas exactly.
@@ -521,7 +717,7 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
             for (const block of response.content) {
                 if (block.type === 'tool_use') {
                     try {
-                        const result = await runTool(block.name, pool, restauranteId);
+                        const result = await runTool(block.name, pool, restauranteId, block.input || {});
                         toolResults.push({
                             type: 'tool_result',
                             tool_use_id: block.id,
