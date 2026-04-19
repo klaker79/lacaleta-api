@@ -391,11 +391,13 @@ async function runTool(name, pool, restauranteId, args = {}) {
             `, [restauranteId])).rows;
 
         case 'obtener_gastos':
+            // Schema real: concepto (VARCHAR), monto_mensual (NUMERIC, ya mensualizado),
+            // activo (BOOL, no hay deleted_at). Sin columnas "frecuencia" ni "categoria".
             return (await pool.query(`
-                SELECT g.id, g.nombre, g.monto, g.frecuencia, g.categoria
-                FROM gastos_fijos g
-                WHERE g.restaurante_id = $1 AND g.deleted_at IS NULL
-                ORDER BY g.nombre
+                SELECT id, concepto, monto_mensual, activo, created_at
+                FROM gastos_fijos
+                WHERE restaurante_id = $1 AND (activo IS NULL OR activo = TRUE)
+                ORDER BY concepto
             `, [restauranteId])).rows;
 
         case 'obtener_proveedores':
@@ -488,18 +490,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 FROM pedidos
                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
             `, [restauranteId, desde, hasta])).rows[0];
+            // Real schema of gastos_fijos: monto_mensual is already monthly,
+            // no frecuencia column, activo boolean (no deleted_at).
             const gastos = (await pool.query(`
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN frecuencia = 'mensual' OR frecuencia IS NULL THEN monto
-                        WHEN frecuencia = 'anual' THEN monto / 12.0
-                        WHEN frecuencia = 'trimestral' THEN monto / 3.0
-                        WHEN frecuencia = 'semanal' THEN monto * 4.333
-                        ELSE monto
-                    END
-                ), 0)::numeric(12,2) AS gastos_fijos_mes
+                SELECT COALESCE(SUM(monto_mensual), 0)::numeric(12,2) AS gastos_fijos_mes
                 FROM gastos_fijos
-                WHERE restaurante_id = $1 AND deleted_at IS NULL
+                WHERE restaurante_id = $1 AND (activo IS NULL OR activo = TRUE)
             `, [restauranteId])).rows[0];
             const ingresos = parseFloat(ventas.ingresos) || 0;
             const compras_periodo = parseFloat(compras.total_compras) || 0;
