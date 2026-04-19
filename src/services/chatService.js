@@ -122,12 +122,12 @@ PRECIO IDEAL VINOS (objetivo 50%):
 
 MARGEN: precio_venta - coste_porcion
 RACIONES: stock / cantidad_por_receta
-⚠️ IMPORTANTE: Para VINOS usar 45-50%, NUNCA 30-33%
+⚠️ IMPORTANTE: Para VINOS usar 45-50%, NUNCA 30-35% (eso es comida)
 
 ═══════════════════════════════════════════════════════════
 🎯 UMBRALES RENTABILIDAD
 ═══════════════════════════════════════════════════════════
-COMIDA: ≤28% 🟢 | 29-33% 🟡 | 34-38% 🟠 | >38% 🔴
+COMIDA: ≤30% 🟢 | 31-35% 🟡 | 36-40% 🟠 | >40% 🔴
 VINOS:  ≤40% 🟢 | 41-50% 🟡 | >50% 🔴
 
 ═══════════════════════════════════════════════════════════
@@ -304,7 +304,7 @@ CONFIGURACIÓN:
 - Configuración → Equipo, datos restaurante, integraciones
 
 📐 EXPLICACIÓN DE FÓRMULAS (para cuando el usuario pregunte):
-- Food Cost = (coste producción / precio venta) × 100. Ideal: ≤33% comida, ≤50% vinos
+- Food Cost = (coste producción / precio venta) × 100. Ideal: ≤35% comida, ≤50% vinos
 - Precio ideal comida = coste / 0.30 (objetivo 30%)
 - Precio ideal vinos = coste / 0.45 (objetivo 45-50%)
 - Margen = precio venta - coste producción
