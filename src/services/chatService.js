@@ -65,9 +65,20 @@ Soy tu Chef Ejecutivo y CFO virtual. Gestiono costes, recetas, inventario y oper
 ═══════════════════════════════════════════════════════════
 📐 FÓRMULAS (CRÍTICO - USAR CORRECTAMENTE)
 ═══════════════════════════════════════════════════════════
-PRECIO UNITARIO: Usar SIEMPRE el campo "precio_unitario_real" de obtener_ingredientes.
-  Este precio ya incluye la media real de compras (albaranes).
-  NUNCA dividir i.precio / cantidad_por_formato manualmente — precio_unitario_real ya lo hace.
+
+⚠️ DOS TIPOS DE PRECIO — NO MEZCLAR:
+- Para CÁLCULO DE COSTE DE RECETAS / FOOD COST → usa "precio_unitario_real"
+  (incluye media real de compras, refleja lo que te cuesta DE VERDAD cada gramo).
+- Para VALORACIÓN DE INVENTARIO (¿cuánto vale mi stock?) → SUMA el campo "valor_stock"
+  que ya devuelve la tool (precio nominal × stock_actual). Coincide con el dashboard.
+
+⚠️ CONTEOS DEL DASHBOARD — para que cuadren con lo que el usuario ve:
+- "Items con stock" o "Valor Stock (274 items)" → cuenta solo ingredientes con stock_actual > 0.
+- "Valor total stock" → suma valor_stock SOLO de los ingredientes con stock_actual > 0.
+- Si el usuario pregunta "¿cuántos ingredientes tengo?" responde con el conteo
+  de ingredientes activos (activo != false). Los inactivos existen en DB pero no
+  aparecen en la pestaña Ingredientes del usuario.
+- "Stock bajo" → stock_actual = 0 OR (stock_minimo > 0 AND stock_actual <= stock_minimo).
 
 COSTE RECETA (fórmula EXACTA de la app):
   Para cada ingrediente de la receta:
@@ -206,7 +217,7 @@ CONFIGURACIÓN:
 const TOOLS = [
     {
         name: 'obtener_ingredientes',
-        description: 'Lista todos los ingredientes del restaurante con stock, precios reales (precio_unitario_real incluye media de compras), rendimiento y proveedor.',
+        description: 'Lista todos los ingredientes del restaurante con stock, proveedor, y DOS precios distintos: (a) precio_unitario_real para CÁLCULO DE COSTE DE RECETAS (incluye media de compras reales), (b) valor_stock para VALORACIÓN DE INVENTARIO (usa precio nominal configurado, coincide con el dashboard). También devuelve el flag activo (si es FALSE el dashboard NO lo cuenta).',
         input_schema: { type: 'object', properties: {}, required: [] }
     },
     {
@@ -258,15 +269,25 @@ const TOOLS = [
 async function runTool(name, pool, restauranteId) {
     switch (name) {
         case 'obtener_ingredientes':
+            // Consistency rule (see CLAUDE.md of this project):
+            //   - precio_unitario_real (with precio_medio_compra) → FOR RECIPE COST ONLY
+            //   - valor_stock (with precio/cpf) → FOR STOCK VALUATION (matches dashboard)
+            // The model decides which to use based on the question.
             return (await pool.query(`
                 SELECT i.id, i.nombre, i.precio, i.unidad, i.cantidad_por_formato,
                        i.stock_actual, i.stock_minimo, i.familia, i.rendimiento,
+                       i.activo,
                        p.nombre as proveedor_nombre,
                        COALESCE(pcd.precio_medio_compra,
                          CASE WHEN i.cantidad_por_formato > 0
                               THEN i.precio / i.cantidad_por_formato
                               ELSE i.precio END
-                       ) as precio_unitario_real
+                       ) as precio_unitario_real,
+                       (i.stock_actual * CASE
+                           WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
+                           THEN i.precio / i.cantidad_por_formato
+                           ELSE i.precio
+                       END) as valor_stock
                 FROM ingredientes i
                 LEFT JOIN proveedores p ON i.proveedor_id = p.id
                 LEFT JOIN (
