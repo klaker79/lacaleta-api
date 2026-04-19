@@ -148,7 +148,7 @@ module.exports = function (pool, config = {}) {
                 return res.status(400).json({ error: 'ID de restaurante inválido' });
             }
 
-            const { plan, plan_status, max_users } = req.body;
+            const { plan, plan_status, max_users, moneda } = req.body;
             const updates = [];
             const params = [];
             let paramIndex = 1;
@@ -182,6 +182,11 @@ module.exports = function (pool, config = {}) {
                 const maxUsersVal = validateNumber(max_users, 2, 1, 999);
                 updates.push(`max_users = $${paramIndex++}`);
                 params.push(maxUsersVal);
+            }
+            if (moneda !== undefined) {
+                const safeMoneda = sanitizeString(String(moneda).slice(0, 10)) || '€';
+                updates.push(`moneda = $${paramIndex++}`);
+                params.push(safeMoneda);
             }
 
             if (updates.length === 0) {
@@ -240,14 +245,9 @@ module.exports = function (pool, config = {}) {
     router.post('/superadmin/restaurants', async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, email, plan } = req.body;
+            const { nombre, email, plan, moneda } = req.body;
             if (!nombre || !email) {
                 return res.status(400).json({ error: 'Nombre y email requeridos' });
-            }
-
-            const existing = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
-            if (existing.rows.length > 0) {
-                return res.status(400).json({ error: 'Email ya registrado' });
             }
 
             await client.query('BEGIN');
@@ -255,32 +255,43 @@ module.exports = function (pool, config = {}) {
             const validPlan = ['trial', 'starter', 'profesional', 'premium'].includes(plan) ? plan : 'trial';
             const trialEndsAt = validPlan === 'trial' ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null;
 
+            const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restResult = await client.query(
-                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users)
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-                [sanitizeString(nombre), email, validPlan, validPlan === 'trial' ? 'trialing' : 'active', trialEndsAt, PLAN_MAX_USERS[validPlan] || 5]
+                `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users, moneda)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [sanitizeString(nombre), email, validPlan, validPlan === 'trial' ? 'trialing' : 'active', trialEndsAt, PLAN_MAX_USERS[validPlan] || 5, safeMoneda]
             );
             const restauranteId = restResult.rows[0].id;
 
-            // Create admin user with temp password
-            const tempPassword = crypto.randomBytes(8).toString('hex');
-            const passwordHash = await bcrypt.hash(tempPassword, 10);
+            // Si el usuario ya existe, vincularlo al nuevo restaurante sin crear uno nuevo.
+            // Esto permite que un owner tenga N restaurantes bajo la misma cuenta.
+            const existing = await client.query('SELECT id, nombre, email FROM usuarios WHERE email = $1', [email]);
+            let userId;
+            let tempPassword = null;
 
-            const userResult = await client.query(
-                `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified)
-                 VALUES ($1, $2, $3, $4, 'admin', TRUE) RETURNING id`,
-                [restauranteId, email, passwordHash, sanitizeString(nombre)]
-            );
+            if (existing.rows.length > 0) {
+                userId = existing.rows[0].id;
+                log('info', 'Usuario existente vinculado a nuevo restaurante desde superadmin', { email, restauranteId });
+            } else {
+                tempPassword = crypto.randomBytes(8).toString('hex');
+                const passwordHash = await bcrypt.hash(tempPassword, 10);
+                const userResult = await client.query(
+                    `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified)
+                     VALUES ($1, $2, $3, $4, 'admin', TRUE) RETURNING id`,
+                    [restauranteId, email, passwordHash, sanitizeString(nombre)]
+                );
+                userId = userResult.rows[0].id;
+            }
 
             // Multi-restaurant junction table
             await client.query(
-                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3)',
-                [userResult.rows[0].id, restauranteId, 'admin']
+                'INSERT INTO usuario_restaurantes (usuario_id, restaurante_id, rol) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+                [userId, restauranteId, 'admin']
             );
 
             await client.query('COMMIT');
 
-            log('info', 'Superadmin creó restaurante', { admin: req.user.email, restauranteId, nombre });
+            log('info', 'Superadmin creó restaurante', { admin: req.user.email, restauranteId, nombre, linkedExisting: !!existing.rows.length });
             res.status(201).json({ id: restauranteId, nombre, email, tempPassword, plan: validPlan });
         } catch (err) {
             await client.query('ROLLBACK');
@@ -288,6 +299,28 @@ module.exports = function (pool, config = {}) {
             res.status(500).json({ error: 'Error creando restaurante' });
         } finally {
             client.release();
+        }
+    });
+
+    // ========== RESET USER PASSWORD ==========
+    router.post('/superadmin/users/:id/reset-password', async (req, res) => {
+        try {
+            const userId = parseInt(req.params.id);
+            if (isNaN(userId) || userId <= 0) {
+                return res.status(400).json({ error: 'ID inválido' });
+            }
+            const user = await pool.query('SELECT id, email, nombre FROM usuarios WHERE id = $1', [userId]);
+            if (user.rows.length === 0) {
+                return res.status(404).json({ error: 'Usuario no encontrado' });
+            }
+            const newPassword = crypto.randomBytes(8).toString('hex');
+            const hash = await bcrypt.hash(newPassword, 10);
+            await pool.query('UPDATE usuarios SET password_hash = $1 WHERE id = $2', [hash, userId]);
+            log('info', 'Superadmin reseteó password', { admin: req.user.email, targetUser: user.rows[0].email });
+            res.json({ success: true, email: user.rows[0].email, tempPassword: newPassword });
+        } catch (err) {
+            log('error', 'Error reseteando password', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
         }
     });
 

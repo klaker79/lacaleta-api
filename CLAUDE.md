@@ -52,13 +52,13 @@ Every route that modifies `stock_actual` must follow these exact formulas:
 | `PUT /purchases/pending/:id` (approve) | `cantidad × (formato_override \|\| 1)` | User sets format via selector; NULL = ×1 |
 | `POST /purchases/pending/approve-batch` | `cantidad × (formato_override \|\| 1)` | Same as single approve |
 | `POST /daily/purchases/bulk` (n8n/OCR) | `cantidad` (raw, NO multiplication) | OCR parses in albaran units |
-| Frontend pedido reception (bulkAdjustStock) | `cantidadRecibida × cantidad_por_formato` | User says "2 cajas" |
+| Frontend pedido reception (bulkAdjustStock) | `cantidadRecibida` **(raw, unidades base)** | `cantidadReal = cantidadValue × formatoMult` ya se multiplicó al crear el pedido (pedidos-crud.js:75). Multiplicar otra vez causa duplicación (bug 2026-04-15 fixed) |
 
 **Subtracting stock:**
 | Route | Formula |
 |-------|---------|
-| `POST /sales` | `(ing.cantidad / porciones) × vendidas × factor_variante` |
-| `DELETE /orders/:id` | `cantidadRecibida × cantidad_por_formato` (reverses frontend) |
+| `POST /sales` | `(ing.cantidad / porciones) × vendidas × factor_variante` (con expansión recursiva de subrecetas) |
+| `DELETE /orders/:id` | `cantidadRecibida` **(raw, unidades base)** (revierte recepción) |
 | `POST /mermas` | `cantidad` (direct, base units) |
 | Transfers | `cantidad` (direct). REJECTS if origin has insufficient stock |
 
@@ -74,6 +74,14 @@ Every route that modifies `stock_actual` must follow these exact formulas:
 3. `precio / cantidad_por_formato` — fallback
 
 **NOTE:** As of 2026-04-09, both approve endpoints (single + batch) normalize `precio_unitario` to unit price before storing in `precios_compra_diarios`. Formula: `total_albaran / (cantidad × formato_override)`. This ensures `precio_medio_compra` is always a true unit price. Frontend uses `getIngredientUnitPrice()` from `cost-calculator.js` with priority: `precio_medio_compra > precio_medio > precio/cpf`.
+
+**⛔ STABILITY WARNING (baseline 2026-04-09):**
+Full audit verified frontend (10 tabs), backend (all routes), and chat (n8n) are consistent.
+DO NOT change price normalization in approve endpoints without verifying:
+- Frontend getIngredientUnitPrice() still works with the data
+- P&L monthly/summary factor_variante via cantidad_ponderada still correct
+- Chat n8n query for precio_unitario_real still returns correct values
+- All cost calculations across balance, sales, analysis, intelligence routes match
 
 ### Food Cost Thresholds
 - **Food (comida):** ≤28% excellent, 29-33% target, 34-38% watch, >38% alert

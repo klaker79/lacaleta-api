@@ -168,7 +168,13 @@ module.exports = function (pool) {
             const finalFamilia = sanitizeString(familia, 50) || 'alimento';
             const finalFormatoCompra = sanitizeString(formato_compra, 50) || null;
             const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;
-            const finalRendimiento = parseFloat(rendimiento) || 100;
+            // 🔒 Rendimiento válido entre 1-100 (%). Defensa en profundidad: el frontend ya
+            // clampa en el input, pero el backend debe rechazar datos fuera de rango
+            // que pudieran entrar vía API directa.
+            const rendimientoRaw = parseFloat(rendimiento);
+            const finalRendimiento = Number.isFinite(rendimientoRaw) && rendimientoRaw > 0
+                ? Math.min(100, Math.max(1, rendimientoRaw))
+                : 100;
 
             const result = await pool.query(
                 'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato, rendimiento) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
@@ -228,9 +234,14 @@ module.exports = function (pool) {
             const finalCantidadPorFormato = body.cantidad_por_formato !== undefined
                 ? (body.cantidad_por_formato ? validateCantidad(body.cantidad_por_formato) : null)
                 : existing.cantidad_por_formato;
+            // 🔒 Rendimiento 1-100 (clamp) tanto si viene en el body como del valor existente.
+            const clampRendimiento = (v) => {
+                const n = parseFloat(v);
+                return Number.isFinite(n) && n > 0 ? Math.min(100, Math.max(1, n)) : 100;
+            };
             const finalRendimiento = body.rendimiento !== undefined
-                ? (parseFloat(body.rendimiento) || 100)
-                : (existing.rendimiento || 100);
+                ? clampRendimiento(body.rendimiento)
+                : clampRendimiento(existing.rendimiento);
 
             // Log para debug (remover en producción)
             log('info', 'Actualizando ingrediente con preservación de datos', {
@@ -239,8 +250,9 @@ module.exports = function (pool) {
                 cantidadPorFormato: { antes: existing.cantidad_por_formato, despues: finalCantidadPorFormato }
             });
 
+            // 🔒 deleted_at IS NULL: evita resucitar un ingrediente soft-eliminado vía PUT
             const result = await pool.query(
-                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 RETURNING *',
+                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
                 [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
             );
 

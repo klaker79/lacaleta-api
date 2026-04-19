@@ -94,6 +94,8 @@ module.exports = function (pool) {
                 const fechaCompra = fecha ? new Date(fecha) : new Date();
 
                 for (const item of ingredientes) {
+                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
+                    if (item.tipo === 'ajuste') continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
@@ -161,6 +163,8 @@ module.exports = function (pool) {
                 const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
 
                 for (const item of ingredientes) {
+                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
+                    if (item.tipo === 'ajuste') continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
@@ -252,6 +256,8 @@ module.exports = function (pool) {
                     // Usar UPDATE-subtract + DELETE-if-≤0 como fallback
                     log('warn', 'Pedido sin filas con pedido_id, usando fallback legacy', { pedidoId: pedido.id });
                     for (const item of ingredientes) {
+                        // 🔒 Saltar items de tipo 'ajuste' (no están en el Diario)
+                        if (item.tipo === 'ajuste') continue;
                         const ingId = item.ingredienteId || item.ingrediente_id;
                         const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
                         const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
@@ -286,19 +292,19 @@ module.exports = function (pool) {
                 // Frontend adds stock via bulkAdjustStock. For pedido recepción,
                 // delta = cantidadRecibida × cantPorFormato (already multiplied).
                 // For compra mercado, delta = cantidad (raw base units, no multiplication).
-                // So: only multiply by cantPorFormato when cantidadRecibida exists.
+                // 🔧 FIX (2026-04-15): cantidadRecibida YA viene en unidades base.
+                // El bug del frontend que multiplicaba doble se arregló en pedidos-recepcion.js.
+                // Aquí también hay que revertir SIN multiplicar otra vez por cantidad_por_formato.
                 for (const item of ingredientes) {
+                    if (item.tipo === 'ajuste') continue; // Ajustes no afectan al stock
                     const ingId = item.ingredienteId || item.ingrediente_id;
-                    const rawCantidad = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+                    const stockARevertir = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
-                    if (rawCantidad > 0) {
-                        let stockARevertir = rawCantidad;
-                        // Only multiply by formato if this was a pedido recepción (has cantidadRecibida)
-                        if (item.cantidadRecibida) {
-                            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
-                            const cantPorFormato = parseFloat(ingRow.rows[0]?.cantidad_por_formato) || 1;
-                            stockARevertir = rawCantidad * cantPorFormato;
-                        }
+                    if (stockARevertir > 0 && ingId) {
+                        await client.query(
+                            'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                            [ingId, req.restauranteId]
+                        );
                         await client.query(
                             `UPDATE ingredientes
                          SET stock_actual = GREATEST(0, stock_actual - $1),

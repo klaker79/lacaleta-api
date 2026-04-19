@@ -10,6 +10,45 @@ const { log } = require('../utils/logger');
 const { validateCantidad, validateId } = require('../utils/validators');
 
 /**
+ * Expande una receta a sus ingredientes BASE (no subrecetas), resolviendo recursivamente.
+ * Convención: ingredienteId >= 100000 codifica una subreceta (recetaId = ingredienteId - 100000).
+ * La cantidad en un escandallo con subreceta representa "porciones de subreceta".
+ * Retorna [{ ingredienteId, cantidadPorPorcion }] donde cantidadPorPorcion es cuánto
+ * se gasta de ese ingrediente base por CADA porción vendida de la receta raíz.
+ */
+async function expandRecipeToBase(receta, client, restauranteId, visited = new Set()) {
+    if (!receta || visited.has(receta.id)) return [];
+    visited.add(receta.id);
+    const porciones = Math.max(1, parseInt(receta.porciones) || 1);
+    const items = receta.ingredientes || [];
+    const acc = new Map();
+    for (const ing of items) {
+        const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
+        const cantidad = parseFloat(ing.cantidad ?? ing.quantity) || 0;
+        if (!ingId || cantidad <= 0) continue;
+        if (ingId > 100000) {
+            const subRecetaId = ingId - 100000;
+            const subRes = await client.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                [subRecetaId, restauranteId]
+            );
+            if (subRes.rows.length === 0) {
+                log('warn', 'Subreceta no encontrada al expandir para stock', { recetaRaiz: receta.id, subRecetaId });
+                continue;
+            }
+            const subExpanded = await expandRecipeToBase(subRes.rows[0], client, restauranteId, new Set(visited));
+            const factor = cantidad / porciones;
+            for (const it of subExpanded) {
+                acc.set(it.ingredienteId, (acc.get(it.ingredienteId) || 0) + it.cantidadPorPorcion * factor);
+            }
+        } else {
+            acc.set(ingId, (acc.get(ingId) || 0) + cantidad / porciones);
+        }
+    }
+    return Array.from(acc.entries()).map(([ingredienteId, cantidadPorPorcion]) => ({ ingredienteId, cantidadPorPorcion }));
+}
+
+/**
  * @param {Pool} pool - PostgreSQL connection pool
  */
 module.exports = function (pool) {
@@ -107,8 +146,27 @@ module.exports = function (pool) {
                     log('info', 'Venta con variante', { varianteId, precio: precioUnitario, factor: factorVariante });
                 }
             } else if (precioVariante && precioVariante > 0) {
-                // Fallback: usar precio enviado desde frontend
+                // Fallback defensivo: el frontend mandó un precio distinto al de la receta
+                // pero sin varianteId. Intentamos encontrar la variante por precio_venta
+                // para aplicar su factor (copa 0.2 vs botella 1.0). Si no la encontramos
+                // conservamos factor=1 pero registramos warning: vender copa sin varianteId
+                // descontaría stock como botella → bug potencial.
                 precioUnitario = precioVariante;
+                const probableVariante = await client.query(
+                    'SELECT id, factor FROM recetas_variantes WHERE receta_id = $1 AND restaurante_id = $2 AND ABS(precio_venta - $3) < 0.01 LIMIT 1',
+                    [recetaId, req.restauranteId, precioVariante]
+                );
+                if (probableVariante.rows.length > 0) {
+                    factorVariante = parseFloat(probableVariante.rows[0].factor) || 1;
+                    log('info', 'Venta con precio de variante (sin id) — factor inferido', {
+                        recetaId, precio: precioUnitario, factor: factorVariante,
+                        varianteInferida: probableVariante.rows[0].id
+                    });
+                } else if (Math.abs(precioVariante - parseFloat(receta.precio_venta)) > 0.01) {
+                    log('warn', 'Venta con precioVariante sin varianteId y sin match — factor=1 aplicado', {
+                        recetaId, precioEnviado: precioVariante, precioReceta: receta.precio_venta
+                    });
+                }
             }
 
             const total = precioUnitario * cantidadValidada;
@@ -145,37 +203,28 @@ module.exports = function (pool) {
                 [recetaId, cantidadValidada, precioUnitario, total, fechaVenta, req.restauranteId, factorVariante, varianteId || null]
             );
 
-            // ⚡ NUEVO: Aplicar factor de variante al descuento de stock
-            // 🔧 FIX: Dividir por porciones - cada venta es 1 porción, no el lote completo
-            const porciones = Math.max(1, parseInt(receta.porciones) || 1);
+            // 🧪 FIX subrecetas: expandir recursivamente a ingredientes BASE antes de descontar
+            // (antes: UPDATE con ingredienteId>100000 no afectaba ninguna fila → fuga de stock silenciosa)
+            const baseIngs = await expandRecipeToBase(receta, client, req.restauranteId);
             const stockDeductions = []; // ⚡ FIX BUG-02: Rastrear descuentos reales
-            for (const ing of ingredientesReceta) {
-                // 🔧 FIX: Soportar múltiples formatos de ID de ingrediente
-                const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
-                const ingCantidad = ing.cantidad || ing.quantity || 0;
-
-                if (!ingId) {
-                    log('warn', 'Ingrediente sin ID en receta', { recetaId, ing });
-                    continue;
-                }
-
-                // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
+            for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngs) {
+                if (!ingId) continue;
                 const lockResult = await client.query(
-                    'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                    'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                     [ingId, req.restauranteId]
                 );
-                const stockAntes = parseFloat(lockResult.rows[0]?.stock_actual) || 0;
-
-                // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor_variante
-                const cantidadADescontar = (ingCantidad / porciones) * cantidadValidada * factorVariante;
+                if (lockResult.rows.length === 0) {
+                    log('warn', 'Ingrediente base no encontrado para descuento de stock', { recetaId, ingId });
+                    continue;
+                }
+                const stockAntes = parseFloat(lockResult.rows[0].stock_actual) || 0;
+                const cantidadADescontar = cantidadPorPorcion * cantidadValidada * factorVariante;
                 const updateResult = await client.query(
-                    'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1) WHERE id = $2 AND restaurante_id = $3 RETURNING stock_actual',
+                    'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING stock_actual',
                     [cantidadADescontar, ingId, req.restauranteId]
                 );
                 const stockDespues = parseFloat(updateResult.rows[0]?.stock_actual) || 0;
                 const descuentoReal = stockAntes - stockDespues;
-
-                // ⚡ FIX BUG-02: Guardar el descuento REAL (no el calculado)
                 stockDeductions.push({ ingredienteId: ingId, real: descuentoReal, calculado: cantidadADescontar });
                 log('debug', 'Stock descontado', { ingredienteId: ingId, calculado: cantidadADescontar, real: descuentoReal });
             }
@@ -248,25 +297,23 @@ module.exports = function (pool) {
 
                 if (recetaResult.rows.length > 0) {
                     const receta = recetaResult.rows[0];
-                    const ingredientesReceta = receta.ingredientes || [];
-                    const porciones = Math.max(1, parseInt(receta.porciones) || 1);
                     const factorVariante = parseFloat(venta.factor_variante) || 1;
-
-                    for (const ing of ingredientesReceta) {
-                        const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
-                        if (ingId && ing.cantidad) {
-                            const cantidadARestaurar = ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
-                            await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
-                            await client.query(
-                                'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
-                                [cantidadARestaurar, ingId, req.restauranteId]
-                            );
-                            log('info', 'Stock restaurado (fallback legacy)', {
-                                ingredienteId: ingId,
-                                cantidad: cantidadARestaurar,
-                                ventaId: venta.id
-                            });
-                        }
+                    // 🧪 FIX subrecetas: expandir a base también en fallback legacy
+                    const baseIngsLegacy = await expandRecipeToBase(receta, client, req.restauranteId);
+                    for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngsLegacy) {
+                        if (!ingId) continue;
+                        const cantidadARestaurar = cantidadPorPorcion * venta.cantidad * factorVariante;
+                        if (!(cantidadARestaurar > 0)) continue;
+                        await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [ingId, req.restauranteId]);
+                        await client.query(
+                            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                            [cantidadARestaurar, ingId, req.restauranteId]
+                        );
+                        log('info', 'Stock restaurado (fallback legacy)', {
+                            ingredienteId: ingId,
+                            cantidad: cantidadARestaurar,
+                            ventaId: venta.id
+                        });
                     }
                 }
             }
@@ -641,34 +688,30 @@ REGLAS:
                     [receta.id, cantidad, precioVenta, total, fecha, req.restauranteId, factorAplicado, varianteEncontrada ? varianteEncontrada.variante_id : null]
                 );
 
-                // Descontar stock (aplicando factor de variante)
-                const bulkDeductions = []; // ⚡ FIX: Rastrear descuentos reales para restauración correcta
-                if (Array.isArray(ingredientesReceta) && ingredientesReceta.length > 0) {
-                    for (const ing of ingredientesReceta) {
-                        // Cantidad a descontar = (cantidad_receta ÷ porciones) × cantidad_vendida × factor
-                        const cantidadADescontar = ((ing.cantidad || 0) / porciones) * cantidad * factorAplicado;
-                        if (cantidadADescontar > 0 && ing.ingredienteId) {
-                            // SELECT FOR UPDATE para prevenir race condition en ventas simultáneas
-                            const lockRes = await client.query(
-                                'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
-                                [ing.ingredienteId, req.restauranteId]
-                            );
-                            const stockAntes = parseFloat(lockRes.rows[0]?.stock_actual) || 0;
-                            // ⚡ NUEVO: Multiplicar por factorAplicado (copa = 0.2 de botella)
-                            const updateResult = await client.query(
-                                'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
-                                [cantidadADescontar, ing.ingredienteId, req.restauranteId]
-                            );
-                            if (updateResult.rows.length > 0) {
-                                const stockDespues = parseFloat(updateResult.rows[0].stock_actual) || 0;
-                                bulkDeductions.push({ ingredienteId: ing.ingredienteId, real: stockAntes - stockDespues, calculado: cantidadADescontar });
-                                log('info', 'Stock descontado', {
-                                    ingrediente: updateResult.rows[0].nombre,
-                                    cantidad: cantidadADescontar,
-                                    nuevoStock: updateResult.rows[0].stock_actual
-                                });
-                            }
-                        }
+                // 🧪 FIX subrecetas: expandir a ingredientes BASE antes de descontar stock
+                const bulkDeductions = [];
+                const baseIngsBulk = await expandRecipeToBase(receta, client, req.restauranteId);
+                for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngsBulk) {
+                    const cantidadADescontar = cantidadPorPorcion * cantidad * factorAplicado;
+                    if (!(cantidadADescontar > 0) || !ingId) continue;
+                    const lockRes = await client.query(
+                        'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
+                        [ingId, req.restauranteId]
+                    );
+                    if (lockRes.rows.length === 0) continue;
+                    const stockAntes = parseFloat(lockRes.rows[0].stock_actual) || 0;
+                    const updateResult = await client.query(
+                        'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING id, nombre, stock_actual',
+                        [cantidadADescontar, ingId, req.restauranteId]
+                    );
+                    if (updateResult.rows.length > 0) {
+                        const stockDespues = parseFloat(updateResult.rows[0].stock_actual) || 0;
+                        bulkDeductions.push({ ingredienteId: ingId, real: stockAntes - stockDespues, calculado: cantidadADescontar });
+                        log('info', 'Stock descontado (bulk)', {
+                            ingrediente: updateResult.rows[0].nombre,
+                            cantidad: cantidadADescontar,
+                            nuevoStock: updateResult.rows[0].stock_actual
+                        });
                     }
                 }
 
