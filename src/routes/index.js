@@ -49,6 +49,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('integrations', require('./integrations.routes'), pool);
     mount('transfers', require('./transfers.routes'), pool);
     mount('chat', require('./chat.routes'), pool);
+    mount('search', require('./search.routes'), pool);
 
     // Suppliers — already controller-based (Fase 4B)
     try {
