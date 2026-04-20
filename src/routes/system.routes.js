@@ -176,13 +176,17 @@ module.exports = function (pool) {
     // 🛡️ Stock health monitor — for n8n daily check
     router.get('/system/stock-health', authMiddleware, async (req, res) => {
         try {
+            // Sin `stock_actual > 0` en el WHERE: los negativos se filtraban antes
+            // de poderse contar. El SUM usa GREATEST(0, ...) para que el valor total
+            // no se descuente por negativos; sospechosos y negativos se cuentan sobre
+            // la población completa.
             const totalResult = await pool.query(`
                 SELECT
-                    ROUND(SUM(stock_actual * (precio / GREATEST(COALESCE(cantidad_por_formato, 1), 1))), 2) as valor_total,
+                    ROUND(SUM(GREATEST(stock_actual, 0) * (precio / GREATEST(COALESCE(cantidad_por_formato, 1), 1))), 2) as valor_total,
                     COUNT(*) FILTER (WHERE stock_actual > 10000 AND cantidad_por_formato > 1) as sospechosos,
                     COUNT(*) FILTER (WHERE stock_actual < 0) as negativos
                 FROM ingredientes
-                WHERE restaurante_id = $1 AND deleted_at IS NULL AND stock_actual > 0
+                WHERE restaurante_id = $1 AND deleted_at IS NULL
             `, [req.restauranteId]);
 
             const topResult = await pool.query(`

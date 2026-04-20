@@ -304,55 +304,6 @@ module.exports = function (pool) {
     // ========== TRACKING DIARIO DE COSTES/VENTAS ==========
 
     // Obtener precios de compra diarios
-    router.get('/daily/purchases', authMiddleware, async (req, res) => {
-        try {
-            const { fecha, mes, ano } = req.query;
-            let query = `
-            SELECT p.ingrediente_id, p.fecha, p.restaurante_id,
-                   i.nombre as ingrediente_nombre, i.unidad,
-                   -- Agregar cantidades de múltiples pedidos del mismo día
-                   SUM(p.cantidad_comprada) as cantidad_comprada,
-                   SUM(p.total_compra) as total_compra,
-                   -- Precio unitario ponderado: total / cantidad
-                   CASE WHEN SUM(p.cantidad_comprada) > 0 
-                        THEN SUM(p.total_compra) / SUM(p.cantidad_comprada)
-                        ELSE MAX(p.precio_unitario)
-                   END as precio_unitario,
-                   MAX(pr.nombre) as proveedor_nombre,
-                   MAX(p.proveedor_id) as proveedor_id,
-                   MAX(p.id) as id,
-                   MAX(p.pedido_id) as pedido_id,
-                   MAX(p.created_at) as created_at,
-                   MAX(p.notas) as notas
-            FROM precios_compra_diarios p
-            LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
-            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
-            WHERE p.restaurante_id = $1
-        `;
-            let params = [req.restauranteId];
-
-            if (fecha) {
-                query += ' AND p.fecha = $2';
-                params.push(fecha);
-            } else if (mes && ano) {
-                const m = parseInt(mes), y = parseInt(ano);
-                const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
-                const nm = m === 12 ? 1 : m + 1, ny = m === 12 ? y + 1 : y;
-                const endDate = `${ny}-${String(nm).padStart(2, '0')}-01`;
-                query += ' AND p.fecha >= $2 AND p.fecha < $3';
-                params.push(startDate, endDate);
-            }
-
-            query += ' GROUP BY p.ingrediente_id, p.fecha, p.restaurante_id, i.nombre, i.unidad';
-            query += ' ORDER BY p.fecha DESC, i.nombre';
-
-            const result = await pool.query(query, params);
-            res.json(result.rows || []);
-        } catch (err) {
-            log('error', 'Error obteniendo compras diarias', { error: err.message });
-            res.status(500).json({ error: 'Error interno', data: [] });
-        }
-    });
 
     // ==========================================
     // 📸 ESCANEO DE ALBARANES CON CLAUDE VISION
@@ -1279,6 +1230,16 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             const formato = parseFloat(item.formato_override) || 1;
             const stockASumar = item.cantidad * formato;
 
+            // 🛡️ Guardrail: rechazar cantidades absurdas ANTES de tocar ninguna tabla.
+            // Si lo pusiéramos después de upsertCompraDiaria/updateProveedorPrecio,
+            // un precio incorrecto quedaría en Diario (la ROLLBACK cubre ambas
+            // escrituras aquí porque es transacción, pero la lógica queda más
+            // limpia validando primero y además evita trabajo desperdiciado).
+            if (stockASumar > 10000) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
+            }
+
             // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
             // total_albarán / unidades_base = precio por unidad (€/kg, €/litro, etc.)
             // Ejemplo: 2 cajas @ 30€, formato ×5 → total=60€, stock=10, unit_price=60/10=6€/ud
@@ -1303,12 +1264,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 proveedorId,
                 precio: precioUnitarioNormalizado
             });
-
-            // 🛡️ Guardrail: reject absurd stock additions
-            if (stockASumar > 10000) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
-            }
 
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -1407,6 +1362,19 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const formato = parseFloat(item.formato_override) || 1;
                 const stockASumar = item.cantidad * formato;
 
+                // 🛡️ Guardrail: validar ANTES de tocar Diario/proveedor_precios.
+                // Antes estaba después de las escrituras: el `continue` saltaba
+                // sólo el UPDATE stock pero las dos escrituras anteriores quedaban
+                // en la transacción y el COMMIT final las persistía → Diario
+                // quedaba con filas de items rechazados.
+                if (stockASumar > 10000) {
+                    log('warn', 'Batch approve: stock addition rejected — absurd value', {
+                        ingrediente: item.ingrediente_nombre, cantidad: stockASumar, itemId: item.id
+                    });
+                    resultados.omitidos = (resultados.omitidos || 0) + 1;
+                    continue;
+                }
+
                 // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
                 const precioUnitarioNormalizado = stockASumar > 0
                     ? +(totalAlbaran / stockASumar).toFixed(4)
@@ -1429,15 +1397,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     proveedorId,
                     precio: precioUnitarioNormalizado
                 });
-
-                // 🛡️ Guardrail: skip absurd stock additions
-                if (stockASumar > 10000) {
-                    log('warn', 'Batch approve: stock addition rejected — absurd value', {
-                        ingrediente: item.ingrediente_nombre, cantidad: stockASumar, itemId: item.id
-                    });
-                    resultados.omitidos = (resultados.omitidos || 0) + 1;
-                    continue;
-                }
 
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -1643,29 +1602,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // Admin: Corregir registro de compra diaria (precios_compra_diarios)
-    router.put('/daily/purchases/correct', authMiddleware, async (req, res) => {
-        try {
-            const { ingredienteId, fecha, cantidad, total } = req.body;
-            if (!ingredienteId || !fecha) {
-                return res.status(400).json({ error: 'ingredienteId y fecha son obligatorios' });
-            }
-            const result = await pool.query(
-                `UPDATE precios_compra_diarios 
-                 SET cantidad_comprada = $1, total_compra = $2
-                 WHERE ingrediente_id = $3 AND fecha = $4 AND restaurante_id = $5
-                 RETURNING *`,
-                [cantidad, total, ingredienteId, fecha, req.restauranteId]
-            );
-            if (result.rows.length === 0) {
-                return res.status(404).json({ error: 'Registro no encontrado' });
-            }
-            log('info', 'Compra diaria corregida', { ingredienteId, fecha, cantidad, total });
-            res.json({ success: true, updated: result.rows[0] });
-        } catch (err) {
-            log('error', 'Error corrigiendo compra diaria', { error: err.message });
-            res.status(500).json({ error: 'Error interno' });
-        }
-    });
 
     // Registrar compras diarias (bulk - para n8n, LEGACY — mantenido por compatibilidad)
     router.post('/daily/purchases/bulk', ocrDisabledGuard, authMiddleware, async (req, res) => {
@@ -1835,254 +1771,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // Obtener resumen diario de ventas
-    router.get('/daily/sales', authMiddleware, async (req, res) => {
-        try {
-            const { fecha, mes, ano } = req.query;
-            let query = `
-            SELECT v.*, r.nombre as receta_nombre, r.categoria
-            FROM ventas_diarias_resumen v
-            LEFT JOIN recetas r ON v.receta_id = r.id
-            WHERE v.restaurante_id = $1
-        `;
-            let params = [req.restauranteId];
 
-            if (fecha) {
-                query += ' AND v.fecha = $2';
-                params.push(fecha);
-            } else if (mes && ano) {
-                const m = parseInt(mes), y = parseInt(ano);
-                const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
-                const nm = m === 12 ? 1 : m + 1, ny = m === 12 ? y + 1 : y;
-                const endDate = `${ny}-${String(nm).padStart(2, '0')}-01`;
-                query += ' AND v.fecha >= $2 AND v.fecha < $3';
-                params.push(startDate, endDate);
-            }
-
-            query += ' ORDER BY v.fecha DESC, r.nombre';
-
-            const result = await pool.query(query, params);
-            res.json(result.rows || []);
-        } catch (err) {
-            log('error', 'Error obteniendo ventas diarias', { error: err.message });
-            res.status(500).json({ error: 'Error interno', data: [] });
-        }
-    });
-
-    // Resumen mensual completo (formato tipo Excel)
-    router.get('/monthly/summary', authMiddleware, async (req, res) => {
-        try {
-            const { mes, ano } = req.query;
-            const mesActual = parseInt(mes) || new Date().getMonth() + 1;
-            const anoActual = parseInt(ano) || new Date().getFullYear();
-
-            // Obtener días del mes con compras (incluye proveedor con fallback a proveedor principal del ingrediente)
-            const comprasDiarias = await pool.query(`
-            SELECT
-                p.fecha,
-                i.id as ingrediente_id,
-                i.nombre as ingrediente,
-                p.precio_unitario,
-                p.cantidad_comprada,
-                p.total_compra,
-                COALESCE(pr.nombre, pr_fallback.nombre) as proveedor_nombre,
-                COALESCE(p.proveedor_id, ip.proveedor_id) as proveedor_id
-            FROM precios_compra_diarios p
-            JOIN ingredientes i ON p.ingrediente_id = i.id
-            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
-            LEFT JOIN ingredientes_proveedores ip ON ip.ingrediente_id = p.ingrediente_id AND ip.es_proveedor_principal = true
-            LEFT JOIN proveedores pr_fallback ON ip.proveedor_id = pr_fallback.id AND p.proveedor_id IS NULL
-            LEFT JOIN pedidos ped ON p.pedido_id = ped.id
-            WHERE p.restaurante_id = $1
-              AND p.fecha >= $2 AND p.fecha < $3
-              AND i.deleted_at IS NULL
-              AND (p.pedido_id IS NULL OR ped.deleted_at IS NULL)
-            ORDER BY p.fecha, i.nombre
-        `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
-
-            // Obtener ventas directamente de la tabla ventas (agrupadas por día y receta)
-            const ventasDiarias = await pool.query(`
-            SELECT
-                DATE(v.fecha) as fecha,
-                r.id as receta_id,
-                r.nombre as receta,
-                r.ingredientes as receta_ingredientes,
-                r.porciones,
-                SUM(v.cantidad) as cantidad_vendida,
-                AVG(v.precio_unitario) as precio_venta_unitario,
-                SUM(v.total) as total_ingresos,
-                SUM(v.cantidad * COALESCE(v.factor_variante, 1)) as cantidad_ponderada
-            FROM ventas v
-            JOIN recetas r ON v.receta_id = r.id
-            WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
-              AND v.fecha >= $2 AND v.fecha < $3
-            GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes, r.porciones
-            ORDER BY DATE(v.fecha), r.nombre
-        `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
-
-            // Obtener precios de todos los ingredientes para calcular costes
-            // Incluye precio_medio_compra (prioridad) y rendimiento (misma lógica que /balance/mes)
-            const ingredientesPrecios = await pool.query(
-                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
-                        pcd.precio_medio_compra
-                 FROM ingredientes i
-                 LEFT JOIN (
-                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
-                     FROM precios_compra_diarios WHERE restaurante_id = $1
-                     GROUP BY ingrediente_id
-                 ) pcd ON pcd.ingrediente_id = i.id
-                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
-                [req.restauranteId]
-            );
-            const preciosMap = {};
-            const rendimientoBaseMap = {};
-            ingredientesPrecios.rows.forEach(ing => {
-                if (ing.precio_medio_compra) {
-                    preciosMap[ing.id] = parseFloat(ing.precio_medio_compra);
-                } else {
-                    const precio = parseFloat(ing.precio) || 0;
-                    const cpf = parseFloat(ing.cantidad_por_formato) || 1;
-                    preciosMap[ing.id] = precio / cpf;
-                }
-                if (ing.rendimiento) {
-                    rendimientoBaseMap[ing.id] = parseFloat(ing.rendimiento);
-                }
-            });
-
-            // Función para calcular coste de una receta (con rendimiento y porciones)
-            // Misma lógica que /balance/mes
-            const calcularCosteReceta = (ingredientesReceta, porciones) => {
-                if (!ingredientesReceta || !Array.isArray(ingredientesReceta)) return 0;
-                const porcionesVal = Math.max(1, parseInt(porciones) || 1);
-                const costeTotal = ingredientesReceta.reduce((sum, item) => {
-                    const precio = preciosMap[item.ingredienteId] || 0;
-                    const cantidad = parseFloat(item.cantidad) || 0;
-                    let rendimiento = parseFloat(item.rendimiento);
-                    if (!rendimiento) {
-                        rendimiento = rendimientoBaseMap[item.ingredienteId] || 100;
-                    }
-                    const factorRendimiento = rendimiento / 100;
-                    const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
-                    return sum + (costeReal * cantidad);
-                }, 0);
-                return costeTotal / porcionesVal;
-            };
-
-            // Procesar datos en formato tipo Excel
-            const ingredientesData = {};
-            const recetasData = {};
-            const diasSet = new Set();
-
-            // Procesar compras
-            comprasDiarias.rows.forEach(row => {
-                const fechaStr = row.fecha.toISOString().split('T')[0];
-                diasSet.add(fechaStr);
-
-                if (!ingredientesData[row.ingrediente]) {
-                    ingredientesData[row.ingrediente] = { id: row.ingrediente_id, dias: {}, total: 0, totalCantidad: 0 };
-                }
-
-                if (!ingredientesData[row.ingrediente].dias[fechaStr]) {
-                    ingredientesData[row.ingrediente].dias[fechaStr] = {
-                        precio: parseFloat(row.precio_unitario),
-                        cantidad: parseFloat(row.cantidad_comprada),
-                        total: parseFloat(row.total_compra)
-                    };
-                } else {
-                    // ⚡ FIX: Acumular cantidades de múltiples pedidos del mismo día
-                    const existing = ingredientesData[row.ingrediente].dias[fechaStr];
-                    existing.cantidad += parseFloat(row.cantidad_comprada);
-                    existing.total += parseFloat(row.total_compra);
-                    // Precio unitario ponderado: total / cantidad
-                    existing.precio = existing.cantidad > 0 ? existing.total / existing.cantidad : existing.precio;
-                }
-                ingredientesData[row.ingrediente].total += parseFloat(row.total_compra);
-                ingredientesData[row.ingrediente].totalCantidad += parseFloat(row.cantidad_comprada);
-            });
-
-            // Agrupar compras por proveedor
-            const proveedoresData = {};
-            comprasDiarias.rows.forEach(row => {
-                const fechaStr = row.fecha.toISOString().split('T')[0];
-                const provNombre = row.proveedor_nombre || 'Sin proveedor';
-
-                if (!proveedoresData[provNombre]) {
-                    proveedoresData[provNombre] = { id: row.proveedor_id, dias: {}, total: 0 };
-                }
-
-                if (!proveedoresData[provNombre].dias[fechaStr]) {
-                    proveedoresData[provNombre].dias[fechaStr] = 0;
-                }
-                proveedoresData[provNombre].dias[fechaStr] += parseFloat(row.total_compra);
-                proveedoresData[provNombre].total += parseFloat(row.total_compra);
-            });
-
-            // Procesar ventas CON CÁLCULO DE COSTES
-            ventasDiarias.rows.forEach(row => {
-                const fechaStr = row.fecha.toISOString().split('T')[0];
-                diasSet.add(fechaStr);
-
-                const cantidadVendida = parseInt(row.cantidad_vendida);
-                const totalIngresos = parseFloat(row.total_ingresos);
-
-                // Calcular coste real desde ingredientes de la receta (con rendimiento y porciones)
-                // 🔧 FIX: Usar cantidad_ponderada (suma de cantidad × factor_variante) para costes
-                // Ejemplo: 5 botellas (factor 1.0) + 10 copas (factor 0.2) = 5+2 = 7 unidades de coste
-                const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones);
-                const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
-                const costeTotal = costePorUnidad * cantidadPonderada;
-                const beneficio = totalIngresos - costeTotal;
-
-                if (!recetasData[row.receta]) {
-                    recetasData[row.receta] = { id: row.receta_id, dias: {}, totalVendidas: 0, totalIngresos: 0, totalCoste: 0, totalBeneficio: 0 };
-                }
-
-                recetasData[row.receta].dias[fechaStr] = {
-                    vendidas: cantidadVendida,
-                    precioVenta: parseFloat(row.precio_venta_unitario),
-                    coste: costeTotal,
-                    ingresos: totalIngresos,
-                    beneficio: beneficio
-                };
-                recetasData[row.receta].totalVendidas += cantidadVendida;
-                recetasData[row.receta].totalIngresos += totalIngresos;
-                recetasData[row.receta].totalCoste += costeTotal;
-                recetasData[row.receta].totalBeneficio += beneficio;
-            });
-
-            // Ordenar días
-            const dias = Array.from(diasSet).sort();
-
-            // Calcular totales generales
-            const totalesCompras = Object.values(ingredientesData).reduce((sum, i) => sum + i.total, 0);
-            const totalesVentas = Object.values(recetasData).reduce((sum, r) => sum + r.totalIngresos, 0);
-            const totalesCostes = Object.values(recetasData).reduce((sum, r) => sum + r.totalCoste, 0);
-            const totalesBeneficio = Object.values(recetasData).reduce((sum, r) => sum + r.totalBeneficio, 0);
-
-            res.json({
-                mes: mesActual,
-                ano: anoActual,
-                dias,
-                compras: {
-                    ingredientes: ingredientesData,
-                    porProveedor: proveedoresData,
-                    total: totalesCompras
-                },
-                ventas: {
-                    recetas: recetasData,
-                    totalIngresos: totalesVentas,
-                    totalCostes: totalesCostes,
-                    beneficioBruto: totalesBeneficio
-                },
-                resumen: {
-                    margenBruto: totalesVentas > 0 ? ((totalesBeneficio / totalesVentas) * 100).toFixed(1) : 0,
-                    foodCost: totalesVentas > 0 ? ((totalesCostes / totalesVentas) * 100).toFixed(1) : 0
-                }
-            });
-        } catch (err) {
-            log('error', 'Error resumen mensual', { error: err.message });
-            res.status(500).json({ error: 'Error interno' });
-        }
-    });
 
 
     return router;
