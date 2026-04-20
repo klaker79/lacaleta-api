@@ -165,7 +165,25 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== VERIFY TOKEN ==========
-    router.get('/auth/verify', authMiddleware, (req, res) => {
+    router.get('/auth/verify', authMiddleware, async (req, res) => {
+        // Refresh restaurant-scoped data (moneda, nombre) from DB on every verify
+        // so the frontend always has fresh currency after reload, even if
+        // localStorage is stale from a pre-migration login.
+        let moneda = '€';
+        let restaurante = null;
+        try {
+            const r = await pool.query(
+                'SELECT nombre, moneda FROM restaurantes WHERE id = $1',
+                [req.restauranteId]
+            );
+            if (r.rows.length > 0) {
+                moneda = r.rows[0].moneda || '€';
+                restaurante = r.rows[0].nombre;
+            }
+        } catch (_e) {
+            // keep defaults; verify should never fail on ancillary data
+        }
+
         res.json({
             valid: true,
             user: {
@@ -173,6 +191,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 email: req.user.email,
                 rol: req.user.rol,
                 restauranteId: req.restauranteId,
+                restaurante,
+                moneda,
                 isSuperAdmin: req.user.isSuperAdmin || false
             },
             tokenInfo: {
