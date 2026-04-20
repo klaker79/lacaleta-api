@@ -343,6 +343,39 @@ module.exports = function (pool) {
                 }
             }
 
+            // 9. Agrupar por receta para inspección humana
+            const porReceta = new Map();
+            for (const ch of changes) {
+                const key = ch.receta;
+                if (!porReceta.has(key)) {
+                    porReceta.set(key, {
+                        receta: ch.receta,
+                        dias_con_cambio: 0,
+                        unidades_total: 0,
+                        ingresos_total: 0,
+                        coste_antes_total: 0,
+                        coste_despues_total: 0
+                    });
+                }
+                const g = porReceta.get(key);
+                g.dias_con_cambio++;
+                g.unidades_total += ch.unidades_vendidas;
+                g.ingresos_total += ch.ingresos;
+                g.coste_antes_total += ch.coste_antes;
+                g.coste_despues_total += ch.coste_despues;
+            }
+            const changes_by_receta = [...porReceta.values()]
+                .map(g => ({
+                    receta: g.receta,
+                    dias_con_cambio: g.dias_con_cambio,
+                    unidades_total: g.unidades_total,
+                    ingresos_total: Math.round(g.ingresos_total * 100) / 100,
+                    coste_antes_total: Math.round(g.coste_antes_total * 100) / 100,
+                    coste_despues_total: Math.round(g.coste_despues_total * 100) / 100,
+                    diferencia: Math.round((g.coste_despues_total - g.coste_antes_total) * 100) / 100
+                }))
+                .sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+
             return res.json({
                 apply: apply === true,
                 periodo: { desde, hasta },
@@ -353,6 +386,7 @@ module.exports = function (pool) {
                 coste_total_antes: Math.round(totalAntes * 100) / 100,
                 coste_total_despues: Math.round(totalDespues * 100) / 100,
                 diferencia: Math.round((totalDespues - totalAntes) * 100) / 100,
+                changes_by_receta,
                 changes_preview: changes.slice(0, 20)
             });
         } catch (err) {
