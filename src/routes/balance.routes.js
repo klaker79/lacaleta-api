@@ -1230,6 +1230,16 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             const formato = parseFloat(item.formato_override) || 1;
             const stockASumar = item.cantidad * formato;
 
+            // 🛡️ Guardrail: rechazar cantidades absurdas ANTES de tocar ninguna tabla.
+            // Si lo pusiéramos después de upsertCompraDiaria/updateProveedorPrecio,
+            // un precio incorrecto quedaría en Diario (la ROLLBACK cubre ambas
+            // escrituras aquí porque es transacción, pero la lógica queda más
+            // limpia validando primero y además evita trabajo desperdiciado).
+            if (stockASumar > 10000) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
+            }
+
             // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
             // total_albarán / unidades_base = precio por unidad (€/kg, €/litro, etc.)
             // Ejemplo: 2 cajas @ 30€, formato ×5 → total=60€, stock=10, unit_price=60/10=6€/ud
@@ -1254,12 +1264,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 proveedorId,
                 precio: precioUnitarioNormalizado
             });
-
-            // 🛡️ Guardrail: reject absurd stock additions
-            if (stockASumar > 10000) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
-            }
 
             await client.query(
                 'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
@@ -1358,6 +1362,19 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 const formato = parseFloat(item.formato_override) || 1;
                 const stockASumar = item.cantidad * formato;
 
+                // 🛡️ Guardrail: validar ANTES de tocar Diario/proveedor_precios.
+                // Antes estaba después de las escrituras: el `continue` saltaba
+                // sólo el UPDATE stock pero las dos escrituras anteriores quedaban
+                // en la transacción y el COMMIT final las persistía → Diario
+                // quedaba con filas de items rechazados.
+                if (stockASumar > 10000) {
+                    log('warn', 'Batch approve: stock addition rejected — absurd value', {
+                        ingrediente: item.ingrediente_nombre, cantidad: stockASumar, itemId: item.id
+                    });
+                    resultados.omitidos = (resultados.omitidos || 0) + 1;
+                    continue;
+                }
+
                 // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
                 const precioUnitarioNormalizado = stockASumar > 0
                     ? +(totalAlbaran / stockASumar).toFixed(4)
@@ -1380,15 +1397,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     proveedorId,
                     precio: precioUnitarioNormalizado
                 });
-
-                // 🛡️ Guardrail: skip absurd stock additions
-                if (stockASumar > 10000) {
-                    log('warn', 'Batch approve: stock addition rejected — absurd value', {
-                        ingrediente: item.ingrediente_nombre, cantidad: stockASumar, itemId: item.id
-                    });
-                    resultados.omitidos = (resultados.omitidos || 0) + 1;
-                    continue;
-                }
 
                 await client.query(
                     'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
