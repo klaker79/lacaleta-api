@@ -153,13 +153,86 @@ module.exports = function (pool) {
 
     // ========== BALANCE Y ESTADÍSTICAS ==========
     /**
+     * GET /analytics/pnl-breakdown?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+     * Breaks down ingresos + cogs + food_cost_pct by category bucket.
+     * Categories are bucketed via recetas.categoria:
+     *   - food     : anything NOT in (bebida/bebidas, suministro/suministros, preparaciones base)
+     *   - beverage : bebida / bebidas
+     *   - otros    : suministros / preparaciones base (excluded from food cost in menu-engineering)
+     * Also returns a `total` bucket with everything summed.
+     * Source of truth: ventas_diarias_resumen joined with recetas (for category).
+     */
+    router.get('/analytics/pnl-breakdown', authMiddleware, async (req, res) => {
+        try {
+            let { desde, hasta } = req.query;
+            if (!desde || !hasta) {
+                const today = new Date();
+                const y = today.getFullYear();
+                const m = today.getMonth();
+                const pad = (n) => String(n).padStart(2, '0');
+                if (!desde) desde = `${y}-${pad(m + 1)}-01`;
+                if (!hasta) {
+                    const nextM = m === 11 ? 1 : m + 2;
+                    const nextY = m === 11 ? y + 1 : y;
+                    hasta = `${nextY}-${pad(nextM)}-01`;
+                }
+            }
+            const { rows } = await pool.query(
+                `SELECT
+                    CASE
+                        WHEN LOWER(COALESCE(r.categoria, '')) IN ('bebida', 'bebidas') THEN 'beverage'
+                        WHEN LOWER(COALESCE(r.categoria, '')) IN ('suministro', 'suministros', 'preparacion base', 'preparaciones base') THEN 'otros'
+                        ELSE 'food'
+                    END AS bucket,
+                    COALESCE(SUM(vdr.total_ingresos), 0)::numeric(14,2) AS ingresos,
+                    COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(14,2) AS cogs,
+                    COALESCE(SUM(vdr.beneficio_bruto), 0)::numeric(14,2) AS margen
+                 FROM ventas_diarias_resumen vdr
+                 LEFT JOIN recetas r ON r.id = vdr.receta_id
+                 WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
+                 GROUP BY bucket`,
+                [req.restauranteId, desde, hasta]
+            );
+            const mkBucket = (name) => {
+                const row = rows.find(r => r.bucket === name);
+                const ingresos = row ? parseFloat(row.ingresos) || 0 : 0;
+                const cogs = row ? parseFloat(row.cogs) || 0 : 0;
+                const margen = row ? parseFloat(row.margen) || 0 : 0;
+                const pct = ingresos > 0 ? (cogs / ingresos) * 100 : 0;
+                return {
+                    ingresos, cogs, margen,
+                    food_cost_pct: Math.round(pct * 100) / 100
+                };
+            };
+            const food = mkBucket('food');
+            const beverage = mkBucket('beverage');
+            const otros = mkBucket('otros');
+            const totalIngresos = food.ingresos + beverage.ingresos + otros.ingresos;
+            const totalCogs = food.cogs + beverage.cogs + otros.cogs;
+            const totalMargen = food.margen + beverage.margen + otros.margen;
+            const totalPct = totalIngresos > 0 ? (totalCogs / totalIngresos) * 100 : 0;
+            res.json({
+                periodo: { desde, hasta },
+                food,
+                beverage,
+                otros,
+                total: {
+                    ingresos: Math.round(totalIngresos * 100) / 100,
+                    cogs: Math.round(totalCogs * 100) / 100,
+                    margen: Math.round(totalMargen * 100) / 100,
+                    food_cost_pct: Math.round(totalPct * 100) / 100
+                }
+            });
+        } catch (err) {
+            log('error', 'Error en /analytics/pnl-breakdown', { error: err.message });
+            res.status(500).json({ error: 'Error calculando breakdown' });
+        }
+    });
+
+    /**
      * GET /analytics/food-cost?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
-     * Returns ingresos + cogs + food_cost_pct aggregated from ventas_diarias_resumen.
-     * This is the "book of record" — the COGS stored at the moment each sale
-     * was registered. All panels (dashboard, diario, análisis) should read from
-     * here to stay consistent.
-     *   - hasta is EXCLUSIVE (typically 1st of next month)
-     *   - If omitted, defaults to the current month.
+     * Legacy endpoint — returns total food_cost_pct (mixes food + beverage).
+     * Prefer /analytics/pnl-breakdown for separated buckets.
      */
     router.get('/analytics/food-cost', authMiddleware, async (req, res) => {
         try {
