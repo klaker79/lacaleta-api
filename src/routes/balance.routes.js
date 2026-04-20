@@ -152,6 +152,56 @@ module.exports = function (pool) {
     };
 
     // ========== BALANCE Y ESTADÍSTICAS ==========
+    /**
+     * GET /analytics/food-cost?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+     * Returns ingresos + cogs + food_cost_pct aggregated from ventas_diarias_resumen.
+     * This is the "book of record" — the COGS stored at the moment each sale
+     * was registered. All panels (dashboard, diario, análisis) should read from
+     * here to stay consistent.
+     *   - hasta is EXCLUSIVE (typically 1st of next month)
+     *   - If omitted, defaults to the current month.
+     */
+    router.get('/analytics/food-cost', authMiddleware, async (req, res) => {
+        try {
+            let { desde, hasta } = req.query;
+            if (!desde || !hasta) {
+                const today = new Date();
+                const y = today.getFullYear();
+                const m = today.getMonth();
+                const pad = (n) => String(n).padStart(2, '0');
+                if (!desde) desde = `${y}-${pad(m + 1)}-01`;
+                if (!hasta) {
+                    const nextM = m === 11 ? 1 : m + 2;
+                    const nextY = m === 11 ? y + 1 : y;
+                    hasta = `${nextY}-${pad(nextM)}-01`;
+                }
+            }
+            const { rows } = await pool.query(
+                `SELECT
+                     COALESCE(SUM(total_ingresos), 0)::numeric(14,2) AS ingresos,
+                     COALESCE(SUM(coste_ingredientes), 0)::numeric(14,2) AS cogs,
+                     COALESCE(SUM(beneficio_bruto), 0)::numeric(14,2) AS margen
+                 FROM ventas_diarias_resumen
+                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3`,
+                [req.restauranteId, desde, hasta]
+            );
+            const ingresos = parseFloat(rows[0].ingresos) || 0;
+            const cogs = parseFloat(rows[0].cogs) || 0;
+            const margen = parseFloat(rows[0].margen) || 0;
+            const food_cost_pct = ingresos > 0 ? (cogs / ingresos) * 100 : 0;
+            res.json({
+                periodo: { desde, hasta },
+                ingresos,
+                cogs,
+                margen,
+                food_cost_pct: Math.round(food_cost_pct * 100) / 100
+            });
+        } catch (err) {
+            log('error', 'Error en /analytics/food-cost', { error: err.message });
+            res.status(500).json({ error: 'Error calculando food cost' });
+        }
+    });
+
     router.get('/balance/mes', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
             const { mes, ano } = req.query;
