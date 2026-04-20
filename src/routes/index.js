@@ -42,6 +42,8 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('gastos', require('./gastos.routes'), pool);
     mount('balance', require('./balance.routes'), pool);
     mount('analytics', require('./analytics.routes'), pool);
+    mount('daily', require('./daily.routes'), pool);
+    mount('monthly', require('./monthly.routes'), pool);
     mount('intelligence', require('./intelligence.routes'), pool);
     mount('mermas', require('./mermas.routes'), pool);
     mount('system', require('./system.routes'), pool);
