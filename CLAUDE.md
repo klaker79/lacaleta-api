@@ -84,7 +84,7 @@ DO NOT change price normalization in approve endpoints without verifying:
 - All cost calculations across balance, sales, analysis, intelligence routes match
 
 ### Food Cost Thresholds
-- **Food (comida):** ≤28% excellent, 29-33% target, 34-38% watch, >38% alert
+- **Food (comida):** ≤30% excellent, 31-35% target, 36-40% watch, >40% alert
 - **Wine (vinos):** target 45% — DO NOT apply food thresholds to wine
 - **Margin equivalents:** ≥67% OK, 62-66% warn, <62% alert
 

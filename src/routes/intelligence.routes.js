@@ -219,8 +219,8 @@ module.exports = function (pool) {
     // ========== 🧠 INTELIGENCIA - REVISION PRECIOS ==========
     router.get('/intelligence/price-check', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
-            const TARGET_FOOD_COST = 33;
-            const ALERT_THRESHOLD = 38;
+            const TARGET_FOOD_COST = 35;
+            const ALERT_THRESHOLD = 40;
 
             const result = await pool.query(`
             SELECT 
