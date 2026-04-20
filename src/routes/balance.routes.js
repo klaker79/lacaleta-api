@@ -153,6 +153,160 @@ module.exports = function (pool) {
 
     // ========== BALANCE Y ESTADÍSTICAS ==========
     /**
+     * POST /analytics/recalculate-cogs
+     * Body: { desde: 'YYYY-MM-DD', hasta: 'YYYY-MM-DD', apply?: boolean }
+     *
+     * Recomputes coste_ingredientes + beneficio_bruto for every row in
+     * ventas_diarias_resumen in the date range using the CURRENT recipe
+     * definitions + CURRENT ingredient prices + CURRENT rendimientos.
+     *
+     * This fixes rows written before bug fixes (e.g. the precio-sin-normalizar-
+     * por-formato that inflated beverage costs by `cantidad_por_formato`, or
+     * the rendimiento=100 override bug that lowered costs).
+     *
+     * Dry-run by default (apply: false) — returns what would change without
+     * touching the DB. Pass apply: true to commit the UPDATEs in a transaction.
+     * Admin-only.
+     */
+    router.post('/analytics/recalculate-cogs', authMiddleware, requireAdmin, costlyApiLimiter, async (req, res) => {
+        try {
+            const { desde, hasta, apply = false } = req.body || {};
+            if (!desde || !hasta) {
+                return res.status(400).json({ error: 'desde y hasta son obligatorios (YYYY-MM-DD)' });
+            }
+
+            // 1. Rows to consider
+            const { rows: ventas } = await pool.query(
+                `SELECT id, fecha, receta_id, cantidad_vendida, total_ingresos,
+                        coste_ingredientes, factor_aplicado
+                 FROM ventas_diarias_resumen
+                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3
+                 ORDER BY fecha, id`,
+                [req.restauranteId, desde, hasta]
+            );
+            if (ventas.length === 0) {
+                return res.json({ apply: false, total_rows: 0, rows_with_change: 0, changes_preview: [] });
+            }
+
+            // 2. Recipes referenced
+            const recetaIds = [...new Set(ventas.map(v => v.receta_id))];
+            const { rows: recetas } = await pool.query(
+                `SELECT id, nombre, ingredientes, porciones
+                 FROM recetas
+                 WHERE restaurante_id = $1 AND id = ANY($2::int[])`,
+                [req.restauranteId, recetaIds]
+            );
+            const recetasMap = new Map(recetas.map(r => [r.id, r]));
+
+            // 3. Ingredient prices + base rendimiento
+            const { rows: ingredientes } = await pool.query(
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) AS precio_medio_compra
+                     FROM precios_compra_diarios
+                     WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [req.restauranteId]
+            );
+            const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
+            for (const ing of ingredientes) {
+                if (ing.precio_medio_compra) {
+                    preciosMap.set(ing.id, parseFloat(ing.precio_medio_compra));
+                } else {
+                    const p = parseFloat(ing.precio) || 0;
+                    const cpf = parseFloat(ing.cantidad_por_formato) || 1;
+                    preciosMap.set(ing.id, cpf > 0 ? p / cpf : p);
+                }
+                if (ing.rendimiento) rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
+            }
+
+            // 4. Recompute each row
+            const changes = [];
+            let totalAntes = 0;
+            let totalDespues = 0;
+
+            for (const v of ventas) {
+                const receta = recetasMap.get(v.receta_id);
+                if (!receta) continue;
+                const lineas = receta.ingredientes || [];
+                const porciones = parseInt(receta.porciones) || 1;
+                let cogsLote = 0;
+                for (const item of lineas) {
+                    const precio = preciosMap.get(item.ingredienteId) || 0;
+                    let rendimiento = parseFloat(item.rendimiento);
+                    if (!rendimiento) rendimiento = rendimientoBaseMap.get(item.ingredienteId) || 100;
+                    const factor = rendimiento / 100;
+                    const costeReal = factor > 0 ? (precio / factor) : precio;
+                    cogsLote += costeReal * (parseFloat(item.cantidad) || 0);
+                }
+                const cogsPorPorcion = cogsLote / porciones;
+                const factorAplicado = parseFloat(v.factor_aplicado) || 1;
+                const cantidadVendida = parseFloat(v.cantidad_vendida) || 0;
+                const cogsNuevo = Math.round(cogsPorPorcion * cantidadVendida * factorAplicado * 100) / 100;
+                const cogsAntes = parseFloat(v.coste_ingredientes) || 0;
+                totalAntes += cogsAntes;
+                totalDespues += cogsNuevo;
+                if (Math.abs(cogsAntes - cogsNuevo) > 0.01) {
+                    changes.push({
+                        id: v.id,
+                        fecha: v.fecha,
+                        receta: receta.nombre,
+                        cantidad_vendida: cantidadVendida,
+                        coste_antes: Math.round(cogsAntes * 100) / 100,
+                        coste_despues: cogsNuevo,
+                        diferencia: Math.round((cogsNuevo - cogsAntes) * 100) / 100
+                    });
+                }
+            }
+
+            // 5. Apply transactionally
+            let applied = 0;
+            if (apply === true && changes.length > 0) {
+                const client = await pool.connect();
+                try {
+                    await client.query('BEGIN');
+                    for (const ch of changes) {
+                        const r = await client.query(
+                            `UPDATE ventas_diarias_resumen
+                             SET coste_ingredientes = $1,
+                                 beneficio_bruto = GREATEST(0, total_ingresos - $1)
+                             WHERE id = $2 AND restaurante_id = $3`,
+                            [ch.coste_despues, ch.id, req.restauranteId]
+                        );
+                        applied += r.rowCount || 0;
+                    }
+                    await client.query('COMMIT');
+                } catch (err) {
+                    await client.query('ROLLBACK');
+                    throw err;
+                } finally {
+                    client.release();
+                }
+            }
+
+            return res.json({
+                apply: apply === true,
+                periodo: { desde, hasta },
+                total_rows: ventas.length,
+                rows_with_change: changes.length,
+                applied_rows: applied,
+                coste_total_antes: Math.round(totalAntes * 100) / 100,
+                coste_total_despues: Math.round(totalDespues * 100) / 100,
+                diferencia: Math.round((totalDespues - totalAntes) * 100) / 100,
+                changes_preview: changes.slice(0, 15)
+            });
+        } catch (err) {
+            log('error', 'Error recalculando COGS', { error: err.message, stack: err.stack });
+            res.status(500).json({ error: 'Error recalculando', details: err.message });
+        }
+    });
+
+    /**
      * GET /analytics/pnl-breakdown?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
      * Breaks down ingresos + cogs + food_cost_pct by category bucket.
      * Categories are bucketed via recetas.categoria:
