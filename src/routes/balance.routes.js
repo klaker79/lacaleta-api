@@ -175,21 +175,22 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'desde y hasta son obligatorios (YYYY-MM-DD)' });
             }
 
-            // 1. Rows to consider
-            const { rows: ventas } = await pool.query(
-                `SELECT id, fecha, receta_id, cantidad_vendida, total_ingresos,
-                        coste_ingredientes, factor_aplicado
-                 FROM ventas_diarias_resumen
-                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3
+            // 1. Individual ventas (not aggregated) — preserves factor_variante per sale
+            const { rows: ventasIndividuales } = await pool.query(
+                `SELECT id, DATE(fecha) AS fecha, receta_id, cantidad, total,
+                        variante_id, factor_variante
+                 FROM ventas
+                 WHERE restaurante_id = $1 AND deleted_at IS NULL
+                   AND fecha >= $2 AND fecha < $3
                  ORDER BY fecha, id`,
                 [req.restauranteId, desde, hasta]
             );
-            if (ventas.length === 0) {
+            if (ventasIndividuales.length === 0) {
                 return res.json({ apply: false, total_rows: 0, rows_with_change: 0, changes_preview: [] });
             }
 
             // 2. Recipes referenced
-            const recetaIds = [...new Set(ventas.map(v => v.receta_id))];
+            const recetaIds = [...new Set(ventasIndividuales.map(v => v.receta_id))];
             const { rows: recetas } = await pool.query(
                 `SELECT id, nombre, ingredientes, porciones
                  FROM recetas
@@ -225,14 +226,9 @@ module.exports = function (pool) {
                 if (ing.rendimiento) rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
             }
 
-            // 4. Recompute each row
-            const changes = [];
-            let totalAntes = 0;
-            let totalDespues = 0;
-
-            for (const v of ventas) {
-                const receta = recetasMap.get(v.receta_id);
-                if (!receta) continue;
+            // 4. Pre-compute coste por porción de cada receta
+            const costePorcionPorReceta = new Map();
+            for (const receta of recetas) {
                 const lineas = receta.ingredientes || [];
                 const porciones = parseInt(receta.porciones) || 1;
                 let cogsLote = 0;
@@ -244,19 +240,77 @@ module.exports = function (pool) {
                     const costeReal = factor > 0 ? (precio / factor) : precio;
                     cogsLote += costeReal * (parseFloat(item.cantidad) || 0);
                 }
-                const cogsPorPorcion = cogsLote / porciones;
-                const factorAplicado = parseFloat(v.factor_aplicado) || 1;
-                const cantidadVendida = parseFloat(v.cantidad_vendida) || 0;
-                const cogsNuevo = Math.round(cogsPorPorcion * cantidadVendida * factorAplicado * 100) / 100;
-                const cogsAntes = parseFloat(v.coste_ingredientes) || 0;
+                costePorcionPorReceta.set(receta.id, cogsLote / porciones);
+            }
+
+            // 5. Recompute each individual venta and aggregate by (receta_id, fecha)
+            const aggregados = new Map(); // key = `${recetaId}_${fechaISO}` → {coste, ingresos, unidades}
+            for (const v of ventasIndividuales) {
+                const cogsPorPorcion = costePorcionPorReceta.get(v.receta_id);
+                if (cogsPorPorcion === undefined) continue;
+                const cantidad = parseFloat(v.cantidad) || 0;
+                const factorVariante = parseFloat(v.factor_variante) || 1;
+                const costeVenta = cogsPorPorcion * cantidad * factorVariante;
+                const fechaStr = v.fecha instanceof Date
+                    ? v.fecha.toISOString().slice(0, 10)
+                    : String(v.fecha).slice(0, 10);
+                const key = `${v.receta_id}_${fechaStr}`;
+                if (!aggregados.has(key)) {
+                    aggregados.set(key, {
+                        receta_id: v.receta_id,
+                        fecha: fechaStr,
+                        coste: 0,
+                        ingresos: 0,
+                        unidades: 0
+                    });
+                }
+                const a = aggregados.get(key);
+                a.coste += costeVenta;
+                a.ingresos += parseFloat(v.total) || 0;
+                a.unidades += cantidad;
+            }
+
+            // 6. Load current ventas_diarias_resumen rows for these (receta_id, fecha) combos
+            const vdrKeys = [...aggregados.keys()];
+            if (vdrKeys.length === 0) {
+                return res.json({ apply: false, total_rows: 0, rows_with_change: 0, changes_preview: [] });
+            }
+            const recetaIdsAgg = [...new Set([...aggregados.values()].map(a => a.receta_id))];
+            const { rows: vdrRows } = await pool.query(
+                `SELECT id, receta_id, fecha::date AS fecha, cantidad_vendida,
+                        total_ingresos, coste_ingredientes
+                 FROM ventas_diarias_resumen
+                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3
+                   AND receta_id = ANY($4::int[])`,
+                [req.restauranteId, desde, hasta, recetaIdsAgg]
+            );
+            const vdrMap = new Map();
+            for (const r of vdrRows) {
+                const fechaStr = r.fecha instanceof Date
+                    ? r.fecha.toISOString().slice(0, 10)
+                    : String(r.fecha).slice(0, 10);
+                vdrMap.set(`${r.receta_id}_${fechaStr}`, r);
+            }
+
+            // 7. Build list of changes (expected vs stored)
+            const changes = [];
+            let totalAntes = 0;
+            let totalDespues = 0;
+            for (const [key, a] of aggregados) {
+                const vdr = vdrMap.get(key);
+                if (!vdr) continue; // no vdr row for this sale (shouldn't normally happen)
+                const cogsAntes = parseFloat(vdr.coste_ingredientes) || 0;
+                const cogsNuevo = Math.round(a.coste * 100) / 100;
                 totalAntes += cogsAntes;
                 totalDespues += cogsNuevo;
                 if (Math.abs(cogsAntes - cogsNuevo) > 0.01) {
+                    const receta = recetasMap.get(a.receta_id);
                     changes.push({
-                        id: v.id,
-                        fecha: v.fecha,
-                        receta: receta.nombre,
-                        cantidad_vendida: cantidadVendida,
+                        vdr_id: vdr.id,
+                        fecha: a.fecha,
+                        receta: receta ? receta.nombre : `(id ${a.receta_id})`,
+                        unidades_vendidas: a.unidades,
+                        ingresos: Math.round(a.ingresos * 100) / 100,
                         coste_antes: Math.round(cogsAntes * 100) / 100,
                         coste_despues: cogsNuevo,
                         diferencia: Math.round((cogsNuevo - cogsAntes) * 100) / 100
@@ -264,7 +318,7 @@ module.exports = function (pool) {
                 }
             }
 
-            // 5. Apply transactionally
+            // 8. Apply transactionally
             let applied = 0;
             if (apply === true && changes.length > 0) {
                 const client = await pool.connect();
@@ -276,7 +330,7 @@ module.exports = function (pool) {
                              SET coste_ingredientes = $1,
                                  beneficio_bruto = GREATEST(0, total_ingresos - $1)
                              WHERE id = $2 AND restaurante_id = $3`,
-                            [ch.coste_despues, ch.id, req.restauranteId]
+                            [ch.coste_despues, ch.vdr_id, req.restauranteId]
                         );
                         applied += r.rowCount || 0;
                     }
@@ -292,13 +346,14 @@ module.exports = function (pool) {
             return res.json({
                 apply: apply === true,
                 periodo: { desde, hasta },
-                total_rows: ventas.length,
+                ventas_individuales_analizadas: ventasIndividuales.length,
+                filas_vdr_analizadas: vdrRows.length,
                 rows_with_change: changes.length,
                 applied_rows: applied,
                 coste_total_antes: Math.round(totalAntes * 100) / 100,
                 coste_total_despues: Math.round(totalDespues * 100) / 100,
                 diferencia: Math.round((totalDespues - totalAntes) * 100) / 100,
-                changes_preview: changes.slice(0, 15)
+                changes_preview: changes.slice(0, 20)
             });
         } catch (err) {
             log('error', 'Error recalculando COGS', { error: err.message, stack: err.stack });
