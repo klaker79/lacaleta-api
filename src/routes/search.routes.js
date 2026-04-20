@@ -128,8 +128,10 @@ module.exports = function (pool) {
             const params = [restauranteId, desdeDate, hastaDate];
             let where = 'p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL';
             if (provId) {
+                // Match explicit proveedor OR fallback to the ingredient's main supplier
+                // (same attribution rule used in /monthly/summary).
                 params.push(provId);
-                where += ` AND p.proveedor_id = $${params.length}`;
+                where += ` AND COALESCE(p.proveedor_id, ip_fb.proveedor_id) = $${params.length}`;
             }
             if (qLike) {
                 params.push(qLike);
@@ -139,13 +141,18 @@ module.exports = function (pool) {
             // precioReal and precioUnitario in the JSONB are UNIT prices.
             // Subtotal must be cantidad (received || ordered) × unit price.
             // Lines marked 'no-entregado' count as 0 to match the pedido detail UI.
+            //
+            // Proveedor: si el pedido no tiene proveedor_id, se atribuye al
+            // proveedor PRINCIPAL del ingrediente (ingredientes_proveedores).
+            // Misma regla que usa /monthly/summary → dashboard Top Proveedores.
+            // Así Búsqueda y Dashboard cuadran al céntimo.
             const rowsQuery = `
                 SELECT
                     p.id AS pedido_id,
                     p.fecha,
                     p.estado,
-                    COALESCE(pr.nombre, '(sin proveedor)') AS proveedor_nombre,
-                    p.proveedor_id,
+                    COALESCE(pr.nombre, pr_fb.nombre, '(sin proveedor)') AS proveedor_nombre,
+                    COALESCE(p.proveedor_id, ip_fb.proveedor_id) AS proveedor_id,
                     i.id AS ingrediente_id,
                     i.nombre AS ingrediente_nombre,
                     i.unidad,
@@ -164,6 +171,10 @@ module.exports = function (pool) {
                 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
                 LEFT JOIN ingredientes i
                     ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
+                LEFT JOIN ingredientes_proveedores ip_fb
+                    ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
+                LEFT JOIN proveedores pr_fb
+                    ON pr_fb.id = ip_fb.proveedor_id AND p.proveedor_id IS NULL
                 WHERE ${where}
                 ORDER BY p.fecha DESC, p.id DESC
                 LIMIT $${params.length}
@@ -175,7 +186,7 @@ module.exports = function (pool) {
             let aggWhere = 'p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL';
             if (provId) {
                 aggParams.push(provId);
-                aggWhere += ` AND p.proveedor_id = $${aggParams.length}`;
+                aggWhere += ` AND COALESCE(p.proveedor_id, ip_fb.proveedor_id) = $${aggParams.length}`;
             }
             // If q filter is applied, aggregate only lines that match
             let aggQuery;
@@ -197,7 +208,31 @@ module.exports = function (pool) {
                     CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
                     LEFT JOIN ingredientes i
                         ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
+                    LEFT JOIN ingredientes_proveedores ip_fb
+                        ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
                     WHERE ${aggWhere} AND LOWER(i.nombre) LIKE $${aggParams.length}
+                `;
+            } else if (provId) {
+                // When filtering by proveedor (with fallback), need the JOIN too
+                aggQuery = `
+                    SELECT
+                        COUNT(DISTINCT p.id)::int AS num_pedidos,
+                        COUNT(*)::int AS total_registros,
+                        COALESCE(SUM(
+                            CASE WHEN ing->>'estado' = 'no-entregado' THEN 0 ELSE
+                                COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) *
+                                COALESCE((ing->>'precioReal')::numeric,
+                                         (ing->>'precioUnitario')::numeric,
+                                         (ing->>'precio_unitario')::numeric)
+                            END
+                        ), 0)::numeric(12,2) AS total_importe
+                    FROM pedidos p
+                    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
+                    LEFT JOIN ingredientes i
+                        ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
+                    LEFT JOIN ingredientes_proveedores ip_fb
+                        ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
+                    WHERE ${aggWhere}
                 `;
             } else {
                 aggQuery = `
