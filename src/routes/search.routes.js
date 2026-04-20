@@ -136,6 +136,9 @@ module.exports = function (pool) {
                 where += ` AND LOWER(i.nombre) LIKE $${params.length}`;
             }
             params.push(limit);
+            // precioReal and precioUnitario in the JSONB are UNIT prices.
+            // Subtotal must be cantidad (received || ordered) × unit price.
+            // Lines marked 'no-entregado' count as 0 to match the pedido detail UI.
             const rowsQuery = `
                 SELECT
                     p.id AS pedido_id,
@@ -146,11 +149,16 @@ module.exports = function (pool) {
                     i.id AS ingrediente_id,
                     i.nombre AS ingrediente_nombre,
                     i.unidad,
-                    (ing->>'cantidad')::numeric AS cantidad,
-                    COALESCE((ing->>'precioUnitario')::numeric, (ing->>'precio_unitario')::numeric) AS precio_unitario,
+                    COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) AS cantidad,
                     COALESCE((ing->>'precioReal')::numeric,
-                             (ing->>'cantidad')::numeric *
-                             COALESCE((ing->>'precioUnitario')::numeric, (ing->>'precio_unitario')::numeric)) AS subtotal
+                             (ing->>'precioUnitario')::numeric,
+                             (ing->>'precio_unitario')::numeric) AS precio_unitario,
+                    CASE WHEN ing->>'estado' = 'no-entregado' THEN 0 ELSE
+                        COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) *
+                        COALESCE((ing->>'precioReal')::numeric,
+                                 (ing->>'precioUnitario')::numeric,
+                                 (ing->>'precio_unitario')::numeric)
+                    END AS subtotal
                 FROM pedidos p
                 LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
                 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
@@ -178,9 +186,12 @@ module.exports = function (pool) {
                         COUNT(DISTINCT p.id)::int AS num_pedidos,
                         COUNT(*)::int AS total_registros,
                         COALESCE(SUM(
-                            COALESCE((ing->>'precioReal')::numeric,
-                                     (ing->>'cantidad')::numeric *
-                                     COALESCE((ing->>'precioUnitario')::numeric, (ing->>'precio_unitario')::numeric))
+                            CASE WHEN ing->>'estado' = 'no-entregado' THEN 0 ELSE
+                                COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) *
+                                COALESCE((ing->>'precioReal')::numeric,
+                                         (ing->>'precioUnitario')::numeric,
+                                         (ing->>'precio_unitario')::numeric)
+                            END
                         ), 0)::numeric(12,2) AS total_importe
                     FROM pedidos p
                     CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing

@@ -496,15 +496,22 @@ async function runTool(name, pool, restauranteId, args = {}) {
             `, [restauranteId])).rows;
 
         case 'obtener_pedidos':
+            // precioReal / precioUnitario are UNIT prices in the JSONB.
+            // subtotal = (cantidadRecibida || cantidad) × unit price; 'no-entregado' → 0.
             return (await pool.query(`
                 SELECT p.id, p.fecha, p.estado, p.total,
                        pr.nombre as proveedor_nombre,
                        i.nombre as ingrediente, i.unidad,
-                       (ing->>'cantidad')::numeric as cantidad,
-                       COALESCE((ing->>'precioUnitario')::numeric, (ing->>'precio_unitario')::numeric) as precio_unitario,
+                       COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) as cantidad,
                        COALESCE((ing->>'precioReal')::numeric,
-                                (ing->>'cantidad')::numeric *
-                                COALESCE((ing->>'precioUnitario')::numeric, (ing->>'precio_unitario')::numeric)) as subtotal
+                                (ing->>'precioUnitario')::numeric,
+                                (ing->>'precio_unitario')::numeric) as precio_unitario,
+                       CASE WHEN ing->>'estado' = 'no-entregado' THEN 0 ELSE
+                           COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) *
+                           COALESCE((ing->>'precioReal')::numeric,
+                                    (ing->>'precioUnitario')::numeric,
+                                    (ing->>'precio_unitario')::numeric)
+                       END as subtotal
                 FROM pedidos p
                 LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
