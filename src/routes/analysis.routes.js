@@ -77,7 +77,7 @@ module.exports = function (pool) {
                         const precioIng = preciosMap.get(ing.ingredienteId) || 0;
                         // 🔧 FIX: Rendimiento con fallback al ingrediente base
                         let rendimiento = parseFloat(ing.rendimiento);
-                        if (!rendimiento || rendimiento === 100) {
+                        if (!rendimiento) {
                             rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
                         }
                         const factorRendimiento = rendimiento / 100;

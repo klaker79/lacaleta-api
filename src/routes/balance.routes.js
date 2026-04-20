@@ -216,7 +216,7 @@ module.exports = function (pool) {
                     const precio = preciosMap.get(ing.ingredienteId) || 0;
                     // 🔧 FIX: Rendimiento con fallback al ingrediente base
                     let rendimiento = parseFloat(ing.rendimiento);
-                    if (!rendimiento || rendimiento === 100) {
+                    if (!rendimiento) {
                         rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
                     }
                     const factorRendimiento = rendimiento / 100;
@@ -1955,7 +1955,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     const precio = preciosMap[item.ingredienteId] || 0;
                     const cantidad = parseFloat(item.cantidad) || 0;
                     let rendimiento = parseFloat(item.rendimiento);
-                    if (!rendimiento || rendimiento === 100) {
+                    if (!rendimiento) {
                         rendimiento = rendimientoBaseMap[item.ingredienteId] || 100;
                     }
                     const factorRendimiento = rendimiento / 100;
