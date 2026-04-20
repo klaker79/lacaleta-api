@@ -515,7 +515,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 FROM pedidos p
                 LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
-                LEFT JOIN ingredientes i ON i.id = (ing->>'ingredienteId')::int OR i.id = (ing->>'ingrediente_id')::int
+                LEFT JOIN ingredientes i ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
                 WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL
                 ORDER BY p.fecha DESC
                 LIMIT 300
