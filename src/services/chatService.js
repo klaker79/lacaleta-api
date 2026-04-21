@@ -64,7 +64,7 @@ LISTAS / DETALLE (para análisis por ítem concreto):
 AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "mejor"):
 - resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
 - resumen_ventas_periodo(fecha_desde, fecha_hasta) → Total ingresos, nº tickets, ticket medio, top recetas.
-- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, compras del periodo, gastos fijos, margen aprox.
+- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos, margen bruto/neto.
 - resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
 - resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
@@ -110,6 +110,11 @@ COSTE RECETA (fórmula EXACTA de la app):
   ⚠️ SIEMPRE dividir por porciones si porciones > 1
 
 FOOD COST: (coste_porcion / precio_venta) × 100
+
+⚠️ FOOD COST DE UN PERIODO (semana / mes / rango):
+  USA siempre resumen_pyg y lee el campo food_cost_pct (o food_cost_food_pct / food_cost_beverage_pct si te piden split).
+  NUNCA calcules food cost del periodo como compras / ingresos — eso es cash-flow de compras, NO food cost.
+  El COGS real está precalculado con Jack Miller en ventas_diarias_resumen y resumen_pyg ya lo devuelve listo.
 
 PRECIO IDEAL COMIDA (objetivo 30%):
   precio = coste_porcion / 0.30
@@ -584,6 +589,28 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 FROM pedidos
                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
             `, [restauranteId, desde, hasta])).rows[0];
+            // COGS real: se calcula en el momento de cada venta con la fórmula Jack Miller
+            // (precio_unitario × cantidad / porciones / rendimiento × factor_variante) y se
+            // almacena en ventas_diarias_resumen.coste_ingredientes. Es la MISMA fuente
+            // que usa el Dashboard para Food Cost. Split food vs beverage por categoría de
+            // receta para que el cliente vea ambos separados (estándar hostelería).
+            const cogsSplit = (await pool.query(`
+                SELECT
+                  CASE WHEN LOWER(r.categoria) IN ('bebidas','base','suministro','suministros')
+                       THEN 'beverage' ELSE 'food' END AS tipo,
+                  COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(12,2) AS cogs,
+                  COALESCE(SUM(vdr.total_ingresos),   0)::numeric(12,2) AS ingresos_cat
+                FROM ventas_diarias_resumen vdr
+                JOIN recetas r ON r.id = vdr.receta_id
+                WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
+                GROUP BY 1
+            `, [restauranteId, desde, hasta])).rows;
+            let cogs_food = 0, cogs_beverage = 0, ing_food = 0, ing_beverage = 0;
+            for (const r of cogsSplit) {
+                if (r.tipo === 'food')     { cogs_food     = parseFloat(r.cogs) || 0; ing_food     = parseFloat(r.ingresos_cat) || 0; }
+                if (r.tipo === 'beverage') { cogs_beverage = parseFloat(r.cogs) || 0; ing_beverage = parseFloat(r.ingresos_cat) || 0; }
+            }
+            const cogs_periodo = cogs_food + cogs_beverage;
             // Real schema of gastos_fijos: monto_mensual is already monthly,
             // no frecuencia column, activo boolean (no deleted_at).
             const gastos = (await pool.query(`
@@ -594,18 +621,26 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const ingresos = parseFloat(ventas.ingresos) || 0;
             const compras_periodo = parseFloat(compras.total_compras) || 0;
             const gastos_fijos_mes = parseFloat(gastos.gastos_fijos_mes) || 0;
-            // COGS exact (cost of goods sold) cannot be calculated precisely here
-            // without replicating the full recipe expansion from the frontend.
-            // Exposed numbers are honest: sales, purchases in period, fixed costs.
-            // The model should explain compras_periodo is "purchases", not "COGS".
+            const fc_total = ingresos > 0 ? +(100 * cogs_periodo / ingresos).toFixed(1) : null;
+            const fc_food  = ing_food > 0 ? +(100 * cogs_food / ing_food).toFixed(1) : null;
+            const fc_bev   = ing_beverage > 0 ? +(100 * cogs_beverage / ing_beverage).toFixed(1) : null;
             return {
                 periodo: { desde, hasta },
                 ingresos,
+                cogs_periodo,
                 compras_periodo,
+                food_cost_pct: fc_total,
+                food_cost_food_pct: fc_food,
+                food_cost_beverage_pct: fc_bev,
+                cogs_food,
+                cogs_beverage,
+                ingresos_food: ing_food,
+                ingresos_beverage: ing_beverage,
                 gastos_fijos_mes,
-                margen_aproximado_sin_cogs_exacto: ingresos - compras_periodo - gastos_fijos_mes,
+                margen_bruto: ingresos - cogs_periodo,
+                margen_neto_aprox: ingresos - cogs_periodo - gastos_fijos_mes,
                 num_tickets: parseInt(ventas.num_tickets) || 0,
-                nota: 'compras_periodo es lo comprado en el periodo (albaranes/pedidos). No es COGS exacto, pero es una aproximación útil. Para COGS exacto haría falta expandir las recetas de cada venta.'
+                nota: 'cogs_periodo es el COGS real calculado con Jack Miller sobre cada venta (fuente: ventas_diarias_resumen). USA food_cost_pct (o el split food/beverage) para reportar food cost al usuario. compras_periodo es sólo cash-flow de albaranes recibidos y NO debe usarse para food cost.'
             };
         }
 
