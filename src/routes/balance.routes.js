@@ -174,7 +174,7 @@ module.exports = function (pool) {
             );
 
             const ventasDetalle = await pool.query(
-                `SELECT v.cantidad, r.ingredientes, r.porciones
+                `SELECT v.cantidad, v.factor_variante, r.ingredientes, r.porciones
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
        WHERE v.fecha >= $1 AND v.fecha < $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL`,
@@ -209,11 +209,18 @@ module.exports = function (pool) {
                 }
             });
 
-            // Calcular costos usando el Map (sin queries adicionales)
+            // Calcular costos usando el Map (sin queries adicionales).
+            //
+            // ⚠️ Orden de la fórmula debe coincidir con sales.routes.js:680
+            // (donde se guarda el coste al crear la venta). Antes divergía:
+            // sales aplicaba `factor_variante` y balance lo omitía → en tenants
+            // con variantes (media ración, extras) el balance mensual mostraba
+            // un COGS distinto al guardado en ventas_diarias_resumen. Fix 2026-04-23.
             let costos = 0;
             for (const venta of ventasDetalle.rows) {
                 const ingredientes = venta.ingredientes || [];
                 const porciones = Math.max(1, parseInt(venta.porciones) || 1);
+                const factorVariante = parseFloat(venta.factor_variante) || 1;
                 for (const ing of ingredientes) {
                     const precio = preciosMap.get(ing.ingredienteId) || 0;
                     // 🔧 FIX: Rendimiento con fallback al ingrediente base
@@ -223,7 +230,7 @@ module.exports = function (pool) {
                     }
                     const factorRendimiento = rendimiento / 100;
                     const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
-                    costos += (costeReal * (ing.cantidad || 0) * venta.cantidad) / porciones;
+                    costos += costeReal * ((ing.cantidad || 0) / porciones) * venta.cantidad * factorVariante;
                 }
             }
 
