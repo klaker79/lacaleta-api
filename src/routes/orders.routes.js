@@ -79,6 +79,23 @@ module.exports = function (pool) {
                 }
             }
 
+            // 🛡️ Guardrail: rechazar cantidades absurdas. Mismo umbral (10.000)
+            // que aplican los endpoints /purchases/pending/approve*. Evita que un
+            // doble click humano o un click por error infle el stock en miles de
+            // unidades (incidente 2026-04-22: Pazo Lusco saltó a 144 botellas por
+            // combinación mal introducida cantidad+formato).
+            if (Array.isArray(ingredientes)) {
+                for (const item of ingredientes) {
+                    if (item.tipo === 'ajuste') continue;
+                    const cantidadGuard = parseFloat(item.cantidadRecibida || item.cantidad);
+                    if (!isNaN(cantidadGuard) && cantidadGuard > 10000) {
+                        return res.status(400).json({
+                            error: `Cantidad absurda detectada (${cantidadGuard}) para ingrediente ${item.ingredienteId || item.ingrediente_id}. Limite maximo por linea: 10000. Revisa cantidad y formato.`
+                        });
+                    }
+                }
+            }
+
             await client.query('BEGIN');
 
             const totalValidado = total !== undefined ? validateNumber(total, 0, 0, 9999999) : 0;
@@ -139,6 +156,21 @@ module.exports = function (pool) {
             const { id } = req.params;
             const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido } = req.body;
             const fechaRecepcionFinal = fecha_recepcion || fechaRecepcion;
+
+            // 🛡️ Guardrail: rechazar cantidades absurdas en recepcion/edicion de
+            // pedido. Mismo umbral 10000 que POST /orders. Protege contra errores
+            // de UX (incidente 2026-04-22) y contra doble click.
+            if (Array.isArray(ingredientes)) {
+                for (const item of ingredientes) {
+                    if (item.tipo === 'ajuste') continue;
+                    const cantidadGuard = parseFloat(item.cantidadRecibida || item.cantidad);
+                    if (!isNaN(cantidadGuard) && cantidadGuard > 10000) {
+                        return res.status(400).json({
+                            error: `Cantidad absurda detectada (${cantidadGuard}) para ingrediente ${item.ingredienteId || item.ingrediente_id}. Limite maximo por linea: 10000. Revisa cantidad y formato.`
+                        });
+                    }
+                }
+            }
 
             await client.query('BEGIN');
 
