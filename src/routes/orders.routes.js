@@ -327,10 +327,32 @@ module.exports = function (pool) {
                 // 🔧 FIX (2026-04-15): cantidadRecibida YA viene en unidades base.
                 // El bug del frontend que multiplicaba doble se arregló en pedidos-recepcion.js.
                 // Aquí también hay que revertir SIN multiplicar otra vez por cantidad_por_formato.
+                //
+                // 🛡️ GUARDRAIL (2026-04-23): loggeamos warn si un item trae campos que
+                // sugieren que su cantidad podría NO estar en unidades base (pedidos legacy
+                // o de endpoints antiguos). NO cambiamos la fórmula — solo alertamos para
+                // revisión manual. El rollback actual es correcto para el flujo vivo
+                // (POST /orders + PUT /orders/:id de recepción) desde 2026-04-15.
                 for (const item of ingredientes) {
                     if (item.tipo === 'ajuste') continue; // Ajustes no afectan al stock
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const stockARevertir = parseFloat(item.cantidadRecibida || item.cantidad || 0);
+
+                    const mult = parseFloat(item.multiplicador);
+                    const hasFormatoOverride = item.formato_override !== undefined && item.formato_override !== null;
+                    const recibidoSinCantRecibida = pedido.estado === 'recibido'
+                        && (item.cantidadRecibida === undefined || item.cantidadRecibida === null);
+                    if ((Number.isFinite(mult) && mult !== 1) || hasFormatoOverride || recibidoSinCantRecibida) {
+                        log('warn', 'DELETE /orders rollback: item con campos sospechosos — revisar stock tras borrado', {
+                            pedidoId: pedido.id,
+                            ingredienteId: ingId,
+                            cantidad: item.cantidad,
+                            cantidadRecibida: item.cantidadRecibida,
+                            multiplicador: item.multiplicador,
+                            formato_override: item.formato_override,
+                            stockARevertir
+                        });
+                    }
 
                     if (stockARevertir > 0 && ingId) {
                         await client.query(
