@@ -348,6 +348,14 @@ module.exports = function (pool) {
 
             const deltaValue = parseFloat(delta);
 
+            // 🛡️ Guardrail: rechazar delta absurdo. Protege contra errores de UX
+            // o dobles clicks que envien ajustes de stock con cantidades erroneas.
+            if (Math.abs(deltaValue) > 10000) {
+                return res.status(400).json({
+                    error: `Delta absurdo (${deltaValue}). Limite maximo en valor absoluto: 10000. Si realmente necesitas un ajuste mayor, haz varias operaciones o ejecuta SQL manual con BEGIN.`
+                });
+            }
+
             // SQL atómico: GREATEST(0, stock + delta) para evitar negativos
             const stockExpr = min_zero
                 ? 'GREATEST(0, COALESCE(stock_actual, 0) + $1)'
@@ -408,6 +416,16 @@ module.exports = function (pool) {
             for (const adj of adjustments) {
                 if (!adj.id || adj.delta === undefined || isNaN(parseFloat(adj.delta))) {
                     errors.push({ id: adj.id, error: 'ID o delta inválido' });
+                    continue;
+                }
+
+                // 🛡️ Guardrail: rechazar ajustes absurdos. Evita que un doble
+                // click humano (incidente 2026-04-22) infle miles de unidades.
+                if (Math.abs(parseFloat(adj.delta)) > 10000) {
+                    errors.push({
+                        id: adj.id,
+                        error: `Delta absurdo (${adj.delta}). Maximo en valor absoluto: 10000.`
+                    });
                     continue;
                 }
 
