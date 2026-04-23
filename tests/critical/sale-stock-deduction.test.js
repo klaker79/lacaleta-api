@@ -27,24 +27,37 @@ describe('POST/DELETE /api/sales — Stock deduction and restoration', () => {
             return;
         }
 
-        // Find a recipe that has ingredients (needed for stock deduction)
+        // Find a recipe that has ingredients AND no variants (needed for stock
+        // deduction test — since 2026-04-23, recipes with variants require
+        // varianteId in POST /api/sales).
         const recipesRes = await request(API_URL)
             .get('/api/recipes')
             .set('Origin', 'http://localhost:3001')
             .set('Authorization', `Bearer ${authToken}`);
 
         if (recipesRes.status === 200) {
-            const recipeWithIngredients = recipesRes.body.find(r =>
+            const candidates = recipesRes.body.filter(r =>
                 r.ingredientes && Array.isArray(r.ingredientes) && r.ingredientes.length > 0
             );
 
-            if (recipeWithIngredients) {
-                testRecipeId = recipeWithIngredients.id;
-                testRecipeIngredients = recipeWithIngredients.ingredientes;
-                console.log(`🍽️ Test recipe: ${recipeWithIngredients.nombre} (ID: ${testRecipeId})`);
-                console.log(`   Ingredients: ${testRecipeIngredients.length}`);
-            } else {
-                console.warn('⚠️ No recipe with ingredients found. Some tests will skip.');
+            for (const r of candidates) {
+                const variantsRes = await request(API_URL)
+                    .get(`/api/recipes/${r.id}/variants`)
+                    .set('Origin', 'http://localhost:3001')
+                    .set('Authorization', `Bearer ${authToken}`);
+                const hasVariants = variantsRes.status === 200
+                    && Array.isArray(variantsRes.body)
+                    && variantsRes.body.length > 0;
+                if (!hasVariants) {
+                    testRecipeId = r.id;
+                    testRecipeIngredients = r.ingredientes;
+                    console.log(`🍽️ Test recipe: ${r.nombre} (ID: ${testRecipeId}) — sin variantes`);
+                    console.log(`   Ingredients: ${testRecipeIngredients.length}`);
+                    break;
+                }
+            }
+            if (!testRecipeId) {
+                console.warn('⚠️ No recipe with ingredients AND without variants found. Tests will skip.');
             }
         }
     });

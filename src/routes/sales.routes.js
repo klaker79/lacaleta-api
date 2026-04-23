@@ -130,7 +130,18 @@ module.exports = function (pool) {
 
             const receta = recetaResult.rows[0];
 
-            // ⚡ NUEVO: Si hay variante, obtener su precio y factor
+            // 🔒 Si la receta tiene variantes registradas, exigir identificarla.
+            // Antes: varianteId=null -> factor=1 silencioso (-> 274 ventas de vinos
+            // mal contabilizadas en La Nave 5 en 90 dias, stock inflado). Ahora
+            // rechazamos 400 con la lista de variantes disponibles para que el
+            // caller (chat IA, import Excel, cualquier integracion) sepa que
+            // tiene que mandar varianteId.
+            const variantesDisponibles = await client.query(
+                'SELECT id, nombre, factor, precio_venta FROM recetas_variantes WHERE receta_id = $1 AND restaurante_id = $2',
+                [recetaId, req.restauranteId]
+            );
+            const tieneVariantes = variantesDisponibles.rows.length > 0;
+
             let precioUnitario = parseFloat(receta.precio_venta);
             let factorVariante = 1;
 
@@ -144,13 +155,14 @@ module.exports = function (pool) {
                     precioUnitario = parseFloat(variante.precio_venta);
                     factorVariante = parseFloat(variante.factor) || 1;
                     log('info', 'Venta con variante', { varianteId, precio: precioUnitario, factor: factorVariante });
+                } else {
+                    // varianteId mandado pero no existe o no pertenece a esta receta/tenant
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ error: 'Variante no encontrada para esta receta' });
                 }
             } else if (precioVariante && precioVariante > 0) {
-                // Fallback defensivo: el frontend mandó un precio distinto al de la receta
-                // pero sin varianteId. Intentamos encontrar la variante por precio_venta
-                // para aplicar su factor (copa 0.2 vs botella 1.0). Si no la encontramos
-                // conservamos factor=1 pero registramos warning: vender copa sin varianteId
-                // descontaría stock como botella → bug potencial.
+                // El caller mando precio pero no id. Intentamos adivinar la variante
+                // por precio_venta (+/-0.01). Si la encontramos, usamos su factor.
                 precioUnitario = precioVariante;
                 const probableVariante = await client.query(
                     'SELECT id, factor FROM recetas_variantes WHERE receta_id = $1 AND restaurante_id = $2 AND ABS(precio_venta - $3) < 0.01 LIMIT 1',
@@ -158,15 +170,29 @@ module.exports = function (pool) {
                 );
                 if (probableVariante.rows.length > 0) {
                     factorVariante = parseFloat(probableVariante.rows[0].factor) || 1;
-                    log('info', 'Venta con precio de variante (sin id) — factor inferido', {
+                    log('info', 'Venta con precio de variante (sin id) - factor inferido', {
                         recetaId, precio: precioUnitario, factor: factorVariante,
                         varianteInferida: probableVariante.rows[0].id
                     });
-                } else if (Math.abs(precioVariante - parseFloat(receta.precio_venta)) > 0.01) {
-                    log('warn', 'Venta con precioVariante sin varianteId y sin match — factor=1 aplicado', {
-                        recetaId, precioEnviado: precioVariante, precioReceta: receta.precio_venta
+                } else if (tieneVariantes) {
+                    // Receta con variantes pero el precio no matchea ninguna. Antes
+                    // aplicabamos factor=1 silencioso; ahora rechazamos.
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        error: 'La receta tiene variantes. Envia varianteId o un precioVariante que coincida con alguna variante.',
+                        variantes: variantesDisponibles.rows
                     });
                 }
+                // Si la receta NO tiene variantes y llega precioVariante, se acepta
+                // con factor=1 (caso legitimo: override de precio puntual).
+            } else if (tieneVariantes) {
+                // Caso problematico historico: no llega ni varianteId ni precioVariante
+                // y la receta SI tiene variantes. Antes: factor=1 silencioso. Ahora 400.
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    error: 'La receta tiene variantes. varianteId es obligatorio.',
+                    variantes: variantesDisponibles.rows
+                });
             }
 
             const total = precioUnitario * cantidadValidada;
