@@ -79,6 +79,34 @@ module.exports = function (pool) {
                 }
             }
 
+            // 🔒 VALIDACIÓN CROSS-TENANT: asegurar que el proveedor y TODOS los
+            // ingredientes pertenecen al tenant del token. Sin esto, un token de
+            // tenant A podría crear pedidos con IDs de recursos del tenant B.
+            if (proveedorId) {
+                const provCheck = await client.query(
+                    'SELECT id FROM proveedores WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                    [proveedorId, req.restauranteId]
+                );
+                if (provCheck.rows.length === 0) {
+                    return res.status(404).json({ error: 'Proveedor no encontrado' });
+                }
+            }
+            if (Array.isArray(ingredientes) && ingredientes.length > 0) {
+                const ingIds = ingredientes
+                    .filter(it => it.tipo !== 'ajuste')
+                    .map(it => it.ingredienteId || it.ingrediente_id)
+                    .filter(Boolean);
+                if (ingIds.length > 0) {
+                    const ingCheck = await client.query(
+                        'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
+                        [ingIds, req.restauranteId]
+                    );
+                    if (ingCheck.rows.length !== ingIds.length) {
+                        return res.status(404).json({ error: 'Uno o más ingredientes no encontrados' });
+                    }
+                }
+            }
+
             // 🛡️ Guardrail: rechazar cantidades absurdas. Mismo umbral (10.000)
             // que aplican los endpoints /purchases/pending/approve*. Evita que un
             // doble click humano o un click por error infle el stock en miles de
