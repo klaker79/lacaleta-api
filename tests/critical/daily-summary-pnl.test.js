@@ -37,17 +37,29 @@ describe('Daily Summary P&L — Sales update and deletion', () => {
             .set('Authorization', `Bearer ${authToken}`);
 
         if (recipesRes.status === 200) {
-            const recipe = recipesRes.body.find(r =>
+            // 2026-04-23: recetas con variantes requieren varianteId en POST /api/sales.
+            // Este test hace ventas sin varianteId, asi que filtramos recetas sin variantes.
+            const candidates = recipesRes.body.filter(r =>
                 r.precio_venta && parseFloat(r.precio_venta) > 0
             );
-
-            if (recipe) {
-                testRecipeId = recipe.id;
-                testRecipeName = recipe.nombre;
-                testRecipePrice = parseFloat(recipe.precio_venta);
-                console.log(`🍽️ Test recipe: ${testRecipeName} (ID: ${testRecipeId}, price: ${testRecipePrice}€)`);
-            } else {
-                console.warn('⚠️ No recipe with price found. Tests will skip.');
+            for (const r of candidates) {
+                const variantsRes = await request(API_URL)
+                    .get(`/api/recipes/${r.id}/variants`)
+                    .set('Origin', 'http://localhost:3001')
+                    .set('Authorization', `Bearer ${authToken}`);
+                const hasVariants = variantsRes.status === 200
+                    && Array.isArray(variantsRes.body)
+                    && variantsRes.body.length > 0;
+                if (!hasVariants) {
+                    testRecipeId = r.id;
+                    testRecipeName = r.nombre;
+                    testRecipePrice = parseFloat(r.precio_venta);
+                    console.log(`🍽️ Test recipe: ${testRecipeName} (ID: ${testRecipeId}, price: ${testRecipePrice}€) — sin variantes`);
+                    break;
+                }
+            }
+            if (!testRecipeId) {
+                console.warn('⚠️ No recipe with price AND without variants found. Tests will skip.');
             }
         }
     });
