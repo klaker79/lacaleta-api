@@ -12,6 +12,7 @@
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
+const { logChange } = require('../utils/auditLog');
 const { upsertCompraDiaria } = require('../utils/businessHelpers');
 const { validateDate, validateNumber, validateId } = require('../utils/validators');
 
@@ -411,6 +412,19 @@ module.exports = function (pool) {
 
             await client.query('COMMIT');
             log('info', 'Pedido eliminado con cascading delete', { id: req.params.id, estado: pedido.estado });
+
+            // Audit: registramos el DELETE a nivel pedido (la operación lógica).
+            // `pedido` ya contiene el JSON de ingredientes, stock revertido y filas
+            // de precios_compra_diarios borradas — todo deducible desde aquí.
+            logChange(pool, {
+                req,
+                tabla: 'pedidos',
+                operacion: 'DELETE',
+                registroId: pedido.id,
+                datosAntes: pedido,
+                datosDespues: null,
+            });
+
             res.json({ message: 'Eliminado', id: pedido.id });
         } catch (err) {
             await client.query('ROLLBACK');

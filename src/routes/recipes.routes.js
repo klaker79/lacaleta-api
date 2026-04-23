@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
+const { logChange } = require('../utils/auditLog');
 const { sanitizeString, validatePrecio, validateNumber, validateId } = require('../utils/validators');
 
 /**
@@ -93,8 +94,14 @@ module.exports = function (pool) {
             const { id, variantId } = { id: idCheck.value, variantId: variantCheck.value };
             const { nombre, factor, precio_venta, codigo, activo } = req.body;
 
+            // Capturar estado previo para audit_log
+            const before = await pool.query(
+                'SELECT * FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3',
+                [variantId, id, req.restauranteId]
+            );
+
             const result = await pool.query(
-                `UPDATE recetas_variantes 
+                `UPDATE recetas_variantes
              SET nombre = COALESCE($1, nombre),
                  factor = COALESCE($2, factor),
                  precio_venta = COALESCE($3, precio_venta),
@@ -110,6 +117,13 @@ module.exports = function (pool) {
             }
 
             log('info', 'Variante actualizada', { variant_id: variantId });
+
+            logChange(pool, {
+                req, tabla: 'recetas_variantes', operacion: 'UPDATE', registroId: variantId,
+                datosAntes: before.rows[0] || null,
+                datosDespues: result.rows[0],
+            });
+
             res.json(result.rows[0]);
         } catch (err) {
             log('error', 'Error actualizando variante', { error: err.message });
@@ -125,6 +139,12 @@ module.exports = function (pool) {
             if (!idCheck.valid || !variantCheck.valid) return res.status(400).json({ error: 'ID inválido' });
             const { id, variantId } = { id: idCheck.value, variantId: variantCheck.value };
 
+            // Capturar estado previo para audit_log
+            const before = await pool.query(
+                'SELECT * FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3',
+                [variantId, id, req.restauranteId]
+            );
+
             const result = await pool.query(
                 'DELETE FROM recetas_variantes WHERE id = $1 AND receta_id = $2 AND restaurante_id = $3 RETURNING id',
                 [variantId, id, req.restauranteId]
@@ -135,6 +155,13 @@ module.exports = function (pool) {
             }
 
             log('info', 'Variante eliminada', { variant_id: variantId });
+
+            logChange(pool, {
+                req, tabla: 'recetas_variantes', operacion: 'DELETE', registroId: variantId,
+                datosAntes: before.rows[0] || null,
+                datosDespues: null,
+            });
+
             res.json({ success: true });
         } catch (err) {
             log('error', 'Error eliminando variante', { error: err.message });
@@ -236,6 +263,12 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: vIngs.error, details: vIngs.details });
             }
 
+            // Capturar estado previo para audit_log antes del UPDATE
+            const before = await pool.query(
+                'SELECT * FROM recetas WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL',
+                [id, req.restauranteId]
+            );
+
             // 🔒 deleted_at IS NULL: no revivir recetas borradas via PUT
             const result = await pool.query(
                 'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6 WHERE id=$7 AND restaurante_id=$8 AND deleted_at IS NULL RETURNING *',
@@ -244,6 +277,13 @@ module.exports = function (pool) {
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Receta no encontrada' });
             }
+
+            logChange(pool, {
+                req, tabla: 'recetas', operacion: 'UPDATE', registroId: id,
+                datosAntes: before.rows[0] || null,
+                datosDespues: result.rows[0],
+            });
+
             res.json(result.rows[0]);
         } catch (err) {
             log('error', 'Error actualizando receta', { error: err.message });
@@ -256,6 +296,13 @@ module.exports = function (pool) {
             // SOFT DELETE: marca como eliminado sin borrar datos
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
+
+            // Capturar estado previo para audit_log
+            const before = await pool.query(
+                'SELECT * FROM recetas WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL',
+                [idCheck.value, req.restauranteId]
+            );
+
             const result = await pool.query(
                 'UPDATE recetas SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING *',
                 [idCheck.value, req.restauranteId]
@@ -264,6 +311,13 @@ module.exports = function (pool) {
                 return res.status(404).json({ error: 'Receta no encontrada o ya eliminada' });
             }
             log('info', 'Receta soft deleted', { id: req.params.id });
+
+            logChange(pool, {
+                req, tabla: 'recetas', operacion: 'DELETE', registroId: idCheck.value,
+                datosAntes: before.rows[0] || null,
+                datosDespues: null,
+            });
+
             res.json({ message: 'Eliminado', id: result.rows[0].id });
         } catch (err) {
             log('error', 'Error eliminando receta', { error: err.message });

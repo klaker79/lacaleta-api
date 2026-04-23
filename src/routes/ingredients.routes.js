@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { validatePrecio, validateCantidad, sanitizeString, validateRequired, validateId } = require('../utils/validators');
+const { logChange } = require('../utils/auditLog');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -303,6 +304,17 @@ module.exports = function (pool) {
                 }
             }
 
+            // Audit trail: fire-and-forget. `existing` es la fila pre-UPDATE,
+            // `result.rows[0]` es la fila tras el UPDATE.
+            logChange(pool, {
+                req,
+                tabla: 'ingredientes',
+                operacion: 'UPDATE',
+                registroId: id,
+                datosAntes: existing,
+                datosDespues: result.rows[0] || null,
+            });
+
             res.json(result.rows[0] || {});
         } catch (err) {
             log('error', 'Error actualizando ingrediente', { error: err.message });
@@ -312,17 +324,43 @@ module.exports = function (pool) {
 
     router.delete('/ingredients/:id', authMiddleware, requireAdmin, async (req, res) => {
         try {
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: idCheck.error });
+            }
+            const id = idCheck.value;
+
+            // Snapshot antes del soft-delete para audit_log
+            const beforeResult = await pool.query(
+                'SELECT * FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                [id, req.restauranteId]
+            );
+            if (beforeResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Ingrediente no encontrado o ya eliminado' });
+            }
+            const datosAntes = beforeResult.rows[0];
+
             // SOFT DELETE: marca como eliminado sin borrar datos
             const result = await pool.query(
                 'UPDATE ingredientes SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2 AND deleted_at IS NULL RETURNING id',
-                [req.params.id, req.restauranteId]
+                [id, req.restauranteId]
             );
 
             if (result.rowCount === 0) {
                 return res.status(404).json({ error: 'Ingrediente no encontrado o ya eliminado' });
             }
 
-            log('info', 'Ingrediente soft deleted', { id: req.params.id });
+            log('info', 'Ingrediente soft deleted', { id });
+
+            logChange(pool, {
+                req,
+                tabla: 'ingredientes',
+                operacion: 'DELETE',
+                registroId: id,
+                datosAntes,
+                datosDespues: null,
+            });
+
             res.json({ message: 'Eliminado', id: result.rows[0].id });
         } catch (err) {
             log('error', 'Error eliminando ingrediente', { error: err.message });

@@ -208,4 +208,42 @@ describe('Super Admin Routes — Access control and endpoints', () => {
 
         expect(res.status).toBe(401);
     });
+
+    // ===== AUDIT LOG =====
+
+    it('GET /api/superadmin/audit-log without token → 401', async () => {
+        const res = await request(API_URL)
+            .get('/api/superadmin/audit-log')
+            .set('Origin', 'http://localhost:3001');
+
+        expect(res.status).toBe(401);
+    });
+
+    it('GET /api/superadmin/audit-log with token → 200 or 403', async () => {
+        if (!authToken) return;
+
+        const res = await request(API_URL)
+            .get('/api/superadmin/audit-log?limit=5')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+
+        expect([200, 403]).toContain(res.status);
+
+        if (res.status === 200) {
+            expect(typeof res.body.total).toBe('number');
+            expect(Array.isArray(res.body.rows)).toBe(true);
+            expect(res.body.limit).toBe(5);
+        }
+    });
+
+    it('GET /api/superadmin/audit-log con operacion invalida → 400 o 403', async () => {
+        if (!authToken) return;
+
+        const res = await request(API_URL)
+            .get('/api/superadmin/audit-log?operacion=TRUNCATE')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+
+        expect([400, 403]).toContain(res.status);
+    });
 });
