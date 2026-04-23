@@ -156,30 +156,9 @@ describe('Ingredient/Recipe CRUD — Validation rules', () => {
         createdIngredientId = null;
     });
 
-    // ===== NEGATIVE VALUES =====
-
-    it('7. Negative precio in pending purchase is auto-corrected', async () => {
-        if (!authToken) return;
-
-        // Get a pending purchase to test against
-        const purchasesRes = await request(API_URL)
-            .get('/api/purchases/pending')
-            .set('Origin', 'http://localhost:3001')
-            .set('Authorization', `Bearer ${authToken}`);
-
-        if (purchasesRes.status === 200 && purchasesRes.body.length > 0) {
-            const testPurchase = purchasesRes.body[0];
-            console.log(`📋 Testing negative values on purchase ID: ${testPurchase.id}`);
-            // This validates the Math.abs fix is in place
-
-            // Just verify the endpoint is reachable — detailed negative value test
-            // would require modifying data we should not change
-            expect(purchasesRes.status).toBe(200);
-            console.log(`✅ Pending purchases endpoint works (${purchasesRes.body.length} items)`);
-        } else {
-            console.log('ℹ️ No pending purchases to test negative values');
-        }
-    });
+    // Nota: el test 7 ("Negative precio in pending purchase is auto-corrected")
+    // se eliminó en 2026-04-23 junto con la demolición de OCR — probaba
+    // GET /api/purchases/pending que ya no existe.
 
     afterAll(async () => {
         // Safety cleanup if test 6 didn't run
