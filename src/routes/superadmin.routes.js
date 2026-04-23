@@ -390,5 +390,101 @@ module.exports = function (pool, config = {}) {
         }
     });
 
+    // ========== AUDIT LOG ==========
+    // GET /superadmin/audit-log — consulta auditoría con filtros
+    // Filtros opcionales: restauranteId, tabla, userId, operacion, desde, hasta
+    router.get('/superadmin/audit-log', async (req, res) => {
+        try {
+            const {
+                restauranteId,
+                tabla,
+                userId,
+                operacion,
+                desde,
+                hasta,
+                limit,
+                offset,
+            } = req.query;
+
+            const conditions = [];
+            const params = [];
+            let p = 1;
+
+            if (restauranteId) {
+                const n = parseInt(restauranteId, 10);
+                if (!Number.isFinite(n)) {
+                    return res.status(400).json({ error: 'restauranteId inválido' });
+                }
+                conditions.push(`al.restaurante_id = $${p++}`);
+                params.push(n);
+            }
+            if (tabla) {
+                conditions.push(`al.tabla = $${p++}`);
+                params.push(String(tabla).slice(0, 50));
+            }
+            if (userId) {
+                const n = parseInt(userId, 10);
+                if (!Number.isFinite(n)) {
+                    return res.status(400).json({ error: 'userId inválido' });
+                }
+                conditions.push(`al.user_id = $${p++}`);
+                params.push(n);
+            }
+            if (operacion) {
+                const op = String(operacion).toUpperCase();
+                if (!['INSERT', 'UPDATE', 'DELETE'].includes(op)) {
+                    return res.status(400).json({ error: 'operacion debe ser INSERT, UPDATE o DELETE' });
+                }
+                conditions.push(`al.operacion = $${p++}`);
+                params.push(op);
+            }
+            if (desde) {
+                conditions.push(`al.timestamp >= $${p++}`);
+                params.push(desde);
+            }
+            if (hasta) {
+                conditions.push(`al.timestamp <= $${p++}`);
+                params.push(hasta);
+            }
+
+            const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+            const limitVal = validateNumber(limit, 100, 1, 500);
+            const offsetVal = validateNumber(offset, 0, 0);
+
+            const countParams = [...params];
+            params.push(limitVal, offsetVal);
+
+            const query = `
+                SELECT al.id, al.timestamp, al.user_id, al.user_email,
+                       al.restaurante_id, r.nombre AS restaurante_nombre,
+                       al.tabla, al.operacion, al.registro_id,
+                       al.datos_antes, al.datos_despues,
+                       al.ip_address, al.user_agent
+                FROM audit_log al
+                LEFT JOIN restaurantes r ON r.id = al.restaurante_id
+                ${where}
+                ORDER BY al.timestamp DESC
+                LIMIT $${p++} OFFSET $${p++}
+            `;
+
+            const countQuery = `SELECT COUNT(*)::int AS total FROM audit_log al ${where}`;
+
+            const [rowsRes, countRes] = await Promise.all([
+                pool.query(query, params),
+                pool.query(countQuery, countParams),
+            ]);
+
+            res.json({
+                total: countRes.rows[0].total,
+                limit: limitVal,
+                offset: offsetVal,
+                rows: rowsRes.rows,
+            });
+        } catch (err) {
+            log('error', 'Error en superadmin audit-log', { error: err.message });
+            res.status(500).json({ error: 'Error obteniendo audit log' });
+        }
+    });
+
     return router;
 };

@@ -689,6 +689,36 @@ async function initializeDatabase(pool) {
     log('info', 'Migración restaurantes.moneda completada');
   } catch (e) { log('warn', 'Migración moneda', { error: e.message }); }
 
+  // ========== MIGRACIÓN: audit_log (B4) ==========
+  // Trazabilidad de cambios sensibles. Se llena via utils/auditLog.js en
+  // endpoints de UPDATE/DELETE de recetas, ingredientes, recetas_variantes.
+  // Fire-and-forget: un fallo de INSERT aquí no rompe la operación original.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        user_id INTEGER,
+        user_email VARCHAR(255),
+        restaurante_id INTEGER NOT NULL,
+        tabla VARCHAR(50) NOT NULL,
+        operacion VARCHAR(10) NOT NULL,
+        registro_id INTEGER NOT NULL,
+        datos_antes JSONB,
+        datos_despues JSONB,
+        ip_address VARCHAR(45),
+        user_agent TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_ts
+        ON audit_log(restaurante_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_tabla_registro
+        ON audit_log(tabla, registro_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_user_ts
+        ON audit_log(user_id, timestamp DESC);
+    `);
+    log('info', 'Tabla audit_log creada/verificada');
+  } catch (e) { log('warn', 'Migración audit_log', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).

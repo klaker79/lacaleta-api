@@ -17,6 +17,7 @@
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
+const { logChange } = require('../utils/auditLog');
 
 module.exports = function (pool) {
     const router = Router();
@@ -78,6 +79,16 @@ module.exports = function (pool) {
             if (!ingredienteId || !fecha) {
                 return res.status(400).json({ error: 'ingredienteId y fecha son obligatorios' });
             }
+
+            // Snapshot ANTES para audit_log (este es el endpoint que usaría un
+            // humano para corregir un parseo erróneo de la IA — el caso del 2026-04-23).
+            const beforeResult = await pool.query(
+                `SELECT * FROM precios_compra_diarios
+                 WHERE ingrediente_id = $1 AND fecha = $2 AND restaurante_id = $3`,
+                [ingredienteId, fecha, req.restauranteId]
+            );
+            const datosAntes = beforeResult.rows[0] || null;
+
             const result = await pool.query(
                 `UPDATE precios_compra_diarios
                  SET cantidad_comprada = $1, total_compra = $2
@@ -89,6 +100,16 @@ module.exports = function (pool) {
                 return res.status(404).json({ error: 'Registro no encontrado' });
             }
             log('info', 'Compra diaria corregida', { ingredienteId, fecha, cantidad, total });
+
+            logChange(pool, {
+                req,
+                tabla: 'precios_compra_diarios',
+                operacion: 'UPDATE',
+                registroId: result.rows[0].id,
+                datosAntes,
+                datosDespues: result.rows[0],
+            });
+
             res.json({ success: true, updated: result.rows[0] });
         } catch (err) {
             log('error', 'Error corrigiendo compra diaria', { error: err.message });
