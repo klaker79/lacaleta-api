@@ -2,16 +2,12 @@
  * Daily Routes — Simple read/update endpoints for daily data.
  *
  * Extracted from balance.routes.js on 2026-04-20 to keep that file under
- * a manageable size. These endpoints read/update day-level tables and do
- * not depend on any OCR-specific helpers.
+ * a manageable size. These endpoints read/update day-level tables.
  *
  * Endpoints:
  *   - GET  /daily/purchases         — daily purchase aggregates (tabla precios_compra_diarios)
  *   - PUT  /daily/purchases/correct — admin-style fix for a mis-entered daily purchase
  *   - GET  /daily/sales             — daily sales aggregates (tabla ventas_diarias_resumen)
- *
- * NOTE: /daily/purchases/bulk lives in compras-pendientes.routes.js because
- * it shares the OCR-disabled guard and is part of the legacy n8n flow.
  */
 
 const { Router } = require('express');
