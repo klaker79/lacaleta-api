@@ -635,18 +635,23 @@ REGLAS:
                     continue;
                 }
 
-                // Prioridad: buscar por código TPV, luego en variantes, luego por nombre
+                // Prioridad: variante por codigo > receta padre por codigo > receta por nombre.
+                // 2026-04-24: antes la receta padre iba primero; si una receta y su variante
+                // BOTELLA comparten codigo TPV (patron comun en La Nave 5: crear receta padre
+                // con codigo botella factor=1, luego variante BOTELLA identica + COPA con otro
+                // codigo), el matcheo por padre dejaba variante_id=null aunque el factor era
+                // correcto. Priorizar variante garantiza trazabilidad sin cambiar el factor.
                 let receta = null;
                 let factorAplicado = 1;  // Factor por defecto
                 let varianteEncontrada = null;
 
-                if (codigoTpv && recetasMapCodigo.has(codigoTpv)) {
-                    receta = recetasMapCodigo.get(codigoTpv);
-                } else if (codigoTpv && variantesMapCodigo.has(codigoTpv)) {
-                    // ⚡ Código encontrado en variantes (COPA, BOTELLA, etc.)
+                if (codigoTpv && variantesMapCodigo.has(codigoTpv)) {
+                    // Código encontrado en variantes (COPA, BOTELLA, etc.)
                     varianteEncontrada = variantesMapCodigo.get(codigoTpv);
                     receta = varianteEncontrada;  // Tiene los mismos campos que receta
                     factorAplicado = varianteEncontrada.factor;
+                } else if (codigoTpv && recetasMapCodigo.has(codigoTpv)) {
+                    receta = recetasMapCodigo.get(codigoTpv);
                 } else if (nombreReceta && recetasMapNombre.has(nombreReceta)) {
                     receta = recetasMapNombre.get(nombreReceta);
                 }
