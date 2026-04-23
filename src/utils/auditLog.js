@@ -95,8 +95,9 @@ async function logChange(pool, params) {
         );
     } catch (err) {
         // Fire-and-forget: un fallo en audit_log NO rompe la operación
-        // original. Solo emite un warn para que se detecte via logs/Sentry.
-        log('warn', 'auditLog: INSERT fallido', {
+        // original. Emitimos 'error' (no 'warn') para que suba a Sentry y
+        // nos enteremos si el audit se rompe — si no, la pérdida es silenciosa.
+        log('error', 'auditLog: INSERT fallido', {
             error: err.message,
             tabla,
             operacion,
