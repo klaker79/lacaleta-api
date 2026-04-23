@@ -636,11 +636,15 @@ module.exports = function (pool) {
             const { id, supplierId } = req.params;
             const { precio, es_proveedor_principal } = req.body;
 
-            // Verificar que la asociación existe
+            // Verificar que la asociación existe y que TANTO ingrediente COMO proveedor
+            // pertenecen al tenant actual. Sin el JOIN con proveedores, un token de
+            // tenant A podría modificar asociaciones usando proveedor_id de tenant B.
             const check = await pool.query(`
             SELECT ip.id FROM ingredientes_proveedores ip
             JOIN ingredientes i ON ip.ingrediente_id = i.id
-            WHERE ip.ingrediente_id = $1 AND ip.proveedor_id = $2 AND i.restaurante_id = $3
+            JOIN proveedores p ON ip.proveedor_id = p.id
+            WHERE ip.ingrediente_id = $1 AND ip.proveedor_id = $2
+              AND i.restaurante_id = $3 AND p.restaurante_id = $3
         `, [id, supplierId, req.restauranteId]);
 
             if (check.rows.length === 0) {
@@ -705,11 +709,14 @@ module.exports = function (pool) {
         try {
             const { id, supplierId } = req.params;
 
-            // Verificar que existe y pertenece al restaurante
+            // Verificar que existe y que TANTO ingrediente COMO proveedor pertenecen
+            // al tenant actual (validación cross-tenant estricta).
             const check = await pool.query(`
             SELECT ip.id FROM ingredientes_proveedores ip
             JOIN ingredientes i ON ip.ingrediente_id = i.id
-            WHERE ip.ingrediente_id = $1 AND ip.proveedor_id = $2 AND i.restaurante_id = $3
+            JOIN proveedores p ON ip.proveedor_id = p.id
+            WHERE ip.ingrediente_id = $1 AND ip.proveedor_id = $2
+              AND i.restaurante_id = $3 AND p.restaurante_id = $3
         `, [id, supplierId, req.restauranteId]);
 
             if (check.rows.length === 0) {
