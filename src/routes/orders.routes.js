@@ -79,11 +79,10 @@ module.exports = function (pool) {
                 }
             }
 
-            // 🛡️ Guardrail: rechazar cantidades absurdas. Mismo umbral (10.000)
-            // que aplican los endpoints /purchases/pending/approve*. Evita que un
-            // doble click humano o un click por error infle el stock en miles de
-            // unidades (incidente 2026-04-22: Pazo Lusco saltó a 144 botellas por
-            // combinación mal introducida cantidad+formato).
+            // 🛡️ Guardrail: rechazar cantidades absurdas. Umbral 10.000 por línea.
+            // Evita que un doble click humano o un click por error infle el stock
+            // en miles de unidades (incidente 2026-04-22: Pazo Lusco saltó a 144
+            // botellas por combinación mal introducida cantidad+formato).
             if (Array.isArray(ingredientes)) {
                 for (const item of ingredientes) {
                     if (item.tipo === 'ajuste') continue;
@@ -105,8 +104,9 @@ module.exports = function (pool) {
                 [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId]
             );
 
-            // 📊 Registrar en Diario y sumar stock si pedido se crea como 'recibido' (compra mercado)
-            // NOTA: El frontend NO llama a /daily/purchases/bulk. Esta es la ÚNICA fuente.
+            // 📊 Registrar en Diario si pedido se crea como 'recibido' (compra mercado).
+            // POST /orders es ahora la ÚNICA fuente de precios_compra_diarios desde el lado
+            // API (el bulk de n8n se retiró en el cleanup OCR de 2026-04-23).
             if (estado === 'recibido' && ingredientes && Array.isArray(ingredientes)) {
                 const fechaCompra = fecha ? new Date(fecha) : new Date();
 
