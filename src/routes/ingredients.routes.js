@@ -252,8 +252,9 @@ module.exports = function (pool) {
             });
 
             // 🔒 deleted_at IS NULL: evita resucitar un ingrediente soft-eliminado vía PUT
+            // fecha_actualizacion = NOW(): util para diagnostico (saber cuando se edito por ultima vez)
             const result = await pool.query(
-                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
+                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12, fecha_actualizacion=NOW() WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
                 [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
             );
 
