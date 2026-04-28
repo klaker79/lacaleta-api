@@ -15,6 +15,7 @@
 const Anthropic = require('@anthropic-ai/sdk').default;
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = 'claude-sonnet-4-6';
@@ -596,10 +597,22 @@ async function runTool(name, pool, restauranteId, args = {}) {
             // almacena en ventas_diarias_resumen.coste_ingredientes. Es la MISMA fuente
             // que usa el Dashboard para Food Cost. Split food vs beverage por categoría de
             // receta para que el cliente vea ambos separados (estándar hostelería).
+            // 🏷️ Capa 5 auditoría 2026-04-28: bucketing canónico vía categoriaClassifier.
+            // ANTES: 'base' y 'suministro(s)' caían en 'beverage', 'bebida' (singular)
+            // caía en 'food' → divergencia con dashboard (analytics.routes.js
+            // pnl-breakdown). Ahora los 3 buckets coinciden: FOOD, BEVERAGE, OTHER
+            // (suministros/preparaciones base). Mantenemos contrato externo del chat
+            // exponiendo food + beverage; el bucket 'otros' se excluye de food cost
+            // como en el dashboard (no son ventas a cliente final).
+            const beverageList = beverageCategoriesSqlList();
+            const otherList = otherCategoriesSqlList();
             const cogsSplit = (await pool.query(`
                 SELECT
-                  CASE WHEN LOWER(r.categoria) IN ('bebidas','base','suministro','suministros')
-                       THEN 'beverage' ELSE 'food' END AS tipo,
+                  CASE
+                    WHEN LOWER(COALESCE(r.categoria, '')) IN (${beverageList}) THEN 'beverage'
+                    WHEN LOWER(COALESCE(r.categoria, '')) IN (${otherList})    THEN 'otros'
+                    ELSE 'food'
+                  END AS tipo,
                   COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(12,2) AS cogs,
                   COALESCE(SUM(vdr.total_ingresos),   0)::numeric(12,2) AS ingresos_cat
                 FROM ventas_diarias_resumen vdr
@@ -611,6 +624,8 @@ async function runTool(name, pool, restauranteId, args = {}) {
             for (const r of cogsSplit) {
                 if (r.tipo === 'food')     { cogs_food     = parseFloat(r.cogs) || 0; ing_food     = parseFloat(r.ingresos_cat) || 0; }
                 if (r.tipo === 'beverage') { cogs_beverage = parseFloat(r.cogs) || 0; ing_beverage = parseFloat(r.ingresos_cat) || 0; }
+                // 'otros' (suministros / preparaciones base): se excluye intencionadamente
+                // del split food cost para alinear con dashboard.
             }
             const cogs_periodo = cogs_food + cogs_beverage;
             // Real schema of gastos_fijos: monto_mensual is already monthly,

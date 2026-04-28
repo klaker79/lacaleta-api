@@ -7,6 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { nonFoodCategoriesSqlList } = require('../utils/categoriaClassifier');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -17,6 +18,13 @@ module.exports = function (pool) {
     // ========== ANÁLISIS AVANZADO ==========
     router.get('/analysis/menu-engineering', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
+            // 🏷️ Capa 5 auditoría 2026-04-28: lista canónica vía categoriaClassifier.
+            // Antes la lista NOT IN estaba hardcoded y divergía del bucketing
+            // food/beverage de chatService y dashboard. Ahora una única fuente:
+            // bebidas (BEVERAGE_CATEGORIES) + suministros/preparaciones base
+            // (OTHER_CATEGORIES) — idéntico a lo que pnl-breakdown excluye del
+            // food cost. Las recetas FOOD son el complemento exacto.
+            const nonFoodList = nonFoodCategoriesSqlList();
             // Query 1: Ventas agrupadas por receta
             const ventas = await pool.query(
                 `SELECT r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones,
@@ -25,7 +33,7 @@ module.exports = function (pool) {
              FROM ventas v
              JOIN recetas r ON v.receta_id = r.id
              WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
-               AND LOWER(COALESCE(r.categoria, '')) NOT IN ('bebidas', 'bebida', 'suministros', 'suministro', 'preparaciones base', 'preparacion base')
+               AND LOWER(COALESCE(r.categoria, '')) NOT IN (${nonFoodList})
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones`,
                 [req.restauranteId]
             );

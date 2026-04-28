@@ -17,6 +17,7 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
 
 function defaultMesActual() {
     const today = new Date();
@@ -272,11 +273,17 @@ module.exports = function (pool) {
                 if (!desde) desde = def.desde;
                 if (!hasta) hasta = def.hasta;
             }
+            // 🏷️ Capa 5 auditoría 2026-04-28: lista canónica vía categoriaClassifier.
+            // El bucketing antes tenía las listas hardcoded — chatService divergía.
+            // Mantenemos los mismos 3 buckets (food / beverage / otros) y la misma
+            // semántica; lo único que cambia es que la lista vive en un único sitio.
+            const beverageList = beverageCategoriesSqlList();
+            const otherList = otherCategoriesSqlList();
             const { rows } = await pool.query(
                 `SELECT
                     CASE
-                        WHEN LOWER(COALESCE(r.categoria, '')) IN ('bebida', 'bebidas') THEN 'beverage'
-                        WHEN LOWER(COALESCE(r.categoria, '')) IN ('suministro', 'suministros', 'preparacion base', 'preparaciones base') THEN 'otros'
+                        WHEN LOWER(COALESCE(r.categoria, '')) IN (${beverageList}) THEN 'beverage'
+                        WHEN LOWER(COALESCE(r.categoria, '')) IN (${otherList})    THEN 'otros'
                         ELSE 'food'
                     END AS bucket,
                     COALESCE(SUM(vdr.total_ingresos), 0)::numeric(14,2) AS ingresos,
