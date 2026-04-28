@@ -33,14 +33,32 @@ module.exports = function (pool) {
             let insertados = 0;
             for (const m of mermas) {
                 // Validar que ingredienteId existe o usar NULL
-                const ingredienteId = m.ingredienteId ? parseInt(m.ingredienteId) : null;
+                let ingredienteId = m.ingredienteId ? parseInt(m.ingredienteId) : null;
+
+                // 🔒 Validación cross-tenant: si llega un ingredienteId, debe pertenecer
+                //    al tenant Y no estar borrado. Sin esta verificación, un cliente
+                //    podía pasar un id de OTRO tenant: el INSERT entraba (la tabla
+                //    `mermas` solo filtra por restaurante en su propia fila), y el
+                //    UPDATE de stock fallaba en silencio. Auditoria A1-A4 / A1-A3.
+                if (ingredienteId !== null) {
+                    const ingCheck = await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                        [ingredienteId, req.restauranteId]
+                    );
+                    if (ingCheck.rows.length === 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({
+                            error: `Ingrediente ${ingredienteId} no existe en este restaurante o está borrado`
+                        });
+                    }
+                }
 
                 // Calcular periodo_id como YYYYMM (ej: 202601 para enero 2026)
                 const now = new Date();
                 const periodoId = now.getFullYear() * 100 + (now.getMonth() + 1);
 
                 await client.query(`
-                INSERT INTO mermas 
+                INSERT INTO mermas
                 (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id, periodo_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             `, [
@@ -57,11 +75,16 @@ module.exports = function (pool) {
                 ]);
 
                 // Descontar stock del ingrediente (simétrico con la restauración en DELETE /api/mermas/:id)
+                // 🔒 Lock + UPDATE con `deleted_at IS NULL` para no descontar stock de
+                //    ingredientes soft-deleted (auditoria A1-A3).
                 if (ingredienteId && parseFloat(m.cantidad) > 0) {
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
+                    await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
+                        [ingredienteId, req.restauranteId]
+                    );
                     await client.query(
                         `UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW()
-                     WHERE id = $2 AND restaurante_id = $3`,
+                     WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
                         [parseFloat(m.cantidad), ingredienteId, req.restauranteId]
                     );
                     log('info', 'Stock descontado por merma', { ingredienteId, cantidad: m.cantidad });
@@ -274,11 +297,16 @@ module.exports = function (pool) {
         `, [req.restauranteId]);
 
             // Restaurar stock de cada merma (con lock para evitar race condition)
+            // 🔒 Lock + UPDATE con `deleted_at IS NULL` para no resucitar stock de
+            //    ingredientes borrados (auditoria A1-A3).
             for (const merma of mermasToReset.rows) {
                 if (merma.ingrediente_id && parseFloat(merma.cantidad) > 0) {
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
                     await client.query(
-                        'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
+                        [merma.ingrediente_id, req.restauranteId]
+                    );
+                    await client.query(
+                        'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
                         [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
                     );
                 }
@@ -340,12 +368,17 @@ module.exports = function (pool) {
             // 2. Restaurar stock del ingrediente (sumar la cantidad que se había restado)
             if (merma.ingrediente_id && merma.cantidad > 0) {
                 // ⚡ FIX Bug #7: Lock row before update to prevent race condition
-                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [merma.ingrediente_id, req.restauranteId]);
+                // 🔒 deleted_at IS NULL en lock + UPDATE para no resucitar stock
+                //    de ingredientes borrados (auditoria A1-A3).
+                await client.query(
+                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
+                    [merma.ingrediente_id, req.restauranteId]
+                );
                 await client.query(
                     `UPDATE ingredientes
                  SET stock_actual = stock_actual + $1,
                      ultima_actualizacion_stock = NOW()
-                 WHERE id = $2 AND restaurante_id = $3`,
+                 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
                     [parseFloat(merma.cantidad), merma.ingrediente_id, req.restauranteId]
                 );
                 log('info', 'Stock restaurado por eliminación de merma', {

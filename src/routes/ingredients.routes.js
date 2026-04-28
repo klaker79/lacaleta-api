@@ -469,13 +469,14 @@ module.exports = function (pool) {
 
                 try {
                     // FOR UPDATE lock to prevent race conditions
+                    // 🔒 deleted_at IS NULL: no bloquear filas zombi (auditoria A1-A3).
                     await client.query(
-                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                         [adj.id, req.restauranteId]
                     );
 
                     const result = await client.query(
-                        `UPDATE ingredientes 
+                        `UPDATE ingredientes
                      SET stock_actual = GREATEST(0, COALESCE(stock_actual, 0) + $1),
                          ultima_actualizacion_stock = NOW()
                      WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL
@@ -519,7 +520,12 @@ module.exports = function (pool) {
     // Toggle activo/inactivo ingrediente (en lugar de eliminar)
     router.patch('/ingredients/:id/toggle-active', authMiddleware, async (req, res) => {
         try {
-            const { id } = req.params;
+            // 🔒 validateId: rechazar IDs no enteros con 400 en vez de 500 (auditoria A1-M10).
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: idCheck.error });
+            }
+            const id = idCheck.value;
             const { activo } = req.body;
 
             const result = await pool.query(
@@ -544,6 +550,8 @@ module.exports = function (pool) {
     // GET /api/ingredients-suppliers - Obtener TODOS los ingredientes_proveedores del restaurante
     router.get('/ingredients-suppliers', authMiddleware, async (req, res) => {
         try {
+            // 🔒 i.deleted_at IS NULL: no devolver asociaciones de ingredientes
+            //    soft-deleted (auditoria A1-A5).
             const result = await pool.query(`
             SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
                    ip.es_proveedor_principal, ip.created_at,
@@ -552,6 +560,7 @@ module.exports = function (pool) {
             JOIN proveedores p ON ip.proveedor_id = p.id
             JOIN ingredientes i ON ip.ingrediente_id = i.id
             WHERE i.restaurante_id = $1
+              AND i.deleted_at IS NULL
               AND p.deleted_at IS NULL
             ORDER BY ip.ingrediente_id, ip.es_proveedor_principal DESC
         `, [req.restauranteId]);
@@ -630,16 +639,23 @@ module.exports = function (pool) {
             }
 
             // Si es principal, desmarcar otros
+            // 🔒 Defensa en profundidad: filtrar por restaurante_id vía JOIN aunque
+            //    `id` ya está validado más arriba (auditoria A1-A2).
             if (es_proveedor_principal) {
                 await pool.query(
-                    'UPDATE ingredientes_proveedores SET es_proveedor_principal = FALSE WHERE ingrediente_id = $1',
-                    [id]
+                    `UPDATE ingredientes_proveedores ip
+                     SET es_proveedor_principal = FALSE
+                     FROM ingredientes i
+                     WHERE ip.ingrediente_id = $1
+                       AND ip.ingrediente_id = i.id
+                       AND i.restaurante_id = $2`,
+                    [id, req.restauranteId]
                 );
                 // Actualizar también en tabla ingredientes para compatibilidad
                 // ⚠️ PROTECCIÓN: NO sobrescribir precio del ingrediente
                 await pool.query(
-                    'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2',
-                    [proveedor_id, id]
+                    'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
+                    [proveedor_id, id, req.restauranteId]
                 );
             }
 
@@ -647,7 +663,7 @@ module.exports = function (pool) {
             const result = await pool.query(`
             INSERT INTO ingredientes_proveedores (ingrediente_id, proveedor_id, precio, es_proveedor_principal)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (ingrediente_id, proveedor_id) 
+            ON CONFLICT (ingrediente_id, proveedor_id)
             DO UPDATE SET precio = $3, es_proveedor_principal = $4
             RETURNING *
         `, [id, proveedor_id, precioNum, es_proveedor_principal || false]);
@@ -690,16 +706,22 @@ module.exports = function (pool) {
             }
 
             // Si se marca como principal, desmarcar otros
+            // 🔒 Defensa en profundidad: filtrar por restaurante_id (auditoria A1-A2).
             if (es_proveedor_principal) {
                 await pool.query(
-                    'UPDATE ingredientes_proveedores SET es_proveedor_principal = FALSE WHERE ingrediente_id = $1',
-                    [id]
+                    `UPDATE ingredientes_proveedores ip
+                     SET es_proveedor_principal = FALSE
+                     FROM ingredientes i
+                     WHERE ip.ingrediente_id = $1
+                       AND ip.ingrediente_id = i.id
+                       AND i.restaurante_id = $2`,
+                    [id, req.restauranteId]
                 );
                 // Actualizar tabla ingredientes para compatibilidad
                 // ⚠️ PROTECCIÓN: NO sobrescribir precio del ingrediente
                 await pool.query(
-                    'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2',
-                    [supplierId, id]
+                    'UPDATE ingredientes SET proveedor_id = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
+                    [supplierId, id, req.restauranteId]
                 );
             }
 
