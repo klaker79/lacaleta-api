@@ -204,8 +204,10 @@ module.exports = function (pool) {
             await client.query('BEGIN');
 
             // ⚡ FIX VAL-02: Obtener estado actual para prevenir doble procesamiento
+            // Recuperamos también fecha_recepcion + proveedor_id para no sobreescribir
+            // valores históricos al editar un pedido ya recibido sin enviarlos.
             const currentOrder = await client.query(
-                'SELECT estado FROM pedidos WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                'SELECT estado, fecha_recepcion, proveedor_id FROM pedidos WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
             if (currentOrder.rows.length === 0) {
@@ -213,15 +215,32 @@ module.exports = function (pool) {
                 return res.status(404).json({ error: 'Pedido no encontrado' });
             }
             const wasAlreadyReceived = currentOrder.rows[0].estado === 'recibido';
+            const fechaRecepcionPersisted = currentOrder.rows[0].fecha_recepcion;
+            const fechaRecepcionFinalReal = fechaRecepcionFinal || fechaRecepcionPersisted || new Date();
 
             const result = await client.query(
                 'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
-                [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinal || new Date(), id, req.restauranteId]
+                [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId]
             );
 
-            // Si el pedido se marca como recibido Y no estaba ya recibido, registrar precios y sumar stock
-            if (estado === 'recibido' && !wasAlreadyReceived && ingredientes && Array.isArray(ingredientes)) {
-                const fechaCompra = fechaRecepcionFinal ? new Date(fechaRecepcionFinal) : new Date();
+            // Reescribir Diario en 2 escenarios:
+            //   a) Transición pendiente → recibido (alta inicial)
+            //   b) Edición de un pedido YA recibido (cambio de precios/cantidades)
+            // En (b) hay que BORRAR primero las filas previas con este pedido_id para
+            // evitar duplicación (upsertCompraDiaria SUMA cantidad/total al hacer
+            // ON CONFLICT). Sin este DELETE, editar un pedido recibido inflaba la
+            // cantidad y el total en precios_compra_diarios y desincronizaba el JSONB
+            // del precio_medio_compra (incidente 2026-04-28: pedido 448 CABREIROA).
+            const debeReescribirDiario = estado === 'recibido' && ingredientes && Array.isArray(ingredientes);
+            if (debeReescribirDiario) {
+                const fechaCompra = new Date(fechaRecepcionFinalReal);
+
+                if (wasAlreadyReceived) {
+                    await client.query(
+                        'DELETE FROM precios_compra_diarios WHERE pedido_id = $1 AND restaurante_id = $2',
+                        [id, req.restauranteId]
+                    );
+                }
 
                 for (const item of ingredientes) {
                     // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
@@ -231,8 +250,6 @@ module.exports = function (pool) {
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
                     const total = precioReal * cantidad;
 
-                    // Upsert: si ya existe para ese ingrediente/fecha, sumar cantidades
-                    // ⚡ FIX Stabilization v1: ON CONFLICT incluye pedido_id para evitar fusionar pedidos distintos
                     await upsertCompraDiaria(client, {
                         ingredienteId: ingId,
                         fecha: fechaCompra,
@@ -247,7 +264,7 @@ module.exports = function (pool) {
                     // (avoids double-counting since frontend already adjusts stock atomically)
                 }
 
-                log('info', 'Compras diarias y stock registrados desde pedido', { pedidoId: id, items: ingredientes.length });
+                log('info', 'Compras diarias registradas/reescritas desde pedido', { pedidoId: id, items: ingredientes.length, edicion: wasAlreadyReceived });
             }
 
             await client.query('COMMIT');
