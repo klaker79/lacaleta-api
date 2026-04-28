@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
+const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -35,7 +36,7 @@ module.exports = function (pool) {
 
             // Query 2: Precios de ingredientes + media de compras reales
             const ingredientesResult = await pool.query(
-                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.precio, i.precio_medio, i.cantidad_por_formato, i.rendimiento,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (
@@ -50,46 +51,32 @@ module.exports = function (pool) {
             const preciosMap = new Map();
             const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(ing => {
-                // Prioridad: media compras reales > precio config / cpf
-                if (ing.precio_medio_compra) {
-                    preciosMap.set(ing.id, parseFloat(ing.precio_medio_compra));
-                } else {
-                    const precioFormato = parseFloat(ing.precio) || 0;
-                    const cantidadPorFormato = parseFloat(ing.cantidad_por_formato) || 1;
-                    preciosMap.set(ing.id, precioFormato / cantidadPorFormato);
-                }
+                preciosMap.set(ing.id, getBackendIngredientUnitPrice(ing));
                 if (ing.rendimiento) {
                     rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
                 }
             });
+
+            // Mapa de recetas (necesario para expandir subrecetas en getRecipeCostBase).
+            // Cargamos todas las recetas del tenant; el filtro WHERE de menu engineering ya
+            // excluye categorías "preparacion base" del result set principal, pero las
+            // subrecetas SÍ pueden estar referenciadas como ingrediente desde recetas de food.
+            const todasRecetasResult = await pool.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
 
             const analisis = [];
             const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
             const promedioPopularidad = ventas.rows.length > 0 ? totalVentasRestaurante / ventas.rows.length : 0;
             let sumaMargenes = 0;
 
-            // Calcular costes usando el Map (sin queries adicionales)
+            // Calcular costes usando el helper canónico (Capa 3 auditoría: ahora expande subrecetas).
             for (const plato of ventas.rows) {
-                const ingredientes = plato.ingredientes || [];
-                let costePlato = 0;
-
-                if (ingredientes && Array.isArray(ingredientes)) {
-                    for (const ing of ingredientes) {
-                        const precioIng = preciosMap.get(ing.ingredienteId) || 0;
-                        // 🔧 FIX: Rendimiento con fallback al ingrediente base
-                        let rendimiento = parseFloat(ing.rendimiento);
-                        if (!rendimiento) {
-                            rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
-                        }
-                        const factorRendimiento = rendimiento / 100;
-                        const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
-                        costePlato += costeReal * (ing.cantidad || 0);
-                    }
-                }
-
-                // 🔧 FIX: Dividir por porciones para obtener coste POR PORCIÓN
                 const porciones = parseInt(plato.porciones) || 1;
-                costePlato = costePlato / porciones;
+                const costeLote = getRecipeCostBase(plato, preciosMap, recetasMap, rendimientoBaseMap);
+                const costePlato = costeLote / porciones;
 
                 const margenContribucion = parseFloat(plato.precio_venta) - costePlato;
                 sumaMargenes += margenContribucion * parseFloat(plato.cantidad_vendida);
