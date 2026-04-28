@@ -36,10 +36,15 @@ module.exports = function (pool) {
     // GET /api/recipes/:id/variants - Obtener variantes de una receta
     router.get('/recipes/:id/variants', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
-            const { id } = req.params;
+            // 🔒 validateId: rechazar IDs no numéricos con 400 en vez de 500 (auditoria A1-M8).
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: idCheck.error });
+            }
+            const id = idCheck.value;
             const result = await pool.query(
-                `SELECT * FROM recetas_variantes 
-             WHERE receta_id = $1 AND restaurante_id = $2 
+                `SELECT * FROM recetas_variantes
+             WHERE receta_id = $1 AND restaurante_id = $2
              ORDER BY precio_venta DESC`,
                 [id, req.restauranteId]
             );
@@ -53,7 +58,12 @@ module.exports = function (pool) {
     // POST /api/recipes/:id/variants - Crear variante
     router.post('/recipes/:id/variants', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
-            const { id } = req.params;
+            // 🔒 validateId: rechazar IDs no numéricos con 400 en vez de 500 (auditoria A1-M9).
+            const idCheck = validateId(req.params.id);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: idCheck.error });
+            }
+            const id = idCheck.value;
             const { nombre, factor, precio_venta, codigo } = req.body;
 
             if (!nombre || precio_venta === undefined) {

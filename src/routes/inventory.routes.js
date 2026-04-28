@@ -114,16 +114,23 @@ module.exports = function (pool) {
                 const stockVal = parseFloat(item.stock_real);
                 if (isNaN(stockVal) || stockVal < 0) continue;
 
+                // 🛡️ Guardrail defensa-en-profundidad: rechazar valores absolutos
+                //    absurdos (>10000). Coherente con bulk-adjust-stock (auditoria B4).
+                if (stockVal > 10000) {
+                    continue;
+                }
+
                 // C2: FOR UPDATE lock to prevent race condition
+                // 🔒 deleted_at IS NULL en lock + UPDATE (auditoria A1-A3).
                 await client.query(
-                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                     [item.id, req.restauranteId]
                 );
                 const result = await client.query(
-                    `UPDATE ingredientes 
-         SET stock_real = $1, 
-             ultima_actualizacion_stock = CURRENT_TIMESTAMP 
-         WHERE id = $2 AND restaurante_id = $3 
+                    `UPDATE ingredientes
+         SET stock_real = $1,
+             ultima_actualizacion_stock = CURRENT_TIMESTAMP
+         WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL
          RETURNING *`,
                     [stockVal, item.id, req.restauranteId]
                 );
@@ -298,13 +305,17 @@ module.exports = function (pool) {
                     const safeReal = isNaN(real) ? 0 : real;
 
                     // Lock ingredient row to prevent race condition during consolidation
-                    await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingId, req.restauranteId]);
+                    // 🔒 deleted_at IS NULL en lock + UPDATE (auditoria A1-A3).
+                    await client.query(
+                        'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
+                        [ingId, req.restauranteId]
+                    );
                     const result = await client.query(
                         `UPDATE ingredientes
                      SET stock_actual = $1,
                          stock_real = NULL,
                          ultima_actualizacion_stock = CURRENT_TIMESTAMP
-                     WHERE id = $2 AND restaurante_id = $3
+                     WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL
                      RETURNING *`,
                         [safeReal.toFixed(2), ingId, req.restauranteId]
                     );

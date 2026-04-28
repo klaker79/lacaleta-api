@@ -293,7 +293,7 @@ module.exports = function (pool) {
                     COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(14,2) AS cogs,
                     COALESCE(SUM(vdr.beneficio_bruto), 0)::numeric(14,2) AS margen
                  FROM ventas_diarias_resumen vdr
-                 LEFT JOIN recetas r ON r.id = vdr.receta_id
+                 LEFT JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
                  WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
                  GROUP BY bucket`,
                 [req.restauranteId, desde, hasta]

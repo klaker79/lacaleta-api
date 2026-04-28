@@ -15,9 +15,10 @@
  */
 
 const { Router } = require('express');
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { logChange } = require('../utils/auditLog');
+const { validateId, validateNumber, validateDate } = require('../utils/validators');
 
 module.exports = function (pool) {
     const router = Router();
@@ -73,11 +74,30 @@ module.exports = function (pool) {
     });
 
     // PUT fix a daily purchase entry (precios_compra_diarios)
-    router.put('/daily/purchases/correct', authMiddleware, async (req, res) => {
+    // 🔒 requireAdmin: corregir precios afecta precio_medio_compra y propaga a coste de
+    //    recetas y P&L. Solo admins (auditoria 2026-04-28).
+    router.put('/daily/purchases/correct', authMiddleware, requireAdmin, async (req, res) => {
         try {
             const { ingredienteId, fecha, cantidad, total } = req.body;
-            if (!ingredienteId || !fecha) {
-                return res.status(400).json({ error: 'ingredienteId y fecha son obligatorios' });
+
+            // 🔒 Validación numérica/fecha estricta (auditoria 2026-04-28).
+            const idCheck = validateId(ingredienteId);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: `ingredienteId inválido: ${idCheck.error}` });
+            }
+            const fechaCheck = validateDate(fecha);
+            if (!fechaCheck.valid) {
+                return res.status(400).json({ error: `fecha inválida: ${fechaCheck.error}` });
+            }
+            if (cantidad === undefined || total === undefined) {
+                return res.status(400).json({ error: 'cantidad y total son obligatorios' });
+            }
+            // Cap defensivo. cantidad > 100000 o total > 1M en una linea diaria
+            // es siempre un error humano/OCR.
+            const cantidadValidada = validateNumber(cantidad, NaN, 0, 100000);
+            const totalValidado = validateNumber(total, NaN, 0, 1000000);
+            if (!Number.isFinite(cantidadValidada) || !Number.isFinite(totalValidado)) {
+                return res.status(400).json({ error: 'cantidad y total deben ser números válidos (cantidad ≤ 100000, total ≤ 1000000)' });
             }
 
             // Snapshot ANTES para audit_log (este es el endpoint que usaría un
@@ -85,21 +105,28 @@ module.exports = function (pool) {
             const beforeResult = await pool.query(
                 `SELECT * FROM precios_compra_diarios
                  WHERE ingrediente_id = $1 AND fecha = $2 AND restaurante_id = $3`,
-                [ingredienteId, fecha, req.restauranteId]
+                [idCheck.value, fecha, req.restauranteId]
             );
             const datosAntes = beforeResult.rows[0] || null;
 
+            // 🔒 Recalcular precio_unitario para mantener coherencia con cantidad/total.
+            //    Sin este UPDATE, AVG(precio_unitario) seguía usando el valor antiguo
+            //    aunque cantidad y total hubieran cambiado (auditoria A1-C4).
+            const precioUnitario = cantidadValidada > 0 ? totalValidado / cantidadValidada : 0;
+
             const result = await pool.query(
                 `UPDATE precios_compra_diarios
-                 SET cantidad_comprada = $1, total_compra = $2
-                 WHERE ingrediente_id = $3 AND fecha = $4 AND restaurante_id = $5
+                 SET cantidad_comprada = $1,
+                     total_compra = $2,
+                     precio_unitario = $3
+                 WHERE ingrediente_id = $4 AND fecha = $5 AND restaurante_id = $6
                  RETURNING *`,
-                [cantidad, total, ingredienteId, fecha, req.restauranteId]
+                [cantidadValidada, totalValidado, precioUnitario, idCheck.value, fecha, req.restauranteId]
             );
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Registro no encontrado' });
             }
-            log('info', 'Compra diaria corregida', { ingredienteId, fecha, cantidad, total });
+            log('info', 'Compra diaria corregida', { ingredienteId: idCheck.value, fecha, cantidad: cantidadValidada, total: totalValidado, precioUnitario });
 
             logChange(pool, {
                 req,
