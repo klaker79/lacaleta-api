@@ -8,45 +8,7 @@ const { requirePlan } = require('../middleware/planGate');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateCantidad, validateId } = require('../utils/validators');
-
-/**
- * Expande una receta a sus ingredientes BASE (no subrecetas), resolviendo recursivamente.
- * Convención: ingredienteId >= 100000 codifica una subreceta (recetaId = ingredienteId - 100000).
- * La cantidad en un escandallo con subreceta representa "porciones de subreceta".
- * Retorna [{ ingredienteId, cantidadPorPorcion }] donde cantidadPorPorcion es cuánto
- * se gasta de ese ingrediente base por CADA porción vendida de la receta raíz.
- */
-async function expandRecipeToBase(receta, client, restauranteId, visited = new Set()) {
-    if (!receta || visited.has(receta.id)) return [];
-    visited.add(receta.id);
-    const porciones = Math.max(1, parseInt(receta.porciones) || 1);
-    const items = receta.ingredientes || [];
-    const acc = new Map();
-    for (const ing of items) {
-        const ingId = ing.ingredienteId || ing.ingrediente_id || ing.ingredientId || ing.id;
-        const cantidad = parseFloat(ing.cantidad ?? ing.quantity) || 0;
-        if (!ingId || cantidad <= 0) continue;
-        if (ingId > 100000) {
-            const subRecetaId = ingId - 100000;
-            const subRes = await client.query(
-                'SELECT id, porciones, ingredientes FROM recetas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
-                [subRecetaId, restauranteId]
-            );
-            if (subRes.rows.length === 0) {
-                log('warn', 'Subreceta no encontrada al expandir para stock', { recetaRaiz: receta.id, subRecetaId });
-                continue;
-            }
-            const subExpanded = await expandRecipeToBase(subRes.rows[0], client, restauranteId, new Set(visited));
-            const factor = cantidad / porciones;
-            for (const it of subExpanded) {
-                acc.set(it.ingredienteId, (acc.get(it.ingredienteId) || 0) + it.cantidadPorPorcion * factor);
-            }
-        } else {
-            acc.set(ingId, (acc.get(ingId) || 0) + cantidad / porciones);
-        }
-    }
-    return Array.from(acc.entries()).map(([ingredienteId, cantidadPorPorcion]) => ({ ingredienteId, cantidadPorPorcion }));
-}
+const { expandRecipeToBase, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -609,17 +571,20 @@ REGLAS:
             const ingredientesPrecios = new Map();
             const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
-                if (i.precio_medio_compra) {
-                    ingredientesPrecios.set(i.id, parseFloat(i.precio_medio_compra));
-                } else {
-                    const precio = parseFloat(i.precio) || 0;
-                    const cantidadPorFormato = parseFloat(i.cantidad_por_formato) || 1;
-                    ingredientesPrecios.set(i.id, precio / cantidadPorFormato);
-                }
+                ingredientesPrecios.set(i.id, getBackendIngredientUnitPrice(i));
                 if (i.rendimiento) {
                     rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
                 }
             });
+
+            // Mapa de recetas (necesario para expandir subrecetas en getRecipeCostBase).
+            // Cargamos todas las recetas del tenant una sola vez — el bulk procesa N ventas
+            // y cualquiera puede tener escandallo con preparaciones base.
+            const todasRecetasResult = await client.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
 
             // Acumulador para resumen diario
             const resumenDiario = new Map(); // key: "recetaId-fecha", value: { cantidad, ingresos, coste }
@@ -695,23 +660,13 @@ REGLAS:
                     });
                 }
 
-                // Calcular coste de ingredientes para esta venta (aplicando factor de variante)
+                // Calcular coste de ingredientes para esta venta (aplicando factor de variante).
+                // 🧪 Capa 3 auditoría: usa getRecipeCostBase que SÍ expande subrecetas. Antes
+                // este bloque iteraba ingredientes inline y trataba ingredienteId>100000 como
+                // precio=0 → COGS subestimado para recetas con preparaciones base.
                 const porciones = Math.max(1, parseInt(receta.porciones) || 1);
-                let costeIngredientes = 0;
-                const ingredientesReceta = receta.ingredientes || [];
-                if (Array.isArray(ingredientesReceta)) {
-                    for (const ing of ingredientesReceta) {
-                        const precioIng = ingredientesPrecios.get(ing.ingredienteId) || 0;
-                        // 🔧 FIX: Rendimiento con fallback al ingrediente base
-                        let rendimiento = parseFloat(ing.rendimiento);
-                        if (!rendimiento) {
-                            rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
-                        }
-                        const factorRendimiento = rendimiento / 100;
-                        const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
-                        costeIngredientes += costeReal * ((ing.cantidad || 0) / porciones) * cantidad * factorAplicado;
-                    }
-                }
+                const costeLote = getRecipeCostBase(receta, ingredientesPrecios, recetasMap, rendimientoBaseMap);
+                const costeIngredientes = (costeLote / porciones) * cantidad * factorAplicado;
 
                 // Registrar venta individual
                 // ⚡ FIX Bug #5: Guardar factor_variante para restaurar stock correctamente al borrar

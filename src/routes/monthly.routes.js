@@ -17,6 +17,7 @@
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
+const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 
 module.exports = function (pool) {
     const router = Router();
@@ -71,7 +72,7 @@ module.exports = function (pool) {
                 ORDER BY DATE(v.fecha), r.nombre
             `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
 
-            // Precios de ingredientes (prioridad: precio_medio_compra > precio/cpf)
+            // Precios de ingredientes (prioridad canónica: ver businessHelpers.getBackendIngredientUnitPrice)
             const ingredientesPrecios = await pool.query(
                 `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
                         pcd.precio_medio_compra
@@ -85,33 +86,30 @@ module.exports = function (pool) {
                  WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
-            const preciosMap = {};
-            const rendimientoBaseMap = {};
+            const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientesPrecios.rows.forEach(ing => {
-                if (ing.precio_medio_compra) {
-                    preciosMap[ing.id] = parseFloat(ing.precio_medio_compra);
-                } else {
-                    const precio = parseFloat(ing.precio) || 0;
-                    const cpf = parseFloat(ing.cantidad_por_formato) || 1;
-                    preciosMap[ing.id] = precio / cpf;
-                }
-                if (ing.rendimiento) rendimientoBaseMap[ing.id] = parseFloat(ing.rendimiento);
+                preciosMap.set(ing.id, getBackendIngredientUnitPrice(ing));
+                if (ing.rendimiento) rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
             });
 
-            // Función para calcular coste de una receta (Jack Miller con rendimiento + porciones)
-            const calcularCosteReceta = (ingredientesReceta, porciones) => {
+            // Mapa de recetas (necesario para expandir subrecetas en getRecipeCostBase).
+            const todasRecetasResult = await pool.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
+
+            // Coste por porción usando el helper canónico (Capa 3 auditoría: expande subrecetas).
+            // NOTA: monthly/summary multiplica luego por cantidadPonderada (factor_variante).
+            const calcularCosteReceta = (ingredientesReceta, porciones, recetaId) => {
                 if (!ingredientesReceta || !Array.isArray(ingredientesReceta)) return 0;
                 const porcionesVal = Math.max(1, parseInt(porciones) || 1);
-                const costeTotal = ingredientesReceta.reduce((sum, item) => {
-                    const precio = preciosMap[item.ingredienteId] || 0;
-                    const cantidad = parseFloat(item.cantidad) || 0;
-                    let rendimiento = parseFloat(item.rendimiento);
-                    if (!rendimiento) rendimiento = rendimientoBaseMap[item.ingredienteId] || 100;
-                    const factorRendimiento = rendimiento / 100;
-                    const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
-                    return sum + (costeReal * cantidad);
-                }, 0);
-                return costeTotal / porcionesVal;
+                const recetaShape = recetaId && recetasMap.has(recetaId)
+                    ? recetasMap.get(recetaId)
+                    : { id: recetaId || 0, ingredientes: ingredientesReceta, porciones: porcionesVal };
+                const costeLote = getRecipeCostBase(recetaShape, preciosMap, recetasMap, rendimientoBaseMap);
+                return costeLote / porcionesVal;
             };
 
             // Agregación por ingrediente / receta / proveedor
@@ -166,7 +164,7 @@ module.exports = function (pool) {
                 const totalIngresos = parseFloat(row.total_ingresos);
 
                 // Coste ponderado por factor_variante (botella vs copa, etc.)
-                const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones);
+                const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones, row.receta_id);
                 const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
                 const costeTotal = costePorUnidad * cantidadPonderada;
                 const beneficio = totalIngresos - costeTotal;

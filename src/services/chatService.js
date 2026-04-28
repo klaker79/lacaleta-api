@@ -14,6 +14,7 @@
 
 const Anthropic = require('@anthropic-ai/sdk').default;
 const { log } = require('../utils/logger');
+const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = 'claude-sonnet-4-6';
@@ -645,43 +646,61 @@ async function runTool(name, pool, restauranteId, args = {}) {
             };
         }
 
-        case 'resumen_food_cost_recetas':
-            return (await pool.query(`
-                WITH recetas_coste AS (
-                    SELECT
-                        r.id, r.nombre, r.categoria, r.precio_venta, r.porciones,
-                        COALESCE(SUM(
-                            (ing->>'cantidad')::numeric *
-                            COALESCE(pcd.precio_medio_compra,
-                                CASE WHEN i.cantidad_por_formato > 0
-                                     THEN i.precio / i.cantidad_por_formato
-                                     ELSE i.precio END
-                            ) /
-                            NULLIF(COALESCE(i.rendimiento, 100) / 100.0, 0)
-                        ), 0) AS coste_lote
-                    FROM recetas r
-                    LEFT JOIN LATERAL jsonb_array_elements(COALESCE(r.ingredientes::jsonb, '[]'::jsonb)) ing ON true
-                    LEFT JOIN ingredientes i ON i.id = (ing->>'ingredienteId')::int
-                      AND i.restaurante_id = $1 AND i.deleted_at IS NULL
-                    LEFT JOIN (
-                        SELECT ingrediente_id,
-                               ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
-                        FROM precios_compra_diarios WHERE restaurante_id = $1
-                        GROUP BY ingrediente_id
-                    ) pcd ON pcd.ingrediente_id = i.id
-                    WHERE r.restaurante_id = $1 AND r.deleted_at IS NULL
-                    GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.porciones
-                )
-                SELECT nombre, categoria,
-                       ROUND(precio_venta::numeric, 2) AS precio_venta,
-                       porciones,
-                       ROUND((coste_lote / NULLIF(porciones, 0))::numeric, 2) AS coste_porcion,
-                       ROUND(((coste_lote / NULLIF(porciones, 0)) / NULLIF(precio_venta, 0) * 100)::numeric, 1) AS food_cost_pct,
-                       ROUND((precio_venta - (coste_lote / NULLIF(porciones, 0)))::numeric, 2) AS margen
-                FROM recetas_coste
-                WHERE precio_venta > 0 AND porciones > 0 AND coste_lote > 0
-                ORDER BY food_cost_pct DESC NULLS LAST
-            `, [restauranteId])).rows;
+        case 'resumen_food_cost_recetas': {
+            // 🧪 Capa 3 auditoría 2026-04-28: antes esta query expandía la JSONB de la receta
+            // con LEFT JOIN ingredientes, lo que daba precio=0 para subrecetas (ingredienteId
+            // > 100000) y sub-estimaba el food cost de cualquier receta con preparación base.
+            // Ahora cargamos en JS y reutilizamos getRecipeCostBase (mismo helper que el resto
+            // del backend) para que el chat IA reporte los mismos números que el dashboard.
+            const { rows: recetas } = await pool.query(
+                `SELECT id, nombre, categoria, precio_venta, porciones, ingredientes
+                 FROM recetas
+                 WHERE restaurante_id = $1 AND deleted_at IS NULL`,
+                [restauranteId]
+            );
+            const { rows: ings } = await pool.query(
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id,
+                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [restauranteId]
+            );
+            const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
+            for (const ing of ings) {
+                preciosMap.set(ing.id, getBackendIngredientUnitPrice(ing));
+                if (ing.rendimiento) rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
+            }
+            const recetasMap = new Map(recetas.map(r => [r.id, r]));
+
+            const out = [];
+            for (const r of recetas) {
+                const porciones = parseInt(r.porciones) || 0;
+                const precioVenta = parseFloat(r.precio_venta) || 0;
+                if (porciones <= 0 || precioVenta <= 0) continue;
+                const costeLote = getRecipeCostBase(r, preciosMap, recetasMap, rendimientoBaseMap);
+                if (!(costeLote > 0)) continue;
+                const costePorcion = costeLote / porciones;
+                const foodCostPct = (costePorcion / precioVenta) * 100;
+                out.push({
+                    nombre: r.nombre,
+                    categoria: r.categoria,
+                    precio_venta: Math.round(precioVenta * 100) / 100,
+                    porciones,
+                    coste_porcion: Math.round(costePorcion * 100) / 100,
+                    food_cost_pct: Math.round(foodCostPct * 10) / 10,
+                    margen: Math.round((precioVenta - costePorcion) * 100) / 100
+                });
+            }
+            out.sort((a, b) => (b.food_cost_pct ?? -Infinity) - (a.food_cost_pct ?? -Infinity));
+            return out;
+        }
 
         case 'resumen_compras_periodo': {
             const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
