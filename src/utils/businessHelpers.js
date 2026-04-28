@@ -9,7 +9,10 @@
 /**
  * I1: Calcula el precio unitario de un ingrediente, dividiendo por cantidad_por_formato si aplica.
  * Reemplaza 6 ocurrencias del mismo cálculo dispersas en server.js.
- * 
+ *
+ * NOTE: prefer `getBackendIngredientUnitPrice()` for recipe-cost calculations.
+ * This helper only knows about `precio` and `cantidad_por_formato` (legacy).
+ *
  * @param {object} ingrediente - Objeto con { precio, cantidad_por_formato }
  * @returns {number} Precio unitario
  */
@@ -17,6 +20,48 @@ function calcularPrecioUnitario(ingrediente) {
     const precio = parseFloat(ingrediente.precio) || 0;
     const cantidadPorFormato = parseFloat(ingrediente.cantidad_por_formato) || 0;
     return cantidadPorFormato > 0 ? precio / cantidadPorFormato : precio;
+}
+
+/**
+ * Canonical backend equivalent of frontend `getIngredientUnitPrice()`
+ * (`MindLoop-CostOS/src/utils/cost-calculator.js`). Returns the unit price
+ * (€/unidad base) for an ingredient, applying the SAME priority used in the
+ * frontend so dashboard, chat IA and any backend calculation agree:
+ *
+ *   1. row.precio_medio_compra — real weighted average from precios_compra_diarios
+ *   2. row.precio_medio        — configured price / cantidad_por_formato (precomputed)
+ *   3. row.precio / row.cantidad_por_formato — raw fallback
+ *
+ * The result is rounded to 4 decimals for parity with the SQL projections of
+ * `precio_medio_compra` (`ROUND(..., 4)`).
+ *
+ * Use this helper EVERY time a route reads an ingredient row and needs the
+ * unit price for cost/COGS aggregation. NEVER inline the priority elsewhere.
+ *
+ * @param {object|null} row - Ingredient row including {precio, cantidad_por_formato, precio_medio?, precio_medio_compra?}
+ * @returns {number} Unit price (>= 0) rounded to 4 decimals.
+ */
+function getBackendIngredientUnitPrice(row) {
+    if (!row) return 0;
+
+    if (row.precio_medio_compra !== null && row.precio_medio_compra !== undefined) {
+        const v = parseFloat(row.precio_medio_compra);
+        if (v > 0) return Math.round(v * 10000) / 10000;
+    }
+
+    if (row.precio_medio !== null && row.precio_medio !== undefined) {
+        const v = parseFloat(row.precio_medio);
+        if (v > 0) return Math.round(v * 10000) / 10000;
+    }
+
+    const precio = parseFloat(row.precio);
+    if (precio > 0) {
+        const cpf = parseFloat(row.cantidad_por_formato) || 1;
+        const fallback = cpf > 0 ? precio / cpf : precio;
+        return Math.round(fallback * 10000) / 10000;
+    }
+
+    return 0;
 }
 
 /**
@@ -132,4 +177,4 @@ async function updateProveedorPrecio(client, { ingredienteId, proveedorId, preci
     );
 }
 
-module.exports = { calcularPrecioUnitario, upsertCompraDiaria, buildIngredientPriceMap, resolveProveedorId, updateProveedorPrecio };
+module.exports = { calcularPrecioUnitario, getBackendIngredientUnitPrice, upsertCompraDiaria, buildIngredientPriceMap, resolveProveedorId, updateProveedorPrecio };
