@@ -609,8 +609,8 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const cogsSplit = (await pool.query(`
                 SELECT
                   CASE
-                    WHEN LOWER(COALESCE(r.categoria, '')) IN (${beverageList}) THEN 'beverage'
-                    WHEN LOWER(COALESCE(r.categoria, '')) IN (${otherList})    THEN 'otros'
+                    WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${beverageList}) THEN 'beverage'
+                    WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${otherList})    THEN 'otros'
                     ELSE 'food'
                   END AS tipo,
                   COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(12,2) AS cogs,

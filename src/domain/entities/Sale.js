@@ -13,7 +13,11 @@ class Sale {
         // Soportar todos los formatos: receta_id, recipeId, recetaId
         this.recipeId = data.receta_id || data.recipeId || data.recetaId;
         this.recipeName = data.receta_nombre || data.recipeName || null;
-        this.quantity = parseInt(data.cantidad || data.quantity) || 0;
+        // 🔒 Auditoría A1-C2 (Capa 6): parseFloat preserva medias porciones (0.5).
+        //    Antes parseInt truncaba ½ ración a 0 y la validación quantity > 0 la
+        //    rechazaba como venta. Alineado con monthly.routes.js (Capa 4) que ya
+        //    usa parseFloat al leer SUM(v.cantidad) desde la BD.
+        this.quantity = parseFloat(data.cantidad || data.quantity) || 0;
         this.unitPrice = parseFloat(data.precio_unitario || data.unitPrice) || 0;
         this.total = parseFloat(data.total) || 0;
         this.date = data.fecha || data.date || new Date();
