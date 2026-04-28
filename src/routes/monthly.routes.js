@@ -160,7 +160,12 @@ module.exports = function (pool) {
                 const fechaStr = row.fecha.toISOString().split('T')[0];
                 diasSet.add(fechaStr);
 
-                const cantidadVendida = parseInt(row.cantidad_vendida);
+                // 🔒 parseFloat (auditoria A1-C2): cantidad_vendida es SUM(v.cantidad)
+                //    sobre la tabla ventas. Aunque la columna es INTEGER, el SUM en
+                //    Postgres devuelve NUMERIC y, en presencia de medias porciones
+                //    (tickets con 0.5, ½ ración), parseInt truncaba decimales y
+                //    desaparecía consumo del Diario. parseFloat preserva los decimales.
+                const cantidadVendida = parseFloat(row.cantidad_vendida) || 0;
                 const totalIngresos = parseFloat(row.total_ingresos);
 
                 // Coste ponderado por factor_variante (botella vs copa, etc.)

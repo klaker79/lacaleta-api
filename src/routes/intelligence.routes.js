@@ -30,14 +30,20 @@ module.exports = function (pool) {
 
     router.get('/intelligence/freshness', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
+            // 🔒 cantidadRecibida con fallback a cantidad (auditoria A1-C3):
+            //    para pedidos en estado 'recibido', cantidadRecibida puede diferir
+            //    de cantidad pedida (incluso 0 si el item se marcó 'no-entregado').
+            //    Antes este endpoint usaba siempre `cantidad` y alertaba sobre
+            //    productos que en realidad nunca llegaron al restaurante.
+            //    Patrón idéntico al de search.routes.js y chatService.js.
             const result = await pool.query(`
             WITH compras_recientes AS (
-                SELECT 
+                SELECT
                     p.id as pedido_id,
                     p.fecha_recepcion,
                     CURRENT_DATE - p.fecha_recepcion::date as dias_desde_compra,
                     ing->>'ingredienteId' as ingrediente_id,
-                    (ing->>'cantidad')::numeric as cantidad_comprada
+                    COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) as cantidad_comprada
                 FROM pedidos p
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
                 WHERE p.restaurante_id = $1
@@ -45,6 +51,8 @@ module.exports = function (pool) {
                   AND p.estado = 'recibido'
                   AND p.fecha_recepcion IS NOT NULL
                   AND p.fecha_recepcion >= CURRENT_DATE - INTERVAL '7 days'
+                  AND COALESCE(ing->>'estado', '') <> 'no-entregado'
+                  AND COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) > 0
             )
             SELECT 
                 i.id,

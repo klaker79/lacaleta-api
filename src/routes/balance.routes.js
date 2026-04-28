@@ -1633,12 +1633,16 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 ingredientesMap.set(normalizar(i.nombre), { id: i.id, cantidadPorFormato: parseFloat(i.cantidad_por_formato) || 0 });
             });
 
-            // Obtener todos los alias para búsqueda
+            // Obtener todos los alias para búsqueda.
+            // 🔒 i.deleted_at IS NULL (auditoria 2026-04-28 capa 4): si un alias
+            //    apunta a un ingrediente soft-deleted, este flujo OCR le inyectaría
+            //    compras reactivando datos zombi. Match con los otros 2 JOINs
+            //    alias→ingredientes en balance.js (líneas 587 y 783).
             const aliasResult = await client.query(
-                `SELECT a.alias, a.ingrediente_id, i.cantidad_por_formato 
-             FROM ingredientes_alias a 
+                `SELECT a.alias, a.ingrediente_id, i.cantidad_por_formato
+             FROM ingredientes_alias a
              JOIN ingredientes i ON a.ingrediente_id = i.id
-             WHERE a.restaurante_id = $1`,
+             WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const aliasMap = new Map();
