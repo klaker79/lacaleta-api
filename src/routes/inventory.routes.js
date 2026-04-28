@@ -49,7 +49,7 @@ module.exports = function (pool) {
       FROM ingredientes i
       LEFT JOIN (
         SELECT ingrediente_id,
-               ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+               ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) as precio_medio_compra
         FROM precios_compra_diarios
         WHERE restaurante_id = $1
         GROUP BY ingrediente_id
