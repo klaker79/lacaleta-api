@@ -74,7 +74,7 @@ module.exports = function (pool) {
 
             // Precios de ingredientes (prioridad canónica: ver businessHelpers.getBackendIngredientUnitPrice)
             const ingredientesPrecios = await pool.query(
-                `SELECT i.id, i.precio, i.precio_medio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (
