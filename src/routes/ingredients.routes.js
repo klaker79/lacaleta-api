@@ -252,10 +252,30 @@ module.exports = function (pool) {
             });
 
             // 🔒 deleted_at IS NULL: evita resucitar un ingrediente soft-eliminado vía PUT
+            // fecha_actualizacion = NOW(): util para diagnostico (saber cuando se edito por ultima vez)
             const result = await pool.query(
-                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12 WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
+                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12, fecha_actualizacion=NOW() WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
                 [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
             );
+
+            // ⚡ SYNC: si el precio del ingrediente cambio, propagarlo al precio del proveedor
+            // PRINCIPAL en ingredientes_proveedores. El modal "Proveedores asociados" lee de
+            // esa tabla; sin sync, el modal mostraba el precio viejo aunque la ficha del
+            // ingrediente ya tenia el nuevo. No tocamos los precios de proveedores secundarios:
+            // siguen siendo precios comparativos legitimos.
+            const oldPrecio = parseFloat(existing.precio) || 0;
+            if (Math.abs(finalPrecio - oldPrecio) > 0.001) {
+                try {
+                    await pool.query(
+                        'UPDATE ingredientes_proveedores SET precio = $1 WHERE ingrediente_id = $2 AND es_proveedor_principal = TRUE',
+                        [finalPrecio, id]
+                    );
+                } catch (syncErr) {
+                    log('warn', 'Sync precio ingrediente -> proveedor principal fallido', {
+                        ingrediente_id: id, error: syncErr.message
+                    });
+                }
+            }
 
             // ⚡ PROPAGACIÓN: Si cambió el rendimiento, actualizar TODAS las recetas que usan este ingrediente
             const oldRendimiento = parseInt(existing.rendimiento) || 100;
@@ -750,11 +770,27 @@ module.exports = function (pool) {
 
             values.push(id, supplierId);
             const result = await pool.query(`
-            UPDATE ingredientes_proveedores 
+            UPDATE ingredientes_proveedores
             SET ${updates.join(', ')}
             WHERE ingrediente_id = $${paramCount++} AND proveedor_id = $${paramCount}
             RETURNING *
         `, values);
+
+            // ⚡ SYNC: si esta asociacion es la principal (o lo acaba de ser) y se actualizo
+            // el precio, sincronizar tambien ingredientes.precio para que el lapiz de la ficha
+            // muestre el mismo dato. Solo afecta al ingrediente actual del tenant.
+            if (precio !== undefined && result.rows[0]?.es_proveedor_principal) {
+                try {
+                    await pool.query(
+                        'UPDATE ingredientes SET precio = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
+                        [parseFloat(precio), id, req.restauranteId]
+                    );
+                } catch (syncErr) {
+                    log('warn', 'Sync precio proveedor principal -> ingrediente fallido', {
+                        ingrediente_id: id, error: syncErr.message
+                    });
+                }
+            }
 
             log('info', 'Actualizado proveedor de ingrediente', { ingrediente_id: id, proveedor_id: supplierId });
             res.json(result.rows[0]);
