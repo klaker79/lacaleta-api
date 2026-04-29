@@ -231,10 +231,11 @@ module.exports = function (pool) {
             const ALERT_THRESHOLD = 40;
 
             const result = await pool.query(`
-            SELECT 
+            SELECT
                 r.id,
                 r.nombre,
                 r.precio_venta,
+                r.porciones,
                 r.ingredientes
             FROM recetas r
             WHERE r.restaurante_id = $1
@@ -272,7 +273,7 @@ module.exports = function (pool) {
 
             const recetasProblema = result.rows
                 .map(r => {
-                    let coste = 0;
+                    let costeLote = 0;
                     if (r.ingredientes && Array.isArray(r.ingredientes)) {
                         r.ingredientes.forEach(ing => {
                             const precioIng = ingMap[ing.ingredienteId] || 0;
@@ -283,17 +284,26 @@ module.exports = function (pool) {
                             }
                             const factorRendimiento = rendimiento / 100;
                             const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
-                            coste += costeReal * (ing.cantidad || 0);
+                            costeLote += costeReal * (ing.cantidad || 0);
                         });
                     }
+                    // 🔒 Auditoría A1-C1 (Capa 6): el bucle acumula coste de LOTE
+                    //    (Σ ingrediente × cantidad). El precio_venta es por PORCIÓN.
+                    //    Antes se dividía coste-de-lote por precio-de-porción y
+                    //    salía food cost ×porciones (ej. 4-porción reportaba 4×).
+                    //    Ahora se divide coste-de-lote por porciones para obtener
+                    //    coste por porción, alineado con el frontend
+                    //    (calcularCosteRecetaCompleto) y con getRecipeCostBase.
+                    const porciones = Math.max(1, parseInt(r.porciones) || 1);
+                    const costePorPorcion = costeLote / porciones;
                     const precioVenta = parseFloat(r.precio_venta) || 0;
-                    const foodCost = precioVenta > 0 ? (coste / precioVenta) * 100 : 0;
-                    const precioSugerido = coste / (TARGET_FOOD_COST / 100);
+                    const foodCost = precioVenta > 0 ? (costePorPorcion / precioVenta) * 100 : 0;
+                    const precioSugerido = costePorPorcion / (TARGET_FOOD_COST / 100);
 
                     return {
                         id: r.id,
                         nombre: r.nombre,
-                        coste,
+                        coste: costePorPorcion,
                         precio_actual: precioVenta,
                         food_cost: Math.round(foodCost),
                         precio_sugerido: precioSugerido

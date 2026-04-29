@@ -282,8 +282,8 @@ module.exports = function (pool) {
             const { rows } = await pool.query(
                 `SELECT
                     CASE
-                        WHEN LOWER(COALESCE(r.categoria, '')) IN (${beverageList}) THEN 'beverage'
-                        WHEN LOWER(COALESCE(r.categoria, '')) IN (${otherList})    THEN 'otros'
+                        WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${beverageList}) THEN 'beverage'
+                        WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${otherList})    THEN 'otros'
                         ELSE 'food'
                     END AS bucket,
                     COALESCE(SUM(vdr.total_ingresos), 0)::numeric(14,2) AS ingresos,

@@ -33,7 +33,7 @@ module.exports = function (pool) {
              FROM ventas v
              JOIN recetas r ON v.receta_id = r.id
              WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
-               AND LOWER(COALESCE(r.categoria, '')) NOT IN (${nonFoodList})
+               AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones`,
                 [req.restauranteId]
             );
