@@ -6,7 +6,7 @@ const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
-const { buildIngredientPriceMap } = require('../utils/businessHelpers');
+const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -243,58 +243,52 @@ module.exports = function (pool) {
               AND r.deleted_at IS NULL
         `, [req.restauranteId]);
 
-            const ingredientes = await pool.query(`
-            SELECT 
-                i.id, i.nombre, i.precio, i.cantidad_por_formato, i.rendimiento,
-                COALESCE(
-                    (SELECT AVG(pcd.precio_unitario) 
-                     FROM precios_compra_diarios pcd 
-                     WHERE pcd.ingrediente_id = i.id AND pcd.restaurante_id = i.restaurante_id),
-                    CASE 
-                        WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0 
-                        THEN i.precio / i.cantidad_por_formato
-                        ELSE i.precio 
-                    END
-                ) as precio_medio
-            FROM ingredientes i
-            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
-        `, [req.restauranteId]);
+            // 🔒 Bloqueante residual B1 (post-auditoría 2026-04-28):
+            //    Antes este endpoint usaba AVG(pcd.precio_unitario) (no ponderado) y un
+            //    bucle inline que NO expandía subrecetas. Capa 2 + Capa 3 cerraron esto
+            //    en las otras 6 rutas pero ésta quedó fuera del scope. Ahora aplica el
+            //    mismo patrón canónico: getBackendIngredientUnitPrice + getRecipeCostBase.
+            const ingredientes = await pool.query(
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id,
+                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                     FROM precios_compra_diarios
+                     WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [req.restauranteId]
+            );
 
-            // Use real average purchase prices (precio_medio) instead of configured prices
-            const ingMap = {};
+            const preciosMap = new Map();
+            const rendimientoBaseMap = new Map();
             ingredientes.rows.forEach(i => {
-                ingMap[i.id] = parseFloat(i.precio_medio) || 0;
+                preciosMap.set(i.id, getBackendIngredientUnitPrice(i));
+                if (i.rendimiento) rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
             });
-            // 🔧 FIX: Map de rendimiento base para fallback
-            const rendimientoBaseMap = {};
-            ingredientes.rows.forEach(i => {
-                if (i.rendimiento) rendimientoBaseMap[i.id] = parseFloat(i.rendimiento);
-            });
+
+            // Cargar TODAS las recetas para que getRecipeCostBase pueda expandir subrecetas
+            // (ingredienteId > 100000 → preparación base). Mismo patrón que analytics.routes.js.
+            const todasRecetasResult = await pool.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
 
             const recetasProblema = result.rows
                 .map(r => {
-                    let costeLote = 0;
-                    if (r.ingredientes && Array.isArray(r.ingredientes)) {
-                        r.ingredientes.forEach(ing => {
-                            const precioIng = ingMap[ing.ingredienteId] || 0;
-                            // 🔧 FIX: Rendimiento con fallback al ingrediente base
-                            let rendimiento = parseFloat(ing.rendimiento);
-                            if (!rendimiento) {
-                                rendimiento = rendimientoBaseMap[ing.ingredienteId] || 100;
-                            }
-                            const factorRendimiento = rendimiento / 100;
-                            const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
-                            costeLote += costeReal * (ing.cantidad || 0);
-                        });
-                    }
-                    // 🔒 Auditoría A1-C1 (Capa 6): el bucle acumula coste de LOTE
-                    //    (Σ ingrediente × cantidad). El precio_venta es por PORCIÓN.
-                    //    Antes se dividía coste-de-lote por precio-de-porción y
-                    //    salía food cost ×porciones (ej. 4-porción reportaba 4×).
-                    //    Ahora se divide coste-de-lote por porciones para obtener
-                    //    coste por porción, alineado con el frontend
-                    //    (calcularCosteRecetaCompleto) y con getRecipeCostBase.
+                    // 🔒 Auditoría A1-C1 (Capa 6) + B1 (post-auditoría): coste-de-lote
+                    //    expandido (subrecetas resueltas) dividido por porciones para
+                    //    obtener coste por porción, alineado con el frontend
+                    //    (calcularCosteRecetaCompleto) y con el resto del backend.
                     const porciones = Math.max(1, parseInt(r.porciones) || 1);
+                    const recetaShape = recetasMap.get(r.id) || {
+                        id: r.id, porciones, ingredientes: r.ingredientes
+                    };
+                    const costeLote = getRecipeCostBase(recetaShape, preciosMap, recetasMap, rendimientoBaseMap);
                     const costePorPorcion = costeLote / porciones;
                     const precioVenta = parseFloat(r.precio_venta) || 0;
                     const foodCost = precioVenta > 0 ? (costePorPorcion / precioVenta) * 100 : 0;
