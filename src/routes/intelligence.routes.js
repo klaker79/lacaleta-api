@@ -30,14 +30,20 @@ module.exports = function (pool) {
 
     router.get('/intelligence/freshness', authMiddleware, requirePlan('profesional'), async (req, res) => {
         try {
+            // 🔒 cantidadRecibida con fallback a cantidad (auditoria A1-C3):
+            //    para pedidos en estado 'recibido', cantidadRecibida puede diferir
+            //    de cantidad pedida (incluso 0 si el item se marcó 'no-entregado').
+            //    Antes este endpoint usaba siempre `cantidad` y alertaba sobre
+            //    productos que en realidad nunca llegaron al restaurante.
+            //    Patrón idéntico al de search.routes.js y chatService.js.
             const result = await pool.query(`
             WITH compras_recientes AS (
-                SELECT 
+                SELECT
                     p.id as pedido_id,
                     p.fecha_recepcion,
                     CURRENT_DATE - p.fecha_recepcion::date as dias_desde_compra,
                     ing->>'ingredienteId' as ingrediente_id,
-                    (ing->>'cantidad')::numeric as cantidad_comprada
+                    COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) as cantidad_comprada
                 FROM pedidos p
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
                 WHERE p.restaurante_id = $1
@@ -45,6 +51,8 @@ module.exports = function (pool) {
                   AND p.estado = 'recibido'
                   AND p.fecha_recepcion IS NOT NULL
                   AND p.fecha_recepcion >= CURRENT_DATE - INTERVAL '7 days'
+                  AND COALESCE(ing->>'estado', '') <> 'no-entregado'
+                  AND COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) > 0
             )
             SELECT 
                 i.id,
@@ -223,10 +231,11 @@ module.exports = function (pool) {
             const ALERT_THRESHOLD = 40;
 
             const result = await pool.query(`
-            SELECT 
+            SELECT
                 r.id,
                 r.nombre,
                 r.precio_venta,
+                r.porciones,
                 r.ingredientes
             FROM recetas r
             WHERE r.restaurante_id = $1
@@ -264,7 +273,7 @@ module.exports = function (pool) {
 
             const recetasProblema = result.rows
                 .map(r => {
-                    let coste = 0;
+                    let costeLote = 0;
                     if (r.ingredientes && Array.isArray(r.ingredientes)) {
                         r.ingredientes.forEach(ing => {
                             const precioIng = ingMap[ing.ingredienteId] || 0;
@@ -275,17 +284,26 @@ module.exports = function (pool) {
                             }
                             const factorRendimiento = rendimiento / 100;
                             const costeReal = factorRendimiento > 0 ? (precioIng / factorRendimiento) : precioIng;
-                            coste += costeReal * (ing.cantidad || 0);
+                            costeLote += costeReal * (ing.cantidad || 0);
                         });
                     }
+                    // 🔒 Auditoría A1-C1 (Capa 6): el bucle acumula coste de LOTE
+                    //    (Σ ingrediente × cantidad). El precio_venta es por PORCIÓN.
+                    //    Antes se dividía coste-de-lote por precio-de-porción y
+                    //    salía food cost ×porciones (ej. 4-porción reportaba 4×).
+                    //    Ahora se divide coste-de-lote por porciones para obtener
+                    //    coste por porción, alineado con el frontend
+                    //    (calcularCosteRecetaCompleto) y con getRecipeCostBase.
+                    const porciones = Math.max(1, parseInt(r.porciones) || 1);
+                    const costePorPorcion = costeLote / porciones;
                     const precioVenta = parseFloat(r.precio_venta) || 0;
-                    const foodCost = precioVenta > 0 ? (coste / precioVenta) * 100 : 0;
-                    const precioSugerido = coste / (TARGET_FOOD_COST / 100);
+                    const foodCost = precioVenta > 0 ? (costePorPorcion / precioVenta) * 100 : 0;
+                    const precioSugerido = costePorPorcion / (TARGET_FOOD_COST / 100);
 
                     return {
                         id: r.id,
                         nombre: r.nombre,
-                        coste,
+                        coste: costePorPorcion,
                         precio_actual: precioVenta,
                         food_cost: Math.round(foodCost),
                         precio_sugerido: precioSugerido

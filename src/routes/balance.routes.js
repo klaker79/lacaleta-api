@@ -8,7 +8,7 @@ const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
-const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio } = require('../utils/businessHelpers');
+const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -187,7 +187,8 @@ module.exports = function (pool) {
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (
-                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+                     SELECT ingrediente_id,
+                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) as precio_medio_compra
                      FROM precios_compra_diarios WHERE restaurante_id = $1
                      GROUP BY ingrediente_id
                  ) pcd ON pcd.ingrediente_id = i.id
@@ -197,34 +198,25 @@ module.exports = function (pool) {
             const preciosMap = new Map();
             const rendimientoBaseMap = new Map();
             ingredientesResult.rows.forEach(i => {
-                if (i.precio_medio_compra) {
-                    preciosMap.set(i.id, parseFloat(i.precio_medio_compra));
-                } else {
-                    const precio = parseFloat(i.precio) || 0;
-                    const cpf = parseFloat(i.cantidad_por_formato) || 1;
-                    preciosMap.set(i.id, precio / cpf);
-                }
+                preciosMap.set(i.id, getBackendIngredientUnitPrice(i));
                 if (i.rendimiento) {
                     rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
                 }
             });
 
-            // Calcular costos usando el Map (sin queries adicionales)
+            // Mapa de recetas (para que getRecipeCostBase pueda expandir subrecetas).
+            const todasRecetasResult = await pool.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
+
+            // Calcular costos usando el helper canónico (Capa 3 auditoría: expande subrecetas).
             let costos = 0;
             for (const venta of ventasDetalle.rows) {
-                const ingredientes = venta.ingredientes || [];
                 const porciones = Math.max(1, parseInt(venta.porciones) || 1);
-                for (const ing of ingredientes) {
-                    const precio = preciosMap.get(ing.ingredienteId) || 0;
-                    // 🔧 FIX: Rendimiento con fallback al ingrediente base
-                    let rendimiento = parseFloat(ing.rendimiento);
-                    if (!rendimiento) {
-                        rendimiento = rendimientoBaseMap.get(ing.ingredienteId) || 100;
-                    }
-                    const factorRendimiento = rendimiento / 100;
-                    const costeReal = factorRendimiento > 0 ? (precio / factorRendimiento) : precio;
-                    costos += (costeReal * (ing.cantidad || 0) * venta.cantidad) / porciones;
-                }
+                const costeLote = getRecipeCostBase(venta, preciosMap, recetasMap, rendimientoBaseMap);
+                costos += (costeLote / porciones) * venta.cantidad;
             }
 
             const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;
@@ -256,7 +248,8 @@ module.exports = function (pool) {
                 `SELECT COALESCE(SUM(i.stock_actual * COALESCE(pcd.precio_medio_compra, i.precio / COALESCE(NULLIF(i.cantidad_por_formato, 0), 1))), 0) as valor
        FROM ingredientes i
        LEFT JOIN (
-           SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) as precio_medio_compra
+           SELECT ingrediente_id,
+                  ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) as precio_medio_compra
            FROM precios_compra_diarios WHERE restaurante_id = $1
            GROUP BY ingrediente_id
        ) pcd ON pcd.ingrediente_id = i.id
@@ -1640,12 +1633,16 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 ingredientesMap.set(normalizar(i.nombre), { id: i.id, cantidadPorFormato: parseFloat(i.cantidad_por_formato) || 0 });
             });
 
-            // Obtener todos los alias para búsqueda
+            // Obtener todos los alias para búsqueda.
+            // 🔒 i.deleted_at IS NULL (auditoria 2026-04-28 capa 4): si un alias
+            //    apunta a un ingrediente soft-deleted, este flujo OCR le inyectaría
+            //    compras reactivando datos zombi. Match con los otros 2 JOINs
+            //    alias→ingredientes en balance.js (líneas 587 y 783).
             const aliasResult = await client.query(
-                `SELECT a.alias, a.ingrediente_id, i.cantidad_por_formato 
-             FROM ingredientes_alias a 
+                `SELECT a.alias, a.ingrediente_id, i.cantidad_por_formato
+             FROM ingredientes_alias a
              JOIN ingredientes i ON a.ingrediente_id = i.id
-             WHERE a.restaurante_id = $1`,
+             WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
             const aliasMap = new Map();

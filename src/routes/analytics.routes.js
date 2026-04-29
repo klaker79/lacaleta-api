@@ -16,6 +16,8 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
+const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
 
 function defaultMesActual() {
     const today = new Date();
@@ -63,23 +65,26 @@ module.exports = function (pool) {
                 return res.json({ apply: false, total_rows: 0, rows_with_change: 0, changes_preview: [] });
             }
 
-            // 2. Recipes referenced
-            const recetaIds = [...new Set(ventasIndividuales.map(v => v.receta_id))];
+            // 2. Recipes — cargamos TODAS las del tenant para que getRecipeCostBase pueda
+            //    expandir subrecetas (Capa 3 auditoría: antes sólo se cargaban las referenciadas
+            //    por ventas; las subrecetas que no se venden directamente quedaban fuera y
+            //    daban precio=0 → COGS subestimado).
             const { rows: recetas } = await pool.query(
                 `SELECT id, nombre, ingredientes, porciones
                  FROM recetas
-                 WHERE restaurante_id = $1 AND id = ANY($2::int[])`,
-                [req.restauranteId, recetaIds]
+                 WHERE restaurante_id = $1 AND deleted_at IS NULL`,
+                [req.restauranteId]
             );
             const recetasMap = new Map(recetas.map(r => [r.id, r]));
 
-            // 3. Ingredient prices + base rendimiento
+            // 3. Ingredient prices + base rendimiento (helper canónico — Capa 2 auditoría).
             const { rows: ingredientes } = await pool.query(
                 `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (
-                     SELECT ingrediente_id, ROUND(AVG(precio_unitario)::numeric, 4) AS precio_medio_compra
+                     SELECT ingrediente_id,
+                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
                      FROM precios_compra_diarios
                      WHERE restaurante_id = $1
                      GROUP BY ingrediente_id
@@ -90,30 +95,16 @@ module.exports = function (pool) {
             const preciosMap = new Map();
             const rendimientoBaseMap = new Map();
             for (const ing of ingredientes) {
-                if (ing.precio_medio_compra) {
-                    preciosMap.set(ing.id, parseFloat(ing.precio_medio_compra));
-                } else {
-                    const p = parseFloat(ing.precio) || 0;
-                    const cpf = parseFloat(ing.cantidad_por_formato) || 1;
-                    preciosMap.set(ing.id, cpf > 0 ? p / cpf : p);
-                }
+                preciosMap.set(ing.id, getBackendIngredientUnitPrice(ing));
                 if (ing.rendimiento) rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
             }
 
-            // 4. Pre-compute coste por porción de cada receta
+            // 4. Pre-compute coste por porción de cada receta (Capa 3: usa getRecipeCostBase
+            //    que SÍ expande subrecetas).
             const costePorcionPorReceta = new Map();
             for (const receta of recetas) {
-                const lineas = receta.ingredientes || [];
                 const porciones = parseInt(receta.porciones) || 1;
-                let cogsLote = 0;
-                for (const item of lineas) {
-                    const precio = preciosMap.get(item.ingredienteId) || 0;
-                    let rendimiento = parseFloat(item.rendimiento);
-                    if (!rendimiento) rendimiento = rendimientoBaseMap.get(item.ingredienteId) || 100;
-                    const factor = rendimiento / 100;
-                    const costeReal = factor > 0 ? (precio / factor) : precio;
-                    cogsLote += costeReal * (parseFloat(item.cantidad) || 0);
-                }
+                const cogsLote = getRecipeCostBase(receta, preciosMap, recetasMap, rendimientoBaseMap);
                 costePorcionPorReceta.set(receta.id, cogsLote / porciones);
             }
 
@@ -282,18 +273,24 @@ module.exports = function (pool) {
                 if (!desde) desde = def.desde;
                 if (!hasta) hasta = def.hasta;
             }
+            // 🏷️ Capa 5 auditoría 2026-04-28: lista canónica vía categoriaClassifier.
+            // El bucketing antes tenía las listas hardcoded — chatService divergía.
+            // Mantenemos los mismos 3 buckets (food / beverage / otros) y la misma
+            // semántica; lo único que cambia es que la lista vive en un único sitio.
+            const beverageList = beverageCategoriesSqlList();
+            const otherList = otherCategoriesSqlList();
             const { rows } = await pool.query(
                 `SELECT
                     CASE
-                        WHEN LOWER(COALESCE(r.categoria, '')) IN ('bebida', 'bebidas') THEN 'beverage'
-                        WHEN LOWER(COALESCE(r.categoria, '')) IN ('suministro', 'suministros', 'preparacion base', 'preparaciones base') THEN 'otros'
+                        WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${beverageList}) THEN 'beverage'
+                        WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${otherList})    THEN 'otros'
                         ELSE 'food'
                     END AS bucket,
                     COALESCE(SUM(vdr.total_ingresos), 0)::numeric(14,2) AS ingresos,
                     COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(14,2) AS cogs,
                     COALESCE(SUM(vdr.beneficio_bruto), 0)::numeric(14,2) AS margen
                  FROM ventas_diarias_resumen vdr
-                 LEFT JOIN recetas r ON r.id = vdr.receta_id
+                 LEFT JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
                  WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
                  GROUP BY bucket`,
                 [req.restauranteId, desde, hasta]
