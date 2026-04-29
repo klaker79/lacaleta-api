@@ -183,8 +183,16 @@ module.exports = function (pool) {
         const client = await pool.connect();
         try {
             const { id } = req.params;
-            const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido } = req.body;
+            const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido, total } = req.body;
             const fechaRecepcionFinal = fecha_recepcion || fechaRecepcion;
+
+            // Si `total` llega en el body, lo validamos y persistimos. Si no llega
+            // pasamos null al UPDATE y COALESCE conserva el valor actual de la columna.
+            // Antes de este fix el campo `total` quedaba desactualizado al editar un
+            // pedido pendiente desde el modal del frontend (incidente 2026-04-29).
+            const totalValidado = (total !== undefined && total !== null)
+                ? validateNumber(total, 0, 0, 9999999)
+                : null;
 
             // 🛡️ Guardrail: rechazar cantidades absurdas en recepcion/edicion de
             // pedido. Mismo umbral 10000 que POST /orders. Protege contra errores
@@ -219,8 +227,8 @@ module.exports = function (pool) {
             const fechaRecepcionFinalReal = fechaRecepcionFinal || fechaRecepcionPersisted || new Date();
 
             const result = await client.query(
-                'UPDATE pedidos SET estado=$1, ingredientes=$2, total_recibido=$3, fecha_recepcion=$4 WHERE id=$5 AND restaurante_id=$6 RETURNING *',
-                [estado, JSON.stringify(ingredientes), total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId]
+                'UPDATE pedidos SET estado=$1, ingredientes=$2, total=COALESCE($3, total), total_recibido=$4, fecha_recepcion=$5 WHERE id=$6 AND restaurante_id=$7 RETURNING *',
+                [estado, JSON.stringify(ingredientes), totalValidado, total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId]
             );
 
             // Reescribir Diario en 2 escenarios:
