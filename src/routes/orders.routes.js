@@ -438,6 +438,15 @@ module.exports = function (pool) {
                     }
                 }
 
+                // Recalcular precio ponderado de cada ingrediente afectado tras la
+                // eliminación del pedido recibido. Sin esto, `precio` queda con el valor
+                // ponderado que incluía las compras de este pedido (ya borradas).
+                for (const item of ingredientes) {
+                    if (item.tipo === 'ajuste') continue;
+                    const ingId = item.ingredienteId || item.ingrediente_id;
+                    if (ingId) await recalcularPrecioPonderado(client, ingId, req.restauranteId);
+                }
+
                 log('info', 'Compras diarias y stock revertidos por borrado de pedido', {
                     pedidoId: req.params.id,
                     ingredientes: ingredientes.length
