@@ -188,15 +188,53 @@ function getRecipeCostBase(receta, preciosMap, recetasMap = new Map(), rendimien
  */
 async function upsertCompraDiaria(client, { ingredienteId, fecha, precioUnitario, cantidad, total, restauranteId, proveedorId = null, pedidoId = null }) {
     await client.query(`
-        INSERT INTO precios_compra_diarios 
+        INSERT INTO precios_compra_diarios
         (ingrediente_id, fecha, precio_unitario, cantidad_comprada, total_compra, restaurante_id, proveedor_id, pedido_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (ingrediente_id, fecha, restaurante_id, (COALESCE(pedido_id, 0)))
-        DO UPDATE SET 
+        DO UPDATE SET
             precio_unitario = EXCLUDED.precio_unitario,
             cantidad_comprada = precios_compra_diarios.cantidad_comprada + EXCLUDED.cantidad_comprada,
             total_compra = precios_compra_diarios.total_compra + EXCLUDED.total_compra
     `, [ingredienteId, fecha, precioUnitario, cantidad, total, restauranteId, proveedorId, pedidoId]);
+}
+
+/**
+ * Recalcula el precio del ingrediente como `precio_medio_compra_ponderado × cantidad_por_formato`.
+ * Tras cada recepción de pedido sincroniza el precio configurado con la realidad de las compras,
+ * de forma que el inventario (que muestra `precio_medio = precio / cantidad_por_formato`) refleje
+ * lo que realmente se ha pagado en lugar del precio inicial estático.
+ *
+ * Mantiene la regla "stock valuation usa precio_medio" (feedback 2026-04-09) — solo cambia el origen
+ * de ese precio_medio: ya no es config manual sino media ponderada de compras reales.
+ *
+ * @param {object} client - PostgreSQL client (dentro de la misma transacción que la recepción)
+ * @param {number} ingredienteId
+ * @param {number} restauranteId
+ */
+async function recalcularPrecioPonderado(client, ingredienteId, restauranteId) {
+    const result = await client.query(`
+        SELECT
+            SUM(pcd.total_compra) / NULLIF(SUM(pcd.cantidad_comprada), 0) AS pmc,
+            i.cantidad_por_formato
+        FROM precios_compra_diarios pcd
+        JOIN ingredientes i ON i.id = pcd.ingrediente_id AND i.restaurante_id = pcd.restaurante_id
+        WHERE pcd.ingrediente_id = $1
+          AND pcd.restaurante_id = $2
+          AND i.deleted_at IS NULL
+        GROUP BY i.cantidad_por_formato
+    `, [ingredienteId, restauranteId]);
+
+    if (result.rows.length === 0 || !result.rows[0].pmc) return;
+
+    const pmc = parseFloat(result.rows[0].pmc);
+    const cpf = parseFloat(result.rows[0].cantidad_por_formato) || 1;
+    const nuevoPrecio = pmc * cpf;
+
+    await client.query(
+        'UPDATE ingredientes SET precio = $1, fecha_actualizacion = NOW() WHERE id = $2 AND restaurante_id = $3',
+        [nuevoPrecio, ingredienteId, restauranteId]
+    );
 }
 
 /**
@@ -290,6 +328,7 @@ module.exports = {
     expandRecipeToBase,
     getRecipeCostBase,
     upsertCompraDiaria,
+    recalcularPrecioPonderado,
     buildIngredientPriceMap,
     resolveProveedorId,
     updateProveedorPrecio

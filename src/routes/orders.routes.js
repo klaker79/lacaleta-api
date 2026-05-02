@@ -13,7 +13,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { logChange } = require('../utils/auditLog');
-const { upsertCompraDiaria } = require('../utils/businessHelpers');
+const { upsertCompraDiaria, recalcularPrecioPonderado } = require('../utils/businessHelpers');
 const { validateDate, validateNumber, validateId } = require('../utils/validators');
 
 /**
@@ -162,6 +162,14 @@ module.exports = function (pool) {
                     // (avoids double-counting since frontend already adjusts stock atomically)
                 }
 
+                // Recalcular precio ponderado de cada ingrediente para que el inventario
+                // (precio_medio = precio / cpf) refleje las compras reales.
+                for (const item of ingredientes) {
+                    if (item.tipo === 'ajuste') continue;
+                    const ingId = item.ingredienteId || item.ingrediente_id;
+                    if (ingId) await recalcularPrecioPonderado(client, ingId, req.restauranteId);
+                }
+
                 log('info', 'Compras diarias y stock registrados desde compra mercado', { pedidoId: result.rows[0].id, items: ingredientes.length });
             }
 
@@ -270,6 +278,13 @@ module.exports = function (pool) {
 
                     // Stock adjustment handled by frontend via bulkAdjustStock — NOT here
                     // (avoids double-counting since frontend already adjusts stock atomically)
+                }
+
+                // Recalcular precio ponderado de cada ingrediente afectado tras la recepción.
+                for (const item of ingredientes) {
+                    if (item.tipo === 'ajuste') continue;
+                    const ingId = item.ingredienteId || item.ingrediente_id;
+                    if (ingId) await recalcularPrecioPonderado(client, ingId, req.restauranteId);
                 }
 
                 log('info', 'Compras diarias registradas/reescritas desde pedido', { pedidoId: id, items: ingredientes.length, edicion: wasAlreadyReceived });
