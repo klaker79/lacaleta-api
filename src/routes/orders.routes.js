@@ -217,6 +217,27 @@ module.exports = function (pool) {
                 }
             }
 
+            // 🔒 VALIDACIÓN CROSS-TENANT: igual que POST /orders. Sin esto un token
+            // de tenant A podría meter `ingredienteId` del tenant B en el array
+            // editado, ensuciando precios_compra_diarios con IDs foráneos.
+            // Audit 2026-05-03 — antes este endpoint sólo verificaba que el pedido
+            // pertenecía al tenant, no los IDs nuevos del body.
+            if (Array.isArray(ingredientes) && ingredientes.length > 0) {
+                const ingIds = ingredientes
+                    .filter(it => it.tipo !== 'ajuste')
+                    .map(it => it.ingredienteId || it.ingrediente_id)
+                    .filter(Boolean);
+                if (ingIds.length > 0) {
+                    const ingCheck = await client.query(
+                        'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
+                        [ingIds, req.restauranteId]
+                    );
+                    if (ingCheck.rows.length !== ingIds.length) {
+                        return res.status(404).json({ error: 'Uno o más ingredientes no encontrados' });
+                    }
+                }
+            }
+
             await client.query('BEGIN');
 
             // ⚡ FIX VAL-02: Obtener estado actual para prevenir doble procesamiento
