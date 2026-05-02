@@ -119,6 +119,62 @@ describe('Cross-tenant validation — resources from other tenants should be rej
         });
     });
 
+    describe('PUT /api/orders/:id', () => {
+        it('rechaza ingredienteId del body que no pertenece al tenant (404)', async () => {
+            if (!authToken || !myIngredient) return;
+
+            // 1. Creamos un pedido pendiente legítimo
+            const createRes = await request(API_URL)
+                .post('/api/orders')
+                .set('Origin', ORIGIN)
+                .set('Authorization', `Bearer ${authToken}`)
+                .send({
+                    proveedorId: null,
+                    fecha: new Date().toISOString().split('T')[0],
+                    estado: 'pendiente',
+                    total: 5,
+                    ingredientes: [{
+                        ingredienteId: myIngredient.id,
+                        cantidad: 1,
+                        precioUnitario: 5,
+                    }],
+                });
+
+            if (![200, 201].includes(createRes.status)) return; // Skip si no se pudo crear
+
+            const orderId = createRes.body?.id;
+
+            try {
+                // 2. PUT con ingrediente foráneo en el body — debe rechazar 404
+                const putRes = await request(API_URL)
+                    .put(`/api/orders/${orderId}`)
+                    .set('Origin', ORIGIN)
+                    .set('Authorization', `Bearer ${authToken}`)
+                    .send({
+                        estado: 'recibido',
+                        total: 10,
+                        ingredientes: [{
+                            ingredienteId: IMPOSSIBLY_HIGH_ID,
+                            cantidad: 1,
+                            cantidadRecibida: 1,
+                            precioReal: 10,
+                            precioUnitario: 10,
+                        }],
+                    });
+
+                expect(putRes.status).toBe(404);
+                expect(putRes.body.error).toMatch(/ingrediente/i);
+            } finally {
+                if (orderId) {
+                    await request(API_URL)
+                        .delete(`/api/orders/${orderId}`)
+                        .set('Origin', ORIGIN)
+                        .set('Authorization', `Bearer ${authToken}`);
+                }
+            }
+        });
+    });
+
     describe('PUT /api/ingredients/:id/suppliers/:supplierId', () => {
         it('rechaza supplierId que no pertenece al tenant (404)', async () => {
             if (!authToken || !myIngredient) return;
