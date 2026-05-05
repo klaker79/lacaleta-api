@@ -157,15 +157,33 @@ module.exports = function (pool) {
                 vdrMap.set(`${r.receta_id}_${fechaStr}`, r);
             }
 
-            // 7. Build list of changes
+            // 7. Build list of changes (UPDATE existentes) + inserts (filas faltantes)
             const changes = [];
+            const inserts = [];
             let totalAntes = 0;
             let totalDespues = 0;
             for (const [key, a] of aggregados) {
                 const vdr = vdrMap.get(key);
-                if (!vdr) continue;
-                const cogsAntes = parseFloat(vdr.coste_ingredientes) || 0;
                 const cogsNuevo = Math.round(a.coste * 100) / 100;
+                const ingresosAgg = Math.round(a.ingresos * 100) / 100;
+                if (!vdr) {
+                    // Fila faltante en ventas_diarias_resumen — la venta está en `ventas`
+                    // pero nunca se agregó (típico cuando POST /sales antes de fix 2026-05-05
+                    // no actualizaba la tabla agregada). Insertamos para que el food cost,
+                    // P&L y demás KPIs reflejen estas ventas.
+                    const receta = recetasMap.get(a.receta_id);
+                    inserts.push({
+                        receta_id: a.receta_id,
+                        fecha: a.fecha,
+                        receta: receta ? receta.nombre : `(id ${a.receta_id})`,
+                        cantidad: a.unidades,
+                        ingresos: ingresosAgg,
+                        coste: cogsNuevo
+                    });
+                    totalDespues += cogsNuevo;
+                    continue;
+                }
+                const cogsAntes = parseFloat(vdr.coste_ingredientes) || 0;
                 totalAntes += cogsAntes;
                 totalDespues += cogsNuevo;
                 if (Math.abs(cogsAntes - cogsNuevo) > 0.01) {
@@ -175,7 +193,7 @@ module.exports = function (pool) {
                         fecha: a.fecha,
                         receta: receta ? receta.nombre : `(id ${a.receta_id})`,
                         unidades_vendidas: a.unidades,
-                        ingresos: Math.round(a.ingresos * 100) / 100,
+                        ingresos: ingresosAgg,
                         coste_antes: Math.round(cogsAntes * 100) / 100,
                         coste_despues: cogsNuevo,
                         diferencia: Math.round((cogsNuevo - cogsAntes) * 100) / 100
@@ -183,9 +201,10 @@ module.exports = function (pool) {
                 }
             }
 
-            // 8. Apply transactionally
+            // 8. Apply transactionally (UPDATE existentes + INSERT faltantes)
             let applied = 0;
-            if (apply === true && changes.length > 0) {
+            let inserted = 0;
+            if (apply === true && (changes.length > 0 || inserts.length > 0)) {
                 const client = await pool.connect();
                 try {
                     await client.query('BEGIN');
@@ -198,6 +217,22 @@ module.exports = function (pool) {
                             [ch.coste_despues, ch.vdr_id, req.restauranteId]
                         );
                         applied += r.rowCount || 0;
+                    }
+                    for (const ins of inserts) {
+                        // Necesitamos un precio_venta_unitario. Usamos ingresos/cantidad como
+                        // promedio (consistente con cómo se mostraría en el resumen). Si la
+                        // cantidad es 0, fallback a 0 para no dividir.
+                        const precioUnitario = ins.cantidad > 0
+                            ? Math.round((ins.ingresos / ins.cantidad) * 100) / 100
+                            : 0;
+                        const r = await client.query(
+                            `INSERT INTO ventas_diarias_resumen
+                             (receta_id, fecha, cantidad_vendida, precio_venta_unitario, coste_ingredientes, total_ingresos, beneficio_bruto, restaurante_id)
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                             ON CONFLICT (receta_id, fecha, restaurante_id) DO NOTHING`,
+                            [ins.receta_id, ins.fecha, ins.cantidad, precioUnitario, ins.coste, ins.ingresos, ins.ingresos - ins.coste, req.restauranteId]
+                        );
+                        inserted += r.rowCount || 0;
                     }
                     await client.query('COMMIT');
                 } catch (err) {
@@ -247,12 +282,15 @@ module.exports = function (pool) {
                 ventas_individuales_analizadas: ventasIndividuales.length,
                 filas_vdr_analizadas: vdrRows.length,
                 rows_with_change: changes.length,
+                rows_to_insert: inserts.length,
                 applied_rows: applied,
+                inserted_rows: inserted,
                 coste_total_antes: Math.round(totalAntes * 100) / 100,
                 coste_total_despues: Math.round(totalDespues * 100) / 100,
                 diferencia: Math.round((totalDespues - totalAntes) * 100) / 100,
                 changes_by_receta,
-                changes_preview: changes.slice(0, 20)
+                changes_preview: changes.slice(0, 20),
+                inserts_preview: inserts.slice(0, 20)
             });
         } catch (err) {
             log('error', 'Error recalculando COGS', { error: err.message, stack: err.stack });
