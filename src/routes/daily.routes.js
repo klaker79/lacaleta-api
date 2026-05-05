@@ -73,6 +73,47 @@ module.exports = function (pool) {
         }
     });
 
+    // GET última compra de un ingrediente al proveedor indicado
+    // Sirve al frontend para autollenar el input "Precio" del modal Nuevo Pedido
+    // con el precio real de la última compra a ese proveedor (en lugar del
+    // promedio ponderado, que no refleja la realidad del proveedor concreto).
+    // Devuelve { precio_unitario, cantidad, fecha, pedido_id } o null si no hay.
+    router.get('/daily/purchases/last', authMiddleware, async (req, res) => {
+        try {
+            const { ingredienteId, proveedorId } = req.query;
+            const idCheck = validateId(ingredienteId);
+            if (!idCheck.valid) {
+                return res.status(400).json({ error: `ingredienteId inválido: ${idCheck.error}` });
+            }
+            const provCheck = validateId(proveedorId);
+            if (!provCheck.valid) {
+                return res.status(400).json({ error: `proveedorId inválido: ${provCheck.error}` });
+            }
+            const result = await pool.query(
+                `SELECT precio_unitario, cantidad_comprada, total_compra, fecha, pedido_id
+                 FROM precios_compra_diarios
+                 WHERE ingrediente_id = $1 AND proveedor_id = $2 AND restaurante_id = $3
+                 ORDER BY fecha DESC, id DESC
+                 LIMIT 1`,
+                [idCheck.value, provCheck.value, req.restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.json(null);
+            }
+            const row = result.rows[0];
+            res.json({
+                precio_unitario: parseFloat(row.precio_unitario) || 0,
+                cantidad: parseFloat(row.cantidad_comprada) || 0,
+                total: parseFloat(row.total_compra) || 0,
+                fecha: row.fecha,
+                pedido_id: row.pedido_id
+            });
+        } catch (err) {
+            log('error', 'Error obteniendo última compra', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     // PUT fix a daily purchase entry (precios_compra_diarios)
     // 🔒 requireAdmin: corregir precios afecta precio_medio_compra y propaga a coste de
     //    recetas y P&L. Solo admins (auditoria 2026-04-28).
