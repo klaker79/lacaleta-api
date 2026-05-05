@@ -114,6 +114,65 @@ module.exports = function (pool) {
         }
     });
 
+    // POST batch — última compra de varios pares (ingrediente, proveedor) en una sola llamada.
+    // Sirve a Smart Order y otros flujos que necesitan autollenar N ingredientes a la vez
+    // sin disparar N peticiones HTTP. Devuelve array de
+    // { ingredienteId, proveedorId, precio_unitario, fecha, pedido_id }.
+    // Los pares sin compras registradas NO aparecen en la respuesta.
+    router.post('/daily/purchases/last/batch', authMiddleware, async (req, res) => {
+        try {
+            const { pares } = req.body || {};
+            if (!Array.isArray(pares) || pares.length === 0) {
+                return res.json([]);
+            }
+            // Cap defensivo. Smart Order rara vez supera 200 items.
+            if (pares.length > 500) {
+                return res.status(400).json({ error: 'Máximo 500 pares por batch' });
+            }
+            const ingIds = [];
+            const provIds = [];
+            for (const p of pares) {
+                const i = parseInt(p?.ingredienteId);
+                const j = parseInt(p?.proveedorId);
+                if (Number.isInteger(i) && i > 0 && Number.isInteger(j) && j > 0) {
+                    ingIds.push(i);
+                    provIds.push(j);
+                }
+            }
+            if (ingIds.length === 0) return res.json([]);
+
+            // Una sola consulta con DISTINCT ON: la fila más reciente por
+            // (ingrediente, proveedor). Después filtramos al subconjunto pedido.
+            const result = await pool.query(
+                `SELECT DISTINCT ON (ingrediente_id, proveedor_id)
+                        ingrediente_id, proveedor_id, precio_unitario,
+                        cantidad_comprada, total_compra, fecha, pedido_id
+                 FROM precios_compra_diarios
+                 WHERE restaurante_id = $1
+                   AND ingrediente_id = ANY($2::int[])
+                   AND proveedor_id = ANY($3::int[])
+                 ORDER BY ingrediente_id, proveedor_id, fecha DESC, id DESC`,
+                [req.restauranteId, ingIds, provIds]
+            );
+            const setPares = new Set(ingIds.map((id, i) => `${id}-${provIds[i]}`));
+            const out = result.rows
+                .filter(r => setPares.has(`${r.ingrediente_id}-${r.proveedor_id}`))
+                .map(r => ({
+                    ingredienteId: r.ingrediente_id,
+                    proveedorId: r.proveedor_id,
+                    precio_unitario: parseFloat(r.precio_unitario) || 0,
+                    cantidad: parseFloat(r.cantidad_comprada) || 0,
+                    total: parseFloat(r.total_compra) || 0,
+                    fecha: r.fecha,
+                    pedido_id: r.pedido_id
+                }));
+            res.json(out);
+        } catch (err) {
+            log('error', 'Error obteniendo última compra batch', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     // PUT fix a daily purchase entry (precios_compra_diarios)
     // 🔒 requireAdmin: corregir precios afecta precio_medio_compra y propaga a coste de
     //    recetas y P&L. Solo admins (auditoria 2026-04-28).
