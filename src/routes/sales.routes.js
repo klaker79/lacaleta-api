@@ -225,6 +225,7 @@ module.exports = function (pool) {
                 );
             }
 
+            log('info', '[fix-2026-05-05] Upsert ventas_diarias_resumen INICIO', { recetaId, fechaVenta });
             // 🔧 FIX 2026-05-05: actualizar ventas_diarias_resumen también en venta single.
             // Antes solo /sales/bulk actualizaba la tabla agregada, dejando el food cost,
             // P&L y rankings vacíos para tenants que registran ventas una a una. Ahora
