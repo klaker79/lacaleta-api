@@ -225,6 +225,63 @@ module.exports = function (pool) {
                 );
             }
 
+            // 🔧 FIX 2026-05-05: actualizar ventas_diarias_resumen también en venta single.
+            // Antes solo /sales/bulk actualizaba la tabla agregada, dejando el food cost,
+            // P&L y rankings vacíos para tenants que registran ventas una a una. Ahora
+            // replicamos la misma lógica del bulk dentro de la transacción para que el
+            // resumen quede consistente con cada venta y los KPIs salgan en tiempo real.
+            const ingredientesResult = await client.query(
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id,
+                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) as precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [req.restauranteId]
+            );
+            const ingredientesPrecios = new Map();
+            const rendimientoBaseMap = new Map();
+            ingredientesResult.rows.forEach(i => {
+                ingredientesPrecios.set(i.id, getBackendIngredientUnitPrice(i));
+                if (i.rendimiento) rendimientoBaseMap.set(i.id, parseFloat(i.rendimiento));
+            });
+
+            const todasRecetasResult = await client.query(
+                'SELECT id, porciones, ingredientes FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                [req.restauranteId]
+            );
+            const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
+
+            const porciones = Math.max(1, parseInt(receta.porciones) || 1);
+            const costeLote = getRecipeCostBase(receta, ingredientesPrecios, recetasMap, rendimientoBaseMap);
+            const costeIngredientes = (costeLote / porciones) * cantidadValidada * factorVariante;
+
+            const fechaResumen = fechaVenta.toISOString().split('T')[0];
+            await client.query(`
+                INSERT INTO ventas_diarias_resumen
+                (receta_id, fecha, cantidad_vendida, precio_venta_unitario, coste_ingredientes, total_ingresos, beneficio_bruto, restaurante_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (receta_id, fecha, restaurante_id)
+                DO UPDATE SET
+                    cantidad_vendida = ventas_diarias_resumen.cantidad_vendida + EXCLUDED.cantidad_vendida,
+                    coste_ingredientes = ventas_diarias_resumen.coste_ingredientes + EXCLUDED.coste_ingredientes,
+                    total_ingresos = ventas_diarias_resumen.total_ingresos + EXCLUDED.total_ingresos,
+                    beneficio_bruto = ventas_diarias_resumen.beneficio_bruto + EXCLUDED.beneficio_bruto
+            `, [
+                recetaId,
+                fechaResumen,
+                cantidadValidada,
+                precioUnitario,
+                costeIngredientes,
+                total,
+                total - costeIngredientes,
+                req.restauranteId
+            ]);
+
             await client.query('COMMIT');
             res.status(201).json(ventaResult.rows[0]);
         } catch (err) {
