@@ -25,14 +25,24 @@ module.exports = function (pool) {
             // (OTHER_CATEGORIES) — idéntico a lo que pnl-breakdown excluye del
             // food cost. Las recetas FOOD son el complemento exacto.
             const nonFoodList = nonFoodCategoriesSqlList();
-            // Query 1: Ventas agrupadas por receta
+            // Query 1: TODAS las recetas activas FOOD del tenant + ventas si las hay.
+            // LEFT JOIN para que las recetas activas sin ventas también entren al
+            // análisis. Sin esto (INNER JOIN previo), un plato que está en la carta
+            // pero no se vende quedaba invisible — justamente lo que un Perro debe
+            // gritar en la matriz BCG. Reportado por Iker 2026-05-07: borró ventas
+            // de SOLOMILLO, no era rentable, esperaba verlo en Perros y no aparecía.
             const ventas = await pool.query(
                 `SELECT r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones,
-                    SUM(v.cantidad) as cantidad_vendida,
-                    SUM(v.total) as total_ventas
-             FROM ventas v
-             JOIN recetas r ON v.receta_id = r.id
-             WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
+                    COALESCE(SUM(v.cantidad), 0) as cantidad_vendida,
+                    COALESCE(SUM(v.total), 0) as total_ventas
+             FROM recetas r
+             LEFT JOIN ventas v
+                ON v.receta_id = r.id
+               AND v.restaurante_id = $1
+               AND v.deleted_at IS NULL
+             WHERE r.restaurante_id = $1
+               AND r.deleted_at IS NULL
+               AND r.activo = TRUE
                AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones`,
                 [req.restauranteId]
@@ -76,8 +86,16 @@ module.exports = function (pool) {
             const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
 
             const analisis = [];
-            const totalVentasRestaurante = ventas.rows.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
-            const promedioPopularidad = ventas.rows.length > 0 ? totalVentasRestaurante / ventas.rows.length : 0;
+            // Las medias de popularidad y margen se calculan SOLO sobre recetas
+            // con ventas reales. Si incluyéramos las recetas sin ventas en el
+            // divisor, la media de popularidad bajaría artificialmente y casi
+            // todo plato vendido aparecería como "popular", desvirtuando la
+            // matriz BCG. Las recetas sin ventas se incluyen al final del
+            // resultado (popularidad=0 → siempre debajo de la media → Perro o
+            // Puzzle según margen).
+            const ventasConDatos = ventas.rows.filter(v => parseFloat(v.cantidad_vendida) > 0);
+            const totalVentasRestaurante = ventasConDatos.reduce((sum, v) => sum + parseFloat(v.cantidad_vendida), 0);
+            const promedioPopularidad = ventasConDatos.length > 0 ? totalVentasRestaurante / ventasConDatos.length : 0;
             let sumaMargenes = 0;
 
             // Calcular costes usando el helper canónico (Capa 3 auditoría: ahora expande subrecetas).
@@ -106,8 +124,12 @@ module.exports = function (pool) {
             }
 
             const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
-            const promedioFoodCost = analisis.length > 0
-                ? analisis.reduce((sum, p) => sum + p.foodCost, 0) / analisis.length
+            // Food cost medio: solo sobre platos con ventas reales — coherente con
+            // popularidad y margen. Las recetas sin ventas no representan el
+            // comportamiento real del menú aunque tengan un food cost calculable.
+            const platosConVentas = analisis.filter(p => p.popularidad > 0);
+            const promedioFoodCost = platosConVentas.length > 0
+                ? platosConVentas.reduce((sum, p) => sum + p.foodCost, 0) / platosConVentas.length
                 : 0;
 
             const resultado = analisis.map(p => {
