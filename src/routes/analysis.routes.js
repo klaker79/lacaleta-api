@@ -4,7 +4,6 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
-const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { nonFoodCategoriesSqlList } = require('../utils/categoriaClassifier');
@@ -16,7 +15,7 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== ANÁLISIS AVANZADO ==========
-    router.get('/analysis/menu-engineering', authMiddleware, requirePlan('profesional'), async (req, res) => {
+    router.get('/analysis/menu-engineering', authMiddleware, async (req, res) => {
         try {
             // 🏷️ Capa 5 auditoría 2026-04-28: lista canónica vía categoriaClassifier.
             // Antes la lista NOT IN estaba hardcoded y divergía del bucketing
