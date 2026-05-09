@@ -4,7 +4,6 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
-const { requirePlan } = require('../middleware/planGate');
 const { log } = require('../utils/logger');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
@@ -154,7 +153,7 @@ module.exports = function (pool) {
     // ========== BALANCE Y ESTADÍSTICAS ==========
     // NOTE: los endpoints /analytics/* (food-cost, pnl-breakdown, recalculate-cogs)
     // se movieron a routes/analytics.routes.js el 2026-04-20.
-    router.get('/balance/mes', authMiddleware, requirePlan('profesional'), async (req, res) => {
+    router.get('/balance/mes', authMiddleware, async (req, res) => {
         try {
             const { mes, ano } = req.query;
             const mesActual = parseInt(mes) || new Date().getMonth() + 1;
@@ -273,7 +272,7 @@ module.exports = function (pool) {
         }
     });
 
-    router.get('/balance/comparativa', authMiddleware, requirePlan('profesional'), async (req, res) => {
+    router.get('/balance/comparativa', authMiddleware, async (req, res) => {
         try {
             const meses = await pool.query(
                 `SELECT 
@@ -302,7 +301,7 @@ module.exports = function (pool) {
     // 📸 ESCANEO DE ALBARANES CON CLAUDE VISION
     // ==========================================
 
-    router.post('/parse-albaran', authMiddleware, requirePlan('profesional'), costlyApiLimiter, async (req, res) => {
+    router.post('/parse-albaran', authMiddleware, costlyApiLimiter, async (req, res) => {
         try {
             const { imageBase64, mediaType, filename } = req.body;
 
