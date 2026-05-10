@@ -56,6 +56,76 @@ module.exports = function (pool) {
         }
     });
 
+    // ⚠️ ENDPOINTS TEMPORALES — placeholder para activar/desactivar el add-on
+    // sin pasarela de pago. Cuando se elija el nuevo proveedor de pago (Stripe
+    // u otro), estos dos endpoints se ELIMINAN y el flag chat_addon pasa a
+    // controlarse desde el webhook del proveedor (subscription.created /
+    // subscription.deleted del producto "MindLoop Chat IA Add-on").
+    //
+    // Validación: cualquier user autenticado del tenant. El cargo real lo
+    // gestionará el proveedor; el frontend muestra modal con confirmación
+    // explícita del importe antes de llamar a activate (UX requirement).
+
+    router.post('/chat-addon/activate', authMiddleware, async (req, res) => {
+        const restauranteId = req.restauranteId;
+        if (!restauranteId) {
+            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
+        }
+        try {
+            const result = await pool.query(
+                `UPDATE restaurantes
+                 SET chat_addon = true,
+                     chat_consultas_reset_at = CASE
+                         WHEN chat_addon = false THEN NOW()
+                         ELSE chat_consultas_reset_at
+                     END,
+                     chat_consultas_mes = CASE
+                         WHEN chat_addon = false THEN 0
+                         ELSE chat_consultas_mes
+                     END
+                 WHERE id = $1
+                 RETURNING chat_addon, chat_consultas_mes, chat_consultas_reset_at`,
+                [restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            log('info', 'Chat addon activated', { restauranteId });
+            res.json({
+                enabled: result.rows[0].chat_addon,
+                used: result.rows[0].chat_consultas_mes,
+                limit: CHAT_MONTHLY_LIMIT
+            });
+        } catch (err) {
+            log('error', '/chat-addon/activate failed', { restauranteId, error: err.message });
+            res.status(500).json({ error: 'Error activando el add-on' });
+        }
+    });
+
+    router.post('/chat-addon/deactivate', authMiddleware, async (req, res) => {
+        const restauranteId = req.restauranteId;
+        if (!restauranteId) {
+            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
+        }
+        try {
+            const result = await pool.query(
+                `UPDATE restaurantes
+                 SET chat_addon = false
+                 WHERE id = $1
+                 RETURNING chat_addon`,
+                [restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            log('info', 'Chat addon deactivated', { restauranteId });
+            res.json({ enabled: result.rows[0].chat_addon });
+        } catch (err) {
+            log('error', '/chat-addon/deactivate failed', { restauranteId, error: err.message });
+            res.status(500).json({ error: 'Error desactivando el add-on' });
+        }
+    });
+
     // Validación de body antes del addon gate. Razón: body inválido o vacío
     // no debe consumir la cuota mensual del cliente. Tests `400` esperan
     // que la validación corra antes que el gate (preserva contrato anterior).
