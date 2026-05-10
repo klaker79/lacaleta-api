@@ -14,13 +14,49 @@
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
+const { chatAddonGate, CHAT_MONTHLY_LIMIT, RESET_INTERVAL_DAYS } = require('../middleware/chatAddonGate');
 const { log } = require('../utils/logger');
 const { processChat } = require('../services/chatService');
 
 module.exports = function (pool) {
     const router = Router();
 
-    router.post('/chat', costlyApiLimiter, authMiddleware, async (req, res) => {
+    // GET /chat-status — el frontend llama aquí para saber si el widget se
+    // muestra y cuántas consultas le quedan. Si addon=false el cliente verá
+    // un CTA "Activar Asistente IA"; si está activado verá el chat con
+    // contador "X/300 este mes".
+    router.get('/chat-status', authMiddleware, async (req, res) => {
+        const restauranteId = req.restauranteId;
+        if (!restauranteId) {
+            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
+        }
+        try {
+            const result = await pool.query(
+                `SELECT chat_addon,
+                        chat_consultas_mes,
+                        chat_consultas_reset_at,
+                        chat_consultas_reset_at + INTERVAL '${RESET_INTERVAL_DAYS} days' AS next_reset
+                 FROM restaurantes
+                 WHERE id = $1`,
+                [restauranteId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Restaurante no encontrado' });
+            }
+            const row = result.rows[0];
+            res.json({
+                enabled: row.chat_addon,
+                used: row.chat_consultas_mes,
+                limit: CHAT_MONTHLY_LIMIT,
+                resets_at: row.next_reset
+            });
+        } catch (err) {
+            log('error', '/chat-status failed', { restauranteId, error: err.message });
+            res.status(500).json({ error: 'Error obteniendo estado del chat' });
+        }
+    });
+
+    router.post('/chat', costlyApiLimiter, authMiddleware, chatAddonGate(pool), async (req, res) => {
         const { message, lang } = req.body || {};
         const restauranteId = req.restauranteId;
 
