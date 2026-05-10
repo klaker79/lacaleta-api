@@ -56,19 +56,23 @@ module.exports = function (pool) {
         }
     });
 
-    router.post('/chat', costlyApiLimiter, authMiddleware, chatAddonGate(pool), async (req, res) => {
-        const { message, lang } = req.body || {};
-        const restauranteId = req.restauranteId;
-
+    // Validación de body antes del addon gate. Razón: body inválido o vacío
+    // no debe consumir la cuota mensual del cliente. Tests `400` esperan
+    // que la validación corra antes que el gate (preserva contrato anterior).
+    function validateChatBody(req, res, next) {
+        const { message } = req.body || {};
         if (!message || typeof message !== 'string' || message.trim().length === 0) {
             return res.status(400).json({ error: 'message is required' });
         }
         if (message.length > 4000) {
             return res.status(400).json({ error: 'message too long (max 4000 chars)' });
         }
-        if (!restauranteId) {
-            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
-        }
+        next();
+    }
+
+    router.post('/chat', costlyApiLimiter, authMiddleware, validateChatBody, chatAddonGate(pool), async (req, res) => {
+        const { message, lang } = req.body || {};
+        const restauranteId = req.restauranteId;
 
         try {
             const restResult = await pool.query(
