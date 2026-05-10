@@ -17,6 +17,7 @@ const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { chatAddonGate, CHAT_MONTHLY_LIMIT, RESET_INTERVAL_DAYS } = require('../middleware/chatAddonGate');
 const { log } = require('../utils/logger');
 const { processChat } = require('../services/chatService');
+const polarService = require('../services/polarService');
 
 module.exports = function (pool) {
     const router = Router();
@@ -56,73 +57,70 @@ module.exports = function (pool) {
         }
     });
 
-    // ⚠️ ENDPOINTS TEMPORALES — placeholder para activar/desactivar el add-on
-    // sin pasarela de pago. Cuando se elija el nuevo proveedor de pago (Stripe
-    // u otro), estos dos endpoints se ELIMINAN y el flag chat_addon pasa a
-    // controlarse desde el webhook del proveedor (subscription.created /
-    // subscription.deleted del producto "MindLoop Chat IA Add-on").
+    // Activación del add-on: NO toca chat_addon directamente. Crea checkout
+    // session en Polar y devuelve URL — el cliente paga ahí, Polar manda
+    // webhook subscription.active y el handler en webhooks.routes.js
+    // pone chat_addon=true.
     //
-    // Validación: cualquier user autenticado del tenant. El cargo real lo
-    // gestionará el proveedor; el frontend muestra modal con confirmación
-    // explícita del importe antes de llamar a activate (UX requirement).
-
-    router.post('/chat-addon/activate', authMiddleware, async (req, res) => {
+    // Diseño: el flag SOLO lo cambia el webhook firmado. El cliente nunca
+    // puede activar el add-on sin pagar — un click en "Activar" solo crea
+    // un checkout, no escribe en BBDD.
+    router.post('/chat-addon/checkout-session', authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });
         }
+        const productId = process.env.POLAR_PRODUCT_ID_CHAT_ADDON;
+        if (!productId) {
+            log('error', 'POLAR_PRODUCT_ID_CHAT_ADDON no configurada');
+            return res.status(500).json({ error: 'Polar product no configurado' });
+        }
+        // origin del cliente para volver tras pagar. Validamos contra ALLOWED_ORIGINS
+        // (ya hardcodeados en server.js) implícitamente: solo aceptamos el header Origin.
+        const origin = req.headers.origin;
+        if (!origin) {
+            return res.status(400).json({ error: 'Origin header requerido' });
+        }
         try {
-            const result = await pool.query(
-                `UPDATE restaurantes
-                 SET chat_addon = true,
-                     chat_consultas_reset_at = CASE
-                         WHEN chat_addon = false THEN NOW()
-                         ELSE chat_consultas_reset_at
-                     END,
-                     chat_consultas_mes = CASE
-                         WHEN chat_addon = false THEN 0
-                         ELSE chat_consultas_mes
-                     END
-                 WHERE id = $1
-                 RETURNING chat_addon, chat_consultas_mes, chat_consultas_reset_at`,
-                [restauranteId]
-            );
-            if (result.rows.length === 0) {
-                return res.status(404).json({ error: 'Restaurante no encontrado' });
-            }
-            log('info', 'Chat addon activated', { restauranteId });
-            res.json({
-                enabled: result.rows[0].chat_addon,
-                used: result.rows[0].chat_consultas_mes,
-                limit: CHAT_MONTHLY_LIMIT
+            const session = await polarService.createCheckoutSession({
+                restauranteId,
+                productId,
+                origin
             });
+            log('info', 'Polar checkout session creada', {
+                restauranteId,
+                checkoutId: session.id
+            });
+            res.json({ url: session.url });
         } catch (err) {
-            log('error', '/chat-addon/activate failed', { restauranteId, error: err.message });
-            res.status(500).json({ error: 'Error activando el add-on' });
+            log('error', '/chat-addon/checkout-session failed', {
+                restauranteId,
+                error: err.message
+            });
+            res.status(502).json({ error: 'Error creando sesión de pago' });
         }
     });
 
-    router.post('/chat-addon/deactivate', authMiddleware, async (req, res) => {
+    // Portal del cliente para cancelar/gestionar la sub. Polar emite un token
+    // temporal y el cliente accede sin login adicional.
+    router.post('/chat-addon/customer-portal', authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });
         }
         try {
-            const result = await pool.query(
-                `UPDATE restaurantes
-                 SET chat_addon = false
-                 WHERE id = $1
-                 RETURNING chat_addon`,
-                [restauranteId]
-            );
-            if (result.rows.length === 0) {
-                return res.status(404).json({ error: 'Restaurante no encontrado' });
-            }
-            log('info', 'Chat addon deactivated', { restauranteId });
-            res.json({ enabled: result.rows[0].chat_addon });
+            const session = await polarService.createCustomerPortalSession({ restauranteId });
+            res.json({ url: session.url });
         } catch (err) {
-            log('error', '/chat-addon/deactivate failed', { restauranteId, error: err.message });
-            res.status(500).json({ error: 'Error desactivando el add-on' });
+            log('error', '/chat-addon/customer-portal failed', {
+                restauranteId,
+                error: err.message
+            });
+            // Si el cliente nunca pasó por checkout, Polar no tiene customer
+            // todavía → 404 esperable. Lo manejamos con 400 informativo.
+            res.status(400).json({
+                error: 'No se pudo abrir el portal. ¿Tienes una suscripción activa?'
+            });
         }
     });
 
