@@ -29,7 +29,7 @@ const FECHA_FIJA = '2026-04-30T12:00:00.000Z';
 function normalizeForSnapshot(html) {
     return html
         // Espacios no-rompibles → espacio normal
-        .replace(/ /g, ' ')
+        .replace(/\u00A0/g, ' ')
         // Separador es-ES de miles (1.234,56 → 1234,56). Lookahead [\d,] para
         // no romper URLs como "v1.0.0".
         .replace(/(\d)\.(\d{3})(?=[\d,])/g, '$1$2')
