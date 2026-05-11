@@ -8,6 +8,7 @@ const { log } = require('../utils/logger');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
 const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -1207,7 +1208,13 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 return res.status(400).json({ error: 'El item no tiene ingrediente asignado. Edítalo primero.' });
             }
 
-            const totalAlbaran = item.precio * item.cantidad;
+            // Lógica de cálculo extraída a `purchaseApproveCalc.js` para que
+            // ambos endpoints (este + approve-batch) compartan exactamente
+            // la misma fórmula y se pueda testear sin DB.
+            const calc = computePurchaseApproval(item);
+            const totalAlbaran = calc.totalAlbaran;
+            const stockASumar = calc.stockToAdd;
+            const precioUnitarioNormalizado = calc.unitPrice;
 
             // Resolver proveedor: texto OCR → proveedor_id, fallback a proveedor principal
             const proveedorId = await resolveProveedorId(client, {
@@ -1216,28 +1223,17 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 restauranteId: req.restauranteId
             });
 
-            // Actualizar stock — formato_override indica cuántas unidades por formato eligió el usuario
-            // Si no eligió nada (NULL), el frontend muestra ×1 por defecto, así que usamos 1
             const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
-            const formato = parseFloat(item.formato_override) || 1;
-            const stockASumar = item.cantidad * formato;
 
             // 🛡️ Guardrail: rechazar cantidades absurdas ANTES de tocar ninguna tabla.
             // Si lo pusiéramos después de upsertCompraDiaria/updateProveedorPrecio,
             // un precio incorrecto quedaría en Diario (la ROLLBACK cubre ambas
             // escrituras aquí porque es transacción, pero la lógica queda más
             // limpia validando primero y además evita trabajo desperdiciado).
-            if (stockASumar > 10000) {
+            if (calc.rejected) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
             }
-
-            // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
-            // total_albarán / unidades_base = precio por unidad (€/kg, €/litro, etc.)
-            // Ejemplo: 2 cajas @ 30€, formato ×5 → total=60€, stock=10, unit_price=60/10=6€/ud
-            const precioUnitarioNormalizado = stockASumar > 0
-                ? +(totalAlbaran / stockASumar).toFixed(4)
-                : item.precio;
 
             // Insertar en precios_compra_diarios con precio UNITARIO normalizado
             await upsertCompraDiaria(client, {
@@ -1339,7 +1335,11 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     continue;
                 }
 
-                const totalAlbaran = item.precio * item.cantidad;
+                // Cálculo unificado vía helper (mismo que el endpoint single)
+                const calc = computePurchaseApproval(item);
+                const totalAlbaran = calc.totalAlbaran;
+                const stockASumar = calc.stockToAdd;
+                const precioUnitarioNormalizado = calc.unitPrice;
 
                 // Resolver proveedor: texto OCR → proveedor_id, fallback a proveedor principal
                 const proveedorId = await resolveProveedorId(client, {
@@ -1348,29 +1348,20 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     restauranteId: req.restauranteId
                 });
 
-                // Actualizar stock — formato_override indica cuántas unidades por formato eligió el usuario
-                // Si no eligió nada (NULL), el frontend muestra ×1 por defecto, así que usamos 1
                 const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
-                const formato = parseFloat(item.formato_override) || 1;
-                const stockASumar = item.cantidad * formato;
 
                 // 🛡️ Guardrail: validar ANTES de tocar Diario/proveedor_precios.
                 // Antes estaba después de las escrituras: el `continue` saltaba
                 // sólo el UPDATE stock pero las dos escrituras anteriores quedaban
                 // en la transacción y el COMMIT final las persistía → Diario
                 // quedaba con filas de items rechazados.
-                if (stockASumar > 10000) {
+                if (calc.rejected) {
                     log('warn', 'Batch approve: stock addition rejected — absurd value', {
                         ingrediente: item.ingrediente_nombre, cantidad: stockASumar, itemId: item.id
                     });
                     resultados.omitidos = (resultados.omitidos || 0) + 1;
                     continue;
                 }
-
-                // 🔧 FIX: Normalizar precio a UNITARIO antes de guardar en Diario
-                const precioUnitarioNormalizado = stockASumar > 0
-                    ? +(totalAlbaran / stockASumar).toFixed(4)
-                    : item.precio;
 
                 // Insertar en precios_compra_diarios con precio UNITARIO normalizado
                 await upsertCompraDiaria(client, {
