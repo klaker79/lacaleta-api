@@ -16,6 +16,24 @@ const { renderHtml } = require('../../src/services/informeMensualHtml')._interna
 // Fecha fija para que el footer "Generado el ..." NO cambie entre runs.
 const FECHA_FIJA = '2026-04-30T12:00:00.000Z';
 
+/**
+ * Normaliza el HTML antes de hacer snapshot para que el resultado sea
+ * estable entre entornos con distinta versión de ICU de Node:
+ *   - Local con full-icu:  "1.234,56 €" (con separador de miles)
+ *   - GitHub Actions runner:  "1234,56 €" (sin separador)
+ *
+ * Quitar SIEMPRE el separador de miles (punto entre dígitos al estilo
+ * es-ES) produce un HTML canónico que el runner siempre generará igual.
+ * No pierde valor: el test sigue detectando cambios estructurales,
+ * CSS, etiquetas traducidas, orden de secciones, etc.
+ */
+function normalizeForSnapshot(html) {
+    // Reemplaza "(d).(ddd)" SOLO si está dentro de un número (no rompe URLs
+    // como version="1.0.0"). El separador es-ES de miles siempre tiene
+    // exactamente 3 dígitos a la derecha del punto.
+    return html.replace(/(\d)\.(\d{3})(?=[\d,])/g, '$1$2');
+}
+
 function fixtureCompleto(moneda = '€') {
     return {
         periodo: {
@@ -90,7 +108,9 @@ function fixtureVacio() {
 
 const ANALISIS_FIJO = {
     resumen_ejecutivo:
-        'Mes positivo con **beneficio neto de 12.746 €** (+12% vs mes anterior). Food cost dentro del rango objetivo.',
+        // Sin separador de miles en el texto literal para que el snapshot
+        // sea idéntico en CI (Node sin ICU completo) y en local.
+        'Mes positivo con **beneficio neto de 12746 €** (+12% vs mes anterior). Food cost dentro del rango objetivo.',
     observaciones: [
         'Ingresos crecen 12.1% vs marzo.',
         'Pulpo subió 13.5% — revisar precio venta de Pulpo a la gallega.',
@@ -122,7 +142,7 @@ describe('informeMensualHtml — snapshots', () => {
             moneda: '€',
             lang: 'es'
         });
-        expect(html).toMatchSnapshot();
+        expect(normalizeForSnapshot(html)).toMatchSnapshot();
     });
 
     test('HTML completo en EN con moneda RM (tenant Malasia)', () => {
@@ -133,7 +153,7 @@ describe('informeMensualHtml — snapshots', () => {
             moneda: 'RM',
             lang: 'en'
         });
-        expect(html).toMatchSnapshot();
+        expect(normalizeForSnapshot(html)).toMatchSnapshot();
     });
 
     test('HTML "estado vacío" — sin actividad operativa', () => {
@@ -149,7 +169,7 @@ describe('informeMensualHtml — snapshots', () => {
             moneda: '€',
             lang: 'es'
         });
-        expect(html).toMatchSnapshot();
+        expect(normalizeForSnapshot(html)).toMatchSnapshot();
     });
 
     test('HTML con análisis IA vacío — secciones opcionales desaparecen', () => {
@@ -170,6 +190,6 @@ describe('informeMensualHtml — snapshots', () => {
         // No queremos headers de secciones vacías
         expect(html).not.toMatch(/<h2>[^<]*Observaciones[^<]*<\/h2>\s*<ul[^>]*>\s*<\/ul>/);
         expect(html).not.toMatch(/<h2>[^<]*Recomendaciones[^<]*<\/h2>\s*<\/section>/);
-        expect(html).toMatchSnapshot();
+        expect(normalizeForSnapshot(html)).toMatchSnapshot();
     });
 });

@@ -645,13 +645,13 @@ exports[`informeMensualHtml — snapshots HTML completo en EN con moneda RM (ten
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-label">Revenue</div>
-                    <div class="kpi-value">RM 47.200,00</div>
+                    <div class="kpi-value">RM 47200,00</div>
                     <div class="kpi-sub"><span class="kpi-good">+12.1%</span> vs previous month</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-warn">33.8%</div>
-                    <div class="kpi-sub">COGS: RM 15.953,60</div>
+                    <div class="kpi-sub">COGS: RM 15953,60</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventory</div>
@@ -663,18 +663,18 @@ exports[`informeMensualHtml — snapshots HTML completo en EN con moneda RM (ten
 
         <section>
             <h2>📝 Executive Summary</h2>
-            <div class="resumen">Mes positivo con <strong>beneficio neto de 12.746 €</strong> (+12% vs mes anterior). Food cost dentro del rango objetivo.</div>
+            <div class="resumen">Mes positivo con <strong>beneficio neto de 12746 €</strong> (+12% vs mes anterior). Food cost dentro del rango objetivo.</div>
         </section>
 
         <section>
             <h2>💼 P&amp;L — Profit &amp; Loss</h2>
             
         <table class="pyg-table">
-            <tr><td>Revenue</td><td class="num">RM 47.200,00</td></tr>
-            <tr class="pyg-minus"><td>− COGS (cost of goods sold)</td><td class="num">RM 15.953,60</td></tr>
-            <tr class="pyg-subtotal"><td>Gross margin</td><td class="num">RM 31.246,40</td></tr>
-            <tr class="pyg-minus"><td>− Fixed costs <span class="pyg-sub-info">(8)</span></td><td class="num">RM 18.500,00</td></tr>
-            <tr class="pyg-total"><td><strong>Net profit</strong></td><td class="num"><strong class="kpi-good">RM 12.746,40</strong></td></tr>
+            <tr><td>Revenue</td><td class="num">RM 47200,00</td></tr>
+            <tr class="pyg-minus"><td>− COGS (cost of goods sold)</td><td class="num">RM 15953,60</td></tr>
+            <tr class="pyg-subtotal"><td>Gross margin</td><td class="num">RM 31246,40</td></tr>
+            <tr class="pyg-minus"><td>− Fixed costs <span class="pyg-sub-info">(8)</span></td><td class="num">RM 18500,00</td></tr>
+            <tr class="pyg-total"><td><strong>Net profit</strong></td><td class="num"><strong class="kpi-good">RM 12746,40</strong></td></tr>
             <tr class="pyg-pct"><td>Net margin</td><td class="num"><span class="kpi-good">27.0%</span></td></tr>
         </table>
     
@@ -1171,13 +1171,13 @@ exports[`informeMensualHtml — snapshots HTML completo en ES con datos reales 1
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-label">Ingresos</div>
-                    <div class="kpi-value">47.200,00 €</div>
+                    <div class="kpi-value">47200,00 €</div>
                     <div class="kpi-sub"><span class="kpi-good">+12.1%</span> vs mes anterior</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-warn">33.8%</div>
-                    <div class="kpi-sub">COGS: 15.953,60 €</div>
+                    <div class="kpi-sub">COGS: 15953,60 €</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventario</div>
@@ -1189,18 +1189,18 @@ exports[`informeMensualHtml — snapshots HTML completo en ES con datos reales 1
 
         <section>
             <h2>📝 Resumen Ejecutivo</h2>
-            <div class="resumen">Mes positivo con <strong>beneficio neto de 12.746 €</strong> (+12% vs mes anterior). Food cost dentro del rango objetivo.</div>
+            <div class="resumen">Mes positivo con <strong>beneficio neto de 12746 €</strong> (+12% vs mes anterior). Food cost dentro del rango objetivo.</div>
         </section>
 
         <section>
             <h2>💼 P&amp;L — Cuenta de Resultados</h2>
             
         <table class="pyg-table">
-            <tr><td>Ingresos</td><td class="num">47.200,00 €</td></tr>
-            <tr class="pyg-minus"><td>− COGS (coste materia prima)</td><td class="num">15.953,60 €</td></tr>
-            <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">31.246,40 €</td></tr>
-            <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(8)</span></td><td class="num">18.500,00 €</td></tr>
-            <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">12.746,40 €</strong></td></tr>
+            <tr><td>Ingresos</td><td class="num">47200,00 €</td></tr>
+            <tr class="pyg-minus"><td>− COGS (coste materia prima)</td><td class="num">15953,60 €</td></tr>
+            <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">31246,40 €</td></tr>
+            <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(8)</span></td><td class="num">18500,00 €</td></tr>
+            <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">12746,40 €</strong></td></tr>
             <tr class="pyg-pct"><td>Margen neto</td><td class="num"><span class="kpi-good">27.0%</span></td></tr>
         </table>
     
@@ -1697,13 +1697,13 @@ exports[`informeMensualHtml — snapshots HTML con análisis IA vacío — secci
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-label">Ingresos</div>
-                    <div class="kpi-value">47.200,00 €</div>
+                    <div class="kpi-value">47200,00 €</div>
                     <div class="kpi-sub"><span class="kpi-good">+12.1%</span> vs mes anterior</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-warn">33.8%</div>
-                    <div class="kpi-sub">COGS: 15.953,60 €</div>
+                    <div class="kpi-sub">COGS: 15953,60 €</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventario</div>
@@ -1722,11 +1722,11 @@ exports[`informeMensualHtml — snapshots HTML con análisis IA vacío — secci
             <h2>💼 P&amp;L — Cuenta de Resultados</h2>
             
         <table class="pyg-table">
-            <tr><td>Ingresos</td><td class="num">47.200,00 €</td></tr>
-            <tr class="pyg-minus"><td>− COGS (coste materia prima)</td><td class="num">15.953,60 €</td></tr>
-            <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">31.246,40 €</td></tr>
-            <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(8)</span></td><td class="num">18.500,00 €</td></tr>
-            <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">12.746,40 €</strong></td></tr>
+            <tr><td>Ingresos</td><td class="num">47200,00 €</td></tr>
+            <tr class="pyg-minus"><td>− COGS (coste materia prima)</td><td class="num">15953,60 €</td></tr>
+            <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">31246,40 €</td></tr>
+            <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(8)</span></td><td class="num">18500,00 €</td></tr>
+            <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">12746,40 €</strong></td></tr>
             <tr class="pyg-pct"><td>Margen neto</td><td class="num"><span class="kpi-good">27.0%</span></td></tr>
         </table>
     
