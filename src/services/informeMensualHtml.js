@@ -178,6 +178,64 @@ function mdToHtml(str) {
         .replace(/\n/g, '<br>');
 }
 
+/**
+ * Renderiza un sparkline SVG simple de los ingresos diarios del mes.
+ * Sin librerías, polyline manual, autoescala. ~600x80px.
+ */
+function renderSparkline(datos, moneda, lang) {
+    if (!datos || datos.length < 2) return '';
+    const W = 600;
+    const H = 80;
+    const PAD_X = 8;
+    const PAD_Y = 8;
+
+    const valores = datos.map(d => parseFloat(d.ingresos) || 0);
+    const max = Math.max(...valores, 1);
+    const min = 0; // siempre arrancamos en 0 para que la magnitud sea legible
+    const innerW = W - PAD_X * 2;
+    const innerH = H - PAD_Y * 2;
+
+    const stepX = datos.length > 1 ? innerW / (datos.length - 1) : 0;
+    const points = datos.map((d, i) => {
+        const x = PAD_X + i * stepX;
+        const v = parseFloat(d.ingresos) || 0;
+        const y = PAD_Y + innerH - ((v - min) / (max - min)) * innerH;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    // Area path: línea + relleno hasta el eje X
+    const areaPath = `M ${PAD_X},${PAD_Y + innerH} L ${points.join(' L ')} L ${PAD_X + (datos.length - 1) * stepX},${PAD_Y + innerH} Z`;
+
+    const maxIdx = valores.indexOf(max);
+    const maxX = PAD_X + maxIdx * stepX;
+    const maxY = PAD_Y + innerH - ((max - min) / (max - min)) * innerH;
+
+    const fmtFecha = (iso) => {
+        try {
+            const d = new Date(iso + 'T00:00:00Z');
+            return d.toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', { day: '2-digit', month: 'short' });
+        } catch (e) { return iso; }
+    };
+    const primero = fmtFecha(datos[0].dia);
+    const ultimo = fmtFecha(datos[datos.length - 1].dia);
+
+    return `
+    <svg viewBox="0 0 ${W} ${H + 22}" preserveAspectRatio="none" style="width:100%; height:110px;" role="img" aria-label="Evolución de ingresos">
+        <defs>
+            <linearGradient id="sl-area" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stop-color="#1e3a8a" stop-opacity="0.35"/>
+                <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0"/>
+            </linearGradient>
+        </defs>
+        <path d="${areaPath}" fill="url(#sl-area)" stroke="none"/>
+        <polyline points="${points.join(' ')}" fill="none" stroke="#1e3a8a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${maxX.toFixed(1)}" cy="${maxY.toFixed(1)}" r="3.5" fill="#f59e0b" stroke="#fff" stroke-width="1.5"/>
+        <text x="${PAD_X}" y="${H + 16}" font-size="11" fill="#64748b" font-family="-apple-system, sans-serif">${escapeHtml(primero)}</text>
+        <text x="${W - PAD_X}" y="${H + 16}" font-size="11" fill="#64748b" font-family="-apple-system, sans-serif" text-anchor="end">${escapeHtml(ultimo)}</text>
+        <text x="${maxX.toFixed(1)}" y="${Math.max(maxY - 6, 14).toFixed(1)}" font-size="11" fill="#f59e0b" font-weight="700" font-family="-apple-system, sans-serif" text-anchor="middle">${escapeHtml(fmtMoneda(max, moneda))}</text>
+    </svg>`;
+}
+
 function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
     const T = lang === 'en' ? {
         titulo: 'Monthly Executive Report',
@@ -209,6 +267,25 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         generadoEl: 'Generated on',
         imprimir: 'Print / Save as PDF',
         sinDatos: 'No data',
+        pyg: 'P&L — Profit & Loss',
+        pygIngresos: 'Revenue',
+        pygCogs: 'COGS (cost of goods sold)',
+        pygMargenBruto: 'Gross margin',
+        pygGastosFijos: 'Fixed costs',
+        pygBeneficio: 'Net profit',
+        pygMargenNeto: 'Net margin',
+        topProveedores: 'Top Suppliers',
+        proveedor: 'Supplier',
+        gastoMes: 'This month',
+        gastoAnterior: 'Previous month',
+        mermas: 'Losses (waste)',
+        mermasValor: 'Total value lost',
+        mermasRegistros: 'records',
+        mermasMotivo: 'Reason',
+        mermasNum: 'Items',
+        mermasValorCol: 'Value',
+        evolucion: 'Daily revenue evolution',
+        sinMermas: 'No waste recorded this month — perfect.',
     } : {
         titulo: 'Informe Ejecutivo Mensual',
         periodo: 'Periodo',
@@ -239,6 +316,25 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         generadoEl: 'Generado el',
         imprimir: 'Imprimir / Guardar PDF',
         sinDatos: 'Sin datos',
+        pyg: 'P&L — Cuenta de Resultados',
+        pygIngresos: 'Ingresos',
+        pygCogs: 'COGS (coste materia prima)',
+        pygMargenBruto: 'Margen bruto',
+        pygGastosFijos: 'Gastos fijos',
+        pygBeneficio: 'Beneficio neto',
+        pygMargenNeto: 'Margen neto',
+        topProveedores: 'Top Proveedores',
+        proveedor: 'Proveedor',
+        gastoMes: 'Este mes',
+        gastoAnterior: 'Mes anterior',
+        mermas: 'Mermas (dinero perdido)',
+        mermasValor: 'Valor total perdido',
+        mermasRegistros: 'registros',
+        mermasMotivo: 'Motivo',
+        mermasNum: 'Nº',
+        mermasValorCol: 'Valor',
+        evolucion: 'Evolución diaria de ingresos',
+        sinMermas: 'Ningún registro de merma este mes — perfecto.',
     };
 
     const fechaGen = new Date(datos.periodo.fecha_generacion).toLocaleString(
@@ -280,6 +376,64 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
             <td class="num"><span class="${subClass}">${fmtVariacion(r.variacion_pct)}</span></td>
         </tr>`;
     }).join('');
+
+    // P&L cascade
+    const pyg = datos.pyg || {};
+    const benefClass = parseFloat(pyg.beneficio_neto) >= 0 ? 'kpi-good' : 'kpi-bad';
+    const margenNetoClass = parseFloat(pyg.margen_neto_pct) >= 10 ? 'kpi-good'
+        : parseFloat(pyg.margen_neto_pct) >= 0 ? 'kpi-warn' : 'kpi-bad';
+    const pygHtml = `
+        <table class="pyg-table">
+            <tr><td>${escapeHtml(T.pygIngresos)}</td><td class="num">${fmtMoneda(pyg.ingresos, moneda)}</td></tr>
+            <tr class="pyg-minus"><td>− ${escapeHtml(T.pygCogs)}</td><td class="num">${fmtMoneda(pyg.cogs, moneda)}</td></tr>
+            <tr class="pyg-subtotal"><td>${escapeHtml(T.pygMargenBruto)}</td><td class="num">${fmtMoneda(pyg.margen_bruto, moneda)}</td></tr>
+            <tr class="pyg-minus"><td>− ${escapeHtml(T.pygGastosFijos)} <span class="pyg-sub-info">(${pyg.gastos_fijos_conceptos || 0})</span></td><td class="num">${fmtMoneda(pyg.gastos_fijos, moneda)}</td></tr>
+            <tr class="pyg-total"><td><strong>${escapeHtml(T.pygBeneficio)}</strong></td><td class="num"><strong class="${benefClass}">${fmtMoneda(pyg.beneficio_neto, moneda)}</strong></td></tr>
+            <tr class="pyg-pct"><td>${escapeHtml(T.pygMargenNeto)}</td><td class="num"><span class="${margenNetoClass}">${fmtPct(pyg.margen_neto_pct)}</span></td></tr>
+        </table>
+    `;
+
+    // Top proveedores
+    const topProveedoresRows = (datos.top_proveedores || []).map(p => {
+        const varClass = p.variacion_pct === null ? 'kpi-neutral'
+            : parseFloat(p.variacion_pct) > 0 ? 'kpi-bad' : 'kpi-good';
+        const varStr = p.variacion_pct === null ? '—' : fmtVariacion(p.variacion_pct);
+        return `
+        <tr>
+            <td>${escapeHtml(p.proveedor)}</td>
+            <td class="num">${fmtMoneda(p.gasto_actual, moneda)}</td>
+            <td class="num">${fmtMoneda(p.gasto_anterior, moneda)}</td>
+            <td class="num"><span class="${varClass}">${varStr}</span></td>
+        </tr>`;
+    }).join('');
+
+    // Mermas
+    const mermas = datos.mermas || {};
+    const mermasMotivosRows = (mermas.top_motivos || []).map(m => `
+        <tr>
+            <td>${escapeHtml(m.motivo)}</td>
+            <td class="num">${m.num}</td>
+            <td class="num">${fmtMoneda(m.valor, moneda)}</td>
+        </tr>
+    `).join('');
+    const mermasHtml = (mermas.num_registros > 0) ? `
+        <div class="mermas-kpi">
+            <div class="mermas-kpi-label">${escapeHtml(T.mermasValor)}</div>
+            <div class="mermas-kpi-value kpi-bad">${fmtMoneda(mermas.valor_total, moneda)}</div>
+            <div class="mermas-kpi-sub">${mermas.num_registros} ${escapeHtml(T.mermasRegistros)}</div>
+        </div>
+        ${mermasMotivosRows ? `<table>
+            <thead><tr>
+                <th>${escapeHtml(T.mermasMotivo)}</th>
+                <th class="num">${escapeHtml(T.mermasNum)}</th>
+                <th class="num">${escapeHtml(T.mermasValorCol)}</th>
+            </tr></thead>
+            <tbody>${mermasMotivosRows}</tbody>
+        </table>` : ''}
+    ` : `<div class="empty">${escapeHtml(T.sinMermas)}</div>`;
+
+    // Sparkline
+    const sparklineHtml = renderSparkline(datos.evolucion_diaria || [], moneda, lang);
 
     const observacionesHtml = (analisis.observaciones || [])
         .map(o => `<li>${mdToHtml(o)}</li>`)
@@ -497,6 +651,74 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         font-style: italic;
         font-size: 14px;
     }
+    /* P&L cascade */
+    .pyg-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 15px;
+    }
+    .pyg-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+    }
+    .pyg-table td.num {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+    }
+    .pyg-table tr.pyg-minus td { color: var(--muted); }
+    .pyg-table tr.pyg-subtotal td {
+        background: #f1f5f9;
+        font-weight: 600;
+    }
+    .pyg-table tr.pyg-total td {
+        background: var(--primary);
+        color: white;
+        font-size: 17px;
+        border-bottom: none;
+    }
+    .pyg-table tr.pyg-total td.num strong { color: #fff; }
+    .pyg-table tr.pyg-total .kpi-good { color: #86efac; }
+    .pyg-table tr.pyg-total .kpi-bad { color: #fca5a5; }
+    .pyg-table tr.pyg-pct td {
+        background: #f8fafc;
+        font-size: 13px;
+        color: var(--muted);
+    }
+    .pyg-sub-info {
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 12px;
+    }
+    /* Mermas KPI */
+    .mermas-kpi {
+        background: #fef2f2;
+        border-left: 4px solid var(--bad);
+        padding: 14px 18px;
+        border-radius: 6px;
+        margin-bottom: 12px;
+    }
+    .mermas-kpi-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 4px;
+    }
+    .mermas-kpi-value {
+        font-size: 22px;
+        font-weight: 700;
+    }
+    .mermas-kpi-sub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+    }
+    /* Sparkline container */
+    .sparkline-box {
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 12px 16px;
+        border: 1px solid var(--border);
+    }
 
     @media print {
         body { background: white; padding: 0; }
@@ -545,6 +767,18 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
             <div class="resumen">${mdToHtml(analisis.resumen_ejecutivo || '')}</div>
         </section>
 
+        <section>
+            <h2>💼 ${escapeHtml(T.pyg)}</h2>
+            ${pygHtml}
+        </section>
+
+        ${sparklineHtml ? `
+        <section>
+            <h2>📉 ${escapeHtml(T.evolucion)}</h2>
+            <div class="sparkline-box">${sparklineHtml}</div>
+        </section>
+        ` : ''}
+
         ${observacionesHtml ? `
         <section>
             <h2>🔍 ${escapeHtml(T.observaciones)}</h2>
@@ -560,6 +794,28 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
             ${recomendacionesHtml}
         </section>
         ` : ''}
+
+        ${topProveedoresRows ? `
+        <section>
+            <h2>🚚 ${escapeHtml(T.topProveedores)}</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>${escapeHtml(T.proveedor)}</th>
+                        <th class="num">${escapeHtml(T.gastoMes)}</th>
+                        <th class="num">${escapeHtml(T.gastoAnterior)}</th>
+                        <th class="num">${escapeHtml(T.variacion)}</th>
+                    </tr>
+                </thead>
+                <tbody>${topProveedoresRows}</tbody>
+            </table>
+        </section>
+        ` : ''}
+
+        <section>
+            <h2>🗑️ ${escapeHtml(T.mermas)}</h2>
+            ${mermasHtml}
+        </section>
 
         ${topRentablesRows ? `
         <section>

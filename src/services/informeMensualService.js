@@ -208,6 +208,116 @@ async function getCogsMes(pool, restauranteId, rango) {
     return parseFloat(r.rows[0].cogs_actual) || 0;
 }
 
+async function getGastosFijosMes(pool, restauranteId) {
+    // gastos_fijos.monto_mensual ya es mensual (no hay frecuencia)
+    const sql = `
+        SELECT COALESCE(SUM(monto_mensual), 0)::numeric AS total,
+               COUNT(*) AS num_conceptos
+        FROM gastos_fijos
+        WHERE restaurante_id = $1
+          AND (activo IS NULL OR activo = TRUE)
+    `;
+    const r = await pool.query(sql, [restauranteId]);
+    return {
+        total: parseFloat(r.rows[0].total) || 0,
+        num_conceptos: parseInt(r.rows[0].num_conceptos) || 0
+    };
+}
+
+async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
+    // Cuánto se compró a cada proveedor en el mes + mes anterior para variación.
+    // Se basa en pedidos.total (cash-flow real de albaranes).
+    const sql = `
+        WITH actual AS (
+            SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
+                   COALESCE(SUM(p.total), 0)::numeric AS gasto
+            FROM pedidos p
+            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+            WHERE p.restaurante_id = $1
+              AND p.fecha >= $2 AND p.fecha < $3
+              AND p.deleted_at IS NULL
+            GROUP BY pr.nombre
+        ),
+        anterior AS (
+            SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
+                   COALESCE(SUM(p.total), 0)::numeric AS gasto
+            FROM pedidos p
+            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+            WHERE p.restaurante_id = $1
+              AND p.fecha >= $4 AND p.fecha < $5
+              AND p.deleted_at IS NULL
+            GROUP BY pr.nombre
+        )
+        SELECT actual.proveedor,
+               ROUND(actual.gasto, 2) AS gasto_actual,
+               ROUND(COALESCE(anterior.gasto, 0), 2) AS gasto_anterior,
+               CASE WHEN COALESCE(anterior.gasto, 0) > 0
+                    THEN ROUND(((actual.gasto - anterior.gasto) / anterior.gasto * 100)::numeric, 1)
+                    ELSE NULL END AS variacion_pct
+        FROM actual
+        LEFT JOIN anterior USING (proveedor)
+        WHERE actual.gasto > 0
+        ORDER BY actual.gasto DESC
+        LIMIT $6
+    `;
+    const r = await pool.query(sql, [
+        restauranteId,
+        rango.inicio, rango.fin,
+        rango.anteriorInicio, rango.anteriorFin,
+        limit
+    ]);
+    return r.rows;
+}
+
+async function getMermasMes(pool, restauranteId, rango) {
+    // Valor perdido por mermas + top motivos
+    const totalSql = `
+        SELECT COALESCE(SUM(valor_perdida), 0)::numeric AS valor_total,
+               COUNT(*) AS num_registros
+        FROM mermas
+        WHERE restaurante_id = $1
+          AND fecha >= $2 AND fecha < $3
+          AND deleted_at IS NULL
+    `;
+    const total = (await pool.query(totalSql, [restauranteId, rango.inicio, rango.fin])).rows[0];
+
+    const topMotivosSql = `
+        SELECT COALESCE(NULLIF(TRIM(motivo), ''), 'sin motivo') AS motivo,
+               COUNT(*)::int AS num,
+               ROUND(SUM(valor_perdida)::numeric, 2) AS valor
+        FROM mermas
+        WHERE restaurante_id = $1
+          AND fecha >= $2 AND fecha < $3
+          AND deleted_at IS NULL
+        GROUP BY 1
+        ORDER BY valor DESC NULLS LAST
+        LIMIT 5
+    `;
+    const motivos = (await pool.query(topMotivosSql, [restauranteId, rango.inicio, rango.fin])).rows;
+
+    return {
+        valor_total: parseFloat(total.valor_total) || 0,
+        num_registros: parseInt(total.num_registros) || 0,
+        top_motivos: motivos
+    };
+}
+
+async function getEvolucionDiaria(pool, restauranteId, rango) {
+    // Ingresos diarios del mes. Para sparkline. Solo días con datos.
+    const sql = `
+        SELECT DATE(fecha)::text AS dia,
+               ROUND(SUM(total)::numeric, 2) AS ingresos
+        FROM ventas
+        WHERE restaurante_id = $1
+          AND fecha >= $2 AND fecha < $3
+          AND deleted_at IS NULL
+        GROUP BY DATE(fecha)
+        ORDER BY DATE(fecha) ASC
+    `;
+    const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin]);
+    return r.rows;
+}
+
 /**
  * Punto de entrada principal. Recoge todos los datos en paralelo y
  * devuelve el JSON consolidado.
@@ -218,18 +328,34 @@ async function generarInformeMensual(pool, restauranteId, mes) {
     const rango = rangoMes(mes);
 
     try {
-        const [restaurante, ingresos, topRentables, topProblematicos, cambiosPrecio, stock, cogsActual] = await Promise.all([
+        const [
+            restaurante, ingresos, topRentables, topProblematicos, cambiosPrecio,
+            stock, cogsActual, gastosFijos, topProveedores, mermas, evolucion
+        ] = await Promise.all([
             getRestaurante(pool, restauranteId),
             getIngresos(pool, restauranteId, rango),
             getTopRentables(pool, restauranteId, rango, 5),
             getTopProblematicos(pool, restauranteId, rango, 5),
             getCambiosPrecio(pool, restauranteId, rango, 10),
             getStock(pool, restauranteId),
-            getCogsMes(pool, restauranteId, rango)
+            getCogsMes(pool, restauranteId, rango),
+            getGastosFijosMes(pool, restauranteId),
+            getTopProveedores(pool, restauranteId, rango, 8),
+            getMermasMes(pool, restauranteId, rango),
+            getEvolucionDiaria(pool, restauranteId, rango)
         ]);
 
         const foodCostPct = ingresos.mes_actual > 0
             ? Math.round((cogsActual / ingresos.mes_actual) * 10000) / 100
+            : 0;
+
+        // P&L: ingresos − COGS − gastos fijos = beneficio neto aproximado.
+        // No incluye mermas (ya están en COGS si se descontaron del stock)
+        // ni amortizaciones / impuestos. Es una aproximación operativa.
+        const margenBruto = ingresos.mes_actual - cogsActual;
+        const beneficioNeto = margenBruto - gastosFijos.total;
+        const margenNetoPct = ingresos.mes_actual > 0
+            ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
             : 0;
 
         return {
@@ -246,10 +372,22 @@ async function generarInformeMensual(pool, restauranteId, mes) {
                 mes_actual_pct: foodCostPct,
                 cogs_actual: Math.round(cogsActual * 100) / 100
             },
+            pyg: {
+                ingresos: Math.round(ingresos.mes_actual * 100) / 100,
+                cogs: Math.round(cogsActual * 100) / 100,
+                margen_bruto: Math.round(margenBruto * 100) / 100,
+                gastos_fijos: Math.round(gastosFijos.total * 100) / 100,
+                gastos_fijos_conceptos: gastosFijos.num_conceptos,
+                beneficio_neto: Math.round(beneficioNeto * 100) / 100,
+                margen_neto_pct: margenNetoPct
+            },
             top_rentables: topRentables,
             top_problematicos: topProblematicos,
             cambios_precio: cambiosPrecio,
-            stock
+            stock,
+            top_proveedores: topProveedores,
+            mermas,
+            evolucion_diaria: evolucion
         };
     } catch (err) {
         log('error', 'generarInformeMensual failed', {
