@@ -347,7 +347,7 @@ exports[`informeMensualHtml — snapshots HTML "estado vacío" — sin actividad
         
 
         <div class="footer">
-            Generado el 30 de abril de 2026 a las 14:00 · MindLoop CostOS
+            Generado el <FECHA_GEN> · MindLoop CostOS
         </div>
     </div>
 </div>
@@ -873,7 +873,7 @@ exports[`informeMensualHtml — snapshots HTML completo en EN con moneda RM (ten
         
 
         <div class="footer">
-            Generated on 30 April 2026 at 14:00 · MindLoop CostOS
+            Generated on <FECHA_GEN> · MindLoop CostOS
         </div>
     </div>
 </div>
@@ -1399,7 +1399,7 @@ exports[`informeMensualHtml — snapshots HTML completo en ES con datos reales 1
         
 
         <div class="footer">
-            Generado el 30 de abril de 2026 a las 14:00 · MindLoop CostOS
+            Generado el <FECHA_GEN> · MindLoop CostOS
         </div>
     </div>
 </div>
@@ -1896,7 +1896,7 @@ exports[`informeMensualHtml — snapshots HTML con análisis IA vacío — secci
         
 
         <div class="footer">
-            Generado el 30 de abril de 2026 a las 14:00 · MindLoop CostOS
+            Generado el <FECHA_GEN> · MindLoop CostOS
         </div>
     </div>
 </div>

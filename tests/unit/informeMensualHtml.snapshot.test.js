@@ -17,21 +17,31 @@ const { renderHtml } = require('../../src/services/informeMensualHtml')._interna
 const FECHA_FIJA = '2026-04-30T12:00:00.000Z';
 
 /**
- * Normaliza el HTML antes de hacer snapshot para que el resultado sea
- * estable entre entornos con distinta versión de ICU de Node:
- *   - Local con full-icu:  "1.234,56 €" (con separador de miles)
- *   - GitHub Actions runner:  "1234,56 €" (sin separador)
+ * Normaliza el HTML antes del snapshot para evitar dependencias del runtime:
+ *   - ICU del runner: separador de miles (presente en local, ausente en CI)
+ *   - Formato de fecha del footer "Generado el ..." (cambia con ICU/locale)
+ *   - Espacios no-rompibles (U+00A0) que Intl introduce a veces entre número y €
  *
- * Quitar SIEMPRE el separador de miles (punto entre dígitos al estilo
- * es-ES) produce un HTML canónico que el runner siempre generará igual.
- * No pierde valor: el test sigue detectando cambios estructurales,
- * CSS, etiquetas traducidas, orden de secciones, etc.
+ * El snapshot resultante captura estructura, CSS, etiquetas traducidas,
+ * orden de secciones — no valores formateados de moneda/fecha (esos los
+ * cubren los unit tests granulares con asserts flexibles).
  */
 function normalizeForSnapshot(html) {
-    // Reemplaza "(d).(ddd)" SOLO si está dentro de un número (no rompe URLs
-    // como version="1.0.0"). El separador es-ES de miles siempre tiene
-    // exactamente 3 dígitos a la derecha del punto.
-    return html.replace(/(\d)\.(\d{3})(?=[\d,])/g, '$1$2');
+    return html
+        // Espacios no-rompibles → espacio normal
+        .replace(/ /g, ' ')
+        // Separador es-ES de miles (1.234,56 → 1234,56). Lookahead [\d,] para
+        // no romper URLs como "v1.0.0".
+        .replace(/(\d)\.(\d{3})(?=[\d,])/g, '$1$2')
+        // Separador en-US de miles (1,234.56 → 1234.56) por si el runner cae
+        // a en-US como fallback.
+        .replace(/(\d),(\d{3})(?=[\d.])/g, '$1$2')
+        // Footer "Generado el ... · MindLoop CostOS" → placeholder.
+        // El formato exacto de la fecha depende del ICU del runtime.
+        .replace(
+            /(Generado el|Generated on)\s+[^<·]+·\s+MindLoop CostOS/g,
+            '$1 <FECHA_GEN> · MindLoop CostOS'
+        );
 }
 
 function fixtureCompleto(moneda = '€') {
