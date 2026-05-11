@@ -19,6 +19,7 @@ const { log } = require('../utils/logger');
 const { processChat } = require('../services/chatService');
 const polarService = require('../services/polarService');
 const { generarInformeMensual } = require('../services/informeMensualService');
+const { generarInformeHtml } = require('../services/informeMensualHtml');
 
 module.exports = function (pool) {
     const router = Router();
@@ -150,6 +151,48 @@ module.exports = function (pool) {
                 restauranteId, mes, error: err.message
             });
             res.status(500).json({ error: 'Error generando datos del informe' });
+        }
+    });
+
+    // GET /chat/informe-mensual/html?mes=YYYY-MM — informe completo en HTML
+    // listo para imprimir/guardar como PDF desde el navegador. Hace una
+    // llamada Claude (sin tools, single-shot) para el análisis narrativo
+    // y el resto se renderiza en backend. No incrementa el contador del
+    // chat — los informes no son consultas conversacionales.
+    router.get('/chat/informe-mensual/html', costlyApiLimiter, authMiddleware, async (req, res) => {
+        const restauranteId = req.restauranteId;
+        if (!restauranteId) {
+            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
+        }
+        const mes = req.query.mes;
+        const lang = req.query.lang === 'en' ? 'en' : 'es';
+        try {
+            const r = await pool.query(
+                'SELECT chat_addon, nombre, moneda FROM restaurantes WHERE id = $1',
+                [restauranteId]
+            );
+            const row = r.rows[0];
+            if (!row?.chat_addon) {
+                return res.status(403).json({ error: 'CHAT_NOT_ACTIVATED' });
+            }
+            const datos = await generarInformeMensual(pool, restauranteId, mes);
+            const { html, usage } = await generarInformeHtml({
+                datos,
+                restauranteNombre: row.nombre || '',
+                moneda: row.moneda || '€',
+                lang
+            });
+            log('info', 'Informe mensual HTML generado', {
+                restauranteId, mes: datos.periodo.mes,
+                tokensInput: usage.input, tokensOutput: usage.output
+            });
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.send(html);
+        } catch (err) {
+            log('error', '/chat/informe-mensual/html failed', {
+                restauranteId, mes, error: err.message, stack: err.stack
+            });
+            res.status(500).json({ error: 'Error generando informe HTML' });
         }
     });
 
