@@ -193,4 +193,178 @@ describe('POST /webhooks/polar', () => {
         expect(res.status).toBe(200);
         expect(res.body).toMatchObject({ ignored: true });
     });
+
+    // ========================================================================
+    // IDEMPOTENCIA — Polar reintenta el mismo evento si no le respondemos 2xx
+    // rápido. El handler debe absorber duplicados sin efectos colaterales:
+    // ON CONFLICT (polar_subscription_id) DO UPDATE en chat_addon_subscriptions
+    // + UPDATE restaurantes idempotente (set chat_addon=true sigue siendo true).
+    // ========================================================================
+    describe('idempotencia (reintentos de Polar)', () => {
+        test('mismo subscription.active enviado 2 veces — ambas 200, INSERT con ON CONFLICT, COMMITs', async () => {
+            polarService.verifyWebhook.mockReturnValue({
+                type: 'subscription.active',
+                data: {
+                    id: 'sub_dupe',
+                    status: 'active',
+                    metadata: { restaurante_id: '7', addon_type: 'chat_ia' },
+                    customer: { id: 'cust_dupe' },
+                    currentPeriodEnd: '2026-07-10T00:00:00Z'
+                }
+            });
+
+            const pool = makePool();
+            const app = buildApp(pool);
+
+            const r1 = await request(app)
+                .post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json')
+                .send({ first: true });
+            const r2 = await request(app)
+                .post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json')
+                .send({ retry: true });
+
+            expect(r1.status).toBe(200);
+            expect(r2.status).toBe(200);
+            expect(r1.body).toMatchObject({ received: true });
+            expect(r2.body).toMatchObject({ received: true });
+
+            const inserts = pool.queries.filter(q =>
+                /INSERT INTO chat_addon_subscriptions/i.test(q.sql)
+            );
+            // Ambas requests emiten su INSERT — la idempotencia la garantiza
+            // ON CONFLICT en la BBDD real. Lo que NOSOTROS verificamos es:
+            //   1. El INSERT siempre lleva ON CONFLICT DO UPDATE
+            //   2. Ambos pasan sus params correctamente (mismo polar_subscription_id)
+            //   3. No hay ROLLBACK en ninguna de las dos transacciones
+            expect(inserts.length).toBe(2);
+            inserts.forEach(ins => {
+                expect(ins.sql).toMatch(/ON CONFLICT \(polar_subscription_id\) DO UPDATE/i);
+                expect(ins.params[1]).toBe('sub_dupe');
+            });
+
+            // Ambas transacciones deben terminar en COMMIT, ninguna en ROLLBACK
+            const commits = pool.queries.filter(q => /^\s*COMMIT/i.test(q.sql));
+            const rollbacks = pool.queries.filter(q => /^\s*ROLLBACK/i.test(q.sql));
+            expect(commits.length).toBe(2);
+            expect(rollbacks.length).toBe(0);
+
+            // Y ambas dispararon UPDATE chat_addon=true (idempotente)
+            const updatesActivos = pool.queries.filter(q =>
+                /UPDATE restaurantes\s+SET chat_addon = true/i.test(q.sql)
+            );
+            expect(updatesActivos.length).toBe(2);
+        });
+
+        test('flip-flop active → canceled → active genera SQL coherente y NO duplica filas', async () => {
+            const pool = makePool();
+            const app = buildApp(pool);
+
+            // 1) Activación inicial
+            polarService.verifyWebhook.mockReturnValueOnce({
+                type: 'subscription.active',
+                data: {
+                    id: 'sub_flip',
+                    status: 'active',
+                    metadata: { restaurante_id: '9', addon_type: 'chat_ia' },
+                    customer: { id: 'cust_flip' },
+                    currentPeriodEnd: '2026-07-15T00:00:00Z'
+                }
+            });
+            const r1 = await request(app).post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json').send({ x: 1 });
+
+            // 2) Cancelación
+            polarService.verifyWebhook.mockReturnValueOnce({
+                type: 'subscription.canceled',
+                data: {
+                    id: 'sub_flip',
+                    status: 'canceled',
+                    metadata: { restaurante_id: '9', addon_type: 'chat_ia' }
+                }
+            });
+            const r2 = await request(app).post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json').send({ x: 2 });
+
+            // 3) Reactivación
+            polarService.verifyWebhook.mockReturnValueOnce({
+                type: 'subscription.active',
+                data: {
+                    id: 'sub_flip',
+                    status: 'active',
+                    metadata: { restaurante_id: '9', addon_type: 'chat_ia' },
+                    customer: { id: 'cust_flip' },
+                    currentPeriodEnd: '2026-08-15T00:00:00Z'
+                }
+            });
+            const r3 = await request(app).post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json').send({ x: 3 });
+
+            expect(r1.status).toBe(200);
+            expect(r2.status).toBe(200);
+            expect(r3.status).toBe(200);
+
+            // 3 INSERTs (todos con ON CONFLICT — la BBDD real solo persiste 1 fila)
+            const inserts = pool.queries.filter(q =>
+                /INSERT INTO chat_addon_subscriptions/i.test(q.sql)
+            );
+            expect(inserts.length).toBe(3);
+            inserts.forEach(ins => expect(ins.params[1]).toBe('sub_flip'));
+
+            // chat_addon: true, false, true (en orden)
+            const updates = pool.queries.filter(q =>
+                /UPDATE restaurantes\s+SET chat_addon/i.test(q.sql)
+            );
+            expect(updates.length).toBe(3);
+            expect(updates[0].sql).toMatch(/chat_addon = true/i);
+            expect(updates[1].sql).toMatch(/chat_addon = false/i);
+            expect(updates[2].sql).toMatch(/chat_addon = true/i);
+
+            // Sin rollbacks
+            expect(pool.queries.some(q => /ROLLBACK/i.test(q.sql))).toBe(false);
+        });
+
+        test('subscription.created y subscription.active del mismo sub_id NO se pisan: ambos llevan ON CONFLICT', async () => {
+            // Polar suele mandar created seguido inmediato de active. Verificamos
+            // que ambos producen INSERTs con ON CONFLICT (la fila no se duplica).
+            const pool = makePool();
+            const app = buildApp(pool);
+
+            polarService.verifyWebhook.mockReturnValueOnce({
+                type: 'subscription.created',
+                data: {
+                    id: 'sub_seq',
+                    status: 'active',
+                    metadata: { restaurante_id: '11', addon_type: 'chat_ia' },
+                    customer: { id: 'cust_seq' },
+                    currentPeriodEnd: '2026-06-01T00:00:00Z'
+                }
+            });
+            polarService.verifyWebhook.mockReturnValueOnce({
+                type: 'subscription.active',
+                data: {
+                    id: 'sub_seq',
+                    status: 'active',
+                    metadata: { restaurante_id: '11', addon_type: 'chat_ia' },
+                    customer: { id: 'cust_seq' },
+                    currentPeriodEnd: '2026-06-01T00:00:00Z'
+                }
+            });
+
+            await request(app).post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json').send({ x: 1 });
+            await request(app).post('/api/webhooks/polar')
+                .set('Content-Type', 'application/json').send({ x: 2 });
+
+            const inserts = pool.queries.filter(q =>
+                /INSERT INTO chat_addon_subscriptions/i.test(q.sql)
+            );
+            expect(inserts.length).toBe(2);
+            inserts.forEach(ins => {
+                expect(ins.sql).toMatch(/ON CONFLICT \(polar_subscription_id\) DO UPDATE/i);
+                expect(ins.params[1]).toBe('sub_seq');
+            });
+        });
+    });
 });

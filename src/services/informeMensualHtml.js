@@ -39,9 +39,12 @@ function escapeHtml(str) {
 
 function fmtMoneda(value, moneda) {
     const n = parseFloat(value);
-    if (!isFinite(n)) return `${moneda} 0,00`;
-    // Símbolo antes para RM/USD, después para € (es lo más visualmente correcto)
-    const formatted = n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const safe = isFinite(n) ? n : 0;
+    // Símbolo antes para RM/USD, después para € (es lo más visualmente correcto).
+    // Si el valor no es finito (null/NaN/string-no-numérico) caemos a 0 pero
+    // respetando el formato canónico de la moneda — el fallback no debe
+    // saltarse la regla de posición del símbolo.
+    const formatted = safe.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return moneda === '€' ? `${formatted} €` : `${moneda} ${formatted}`;
 }
 
@@ -882,4 +885,19 @@ async function generarInformeHtml({ datos, restauranteNombre, moneda, lang }) {
     return { html, usage };
 }
 
-module.exports = { generarInformeHtml };
+module.exports = {
+    generarInformeHtml,
+    // Solo para tests unitarios — exponemos los helpers internos para
+    // poder verificar escapeHtml (anti-XSS), formato multi-currency,
+    // sparkline edge cases, etc. sin necesidad de mockear Claude.
+    _internals: {
+        escapeHtml,
+        fmtMoneda,
+        fmtPct,
+        fmtVariacion,
+        classFoodCost,
+        mdToHtml,
+        renderSparkline,
+        renderHtml
+    }
+};
