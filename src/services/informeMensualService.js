@@ -79,26 +79,27 @@ async function getIngresos(pool, restauranteId, rango) {
 }
 
 async function getTopRentables(pool, restauranteId, rango, limit = 5) {
-    // Plato más vendido con buen margen (precio_venta - coste). Para evitar
-    // depender de tablas resumen, calculamos a partir de ventas + recetas.
+    // Top platos por beneficio bruto. Fuente: ventas_diarias_resumen, que ya
+    // tiene coste_ingredientes y total_ingresos por día/receta — evitamos
+    // depender de un coste persistido en recetas (no existe esa columna).
     const sql = `
         SELECT
             r.nombre,
-            SUM(v.cantidad)::int AS vendidas,
-            r.precio_venta::numeric AS precio_venta,
-            r.coste::numeric AS coste,
-            CASE WHEN r.precio_venta > 0
-                 THEN ROUND(((r.precio_venta - r.coste) / r.precio_venta * 100)::numeric, 2)
-                 ELSE 0 END AS margen_pct,
-            ROUND((SUM(v.cantidad) * r.precio_venta)::numeric, 2) AS ingresos
-        FROM ventas v
-        JOIN recetas r ON r.id = v.receta_id AND r.deleted_at IS NULL
-        WHERE v.restaurante_id = $1
-          AND v.deleted_at IS NULL
-          AND v.fecha >= $2 AND v.fecha < $3
-        GROUP BY r.id, r.nombre, r.precio_venta, r.coste
-        HAVING SUM(v.cantidad) > 0
-        ORDER BY (SUM(v.cantidad) * (r.precio_venta - COALESCE(r.coste, 0))) DESC
+            SUM(vdr.cantidad_vendida)::int AS vendidas,
+            ROUND(SUM(vdr.total_ingresos)::numeric, 2) AS ingresos,
+            ROUND(SUM(vdr.coste_ingredientes)::numeric, 2) AS coste,
+            CASE WHEN SUM(vdr.total_ingresos) > 0
+                 THEN ROUND(((SUM(vdr.total_ingresos) - SUM(vdr.coste_ingredientes))
+                              / SUM(vdr.total_ingresos) * 100)::numeric, 2)
+                 ELSE 0 END AS margen_pct
+        FROM ventas_diarias_resumen vdr
+        JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
+        WHERE vdr.restaurante_id = $1
+          AND vdr.fecha >= $2 AND vdr.fecha < $3
+        GROUP BY r.id, r.nombre
+        HAVING SUM(vdr.cantidad_vendida) > 0
+           AND SUM(vdr.total_ingresos) > 0
+        ORDER BY (SUM(vdr.total_ingresos) - SUM(vdr.coste_ingredientes)) DESC
         LIMIT $4
     `;
     const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin, limit]);
@@ -106,27 +107,29 @@ async function getTopRentables(pool, restauranteId, rango, limit = 5) {
 }
 
 async function getTopProblematicos(pool, restauranteId, rango, limit = 5) {
-    // Platos con food cost alto (>40%) y volumen de venta significativo
+    // Platos con food cost > 40% y volumen significativo. Misma fuente que
+    // top_rentables para coherencia.
     const sql = `
         SELECT
             r.nombre,
-            SUM(v.cantidad)::int AS vendidas,
-            r.precio_venta::numeric AS precio_venta,
-            r.coste::numeric AS coste,
-            CASE WHEN r.precio_venta > 0
-                 THEN ROUND((r.coste / r.precio_venta * 100)::numeric, 2)
+            SUM(vdr.cantidad_vendida)::int AS vendidas,
+            ROUND(SUM(vdr.total_ingresos)::numeric, 2) AS ingresos,
+            ROUND(SUM(vdr.coste_ingredientes)::numeric, 2) AS coste,
+            CASE WHEN SUM(vdr.total_ingresos) > 0
+                 THEN ROUND((SUM(vdr.coste_ingredientes)
+                              / SUM(vdr.total_ingresos) * 100)::numeric, 2)
                  ELSE 0 END AS food_cost_pct
-        FROM ventas v
-        JOIN recetas r ON r.id = v.receta_id AND r.deleted_at IS NULL
-        WHERE v.restaurante_id = $1
-          AND v.deleted_at IS NULL
-          AND v.fecha >= $2 AND v.fecha < $3
-          AND r.precio_venta > 0
-          AND r.coste > 0
-        GROUP BY r.id, r.nombre, r.precio_venta, r.coste
-        HAVING SUM(v.cantidad) > 0
-           AND (r.coste / r.precio_venta) > 0.40
-        ORDER BY (r.coste / r.precio_venta) DESC, SUM(v.cantidad) DESC
+        FROM ventas_diarias_resumen vdr
+        JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
+        WHERE vdr.restaurante_id = $1
+          AND vdr.fecha >= $2 AND vdr.fecha < $3
+        GROUP BY r.id, r.nombre
+        HAVING SUM(vdr.cantidad_vendida) > 0
+           AND SUM(vdr.total_ingresos) > 0
+           AND SUM(vdr.coste_ingredientes) > 0
+           AND (SUM(vdr.coste_ingredientes) / SUM(vdr.total_ingresos)) > 0.40
+        ORDER BY (SUM(vdr.coste_ingredientes) / SUM(vdr.total_ingresos)) DESC,
+                 SUM(vdr.cantidad_vendida) DESC
         LIMIT $4
     `;
     const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin, limit]);
@@ -191,14 +194,15 @@ async function getStock(pool, restauranteId) {
 }
 
 async function getCogsMes(pool, restauranteId, rango) {
-    // COGS calculado: sum(cantidad_recibida * precio_unitario) de los pedidos
-    // recibidos en el mes (proxy razonable). Más adelante podemos refinar
-    // con stock_deductions reales de ventas.
+    // COGS canónico = SUM(coste_ingredientes) de ventas_diarias_resumen.
+    // Es la misma fórmula sellada en el baseline (project_kpis_sellados_2026_04_20).
+    // Usar compras (precios_compra_diarios) inflaría food cost en meses con
+    // pedidos grandes que aún no se han vendido.
     const sql = `
-        SELECT COALESCE(SUM(pcd.total_compra), 0)::numeric AS cogs_actual
-        FROM precios_compra_diarios pcd
-        WHERE pcd.restaurante_id = $1
-          AND pcd.fecha >= $2 AND pcd.fecha < $3
+        SELECT COALESCE(SUM(coste_ingredientes), 0)::numeric AS cogs_actual
+        FROM ventas_diarias_resumen
+        WHERE restaurante_id = $1
+          AND fecha >= $2 AND fecha < $3
     `;
     const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin]);
     return parseFloat(r.rows[0].cogs_actual) || 0;
