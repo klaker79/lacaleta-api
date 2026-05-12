@@ -397,7 +397,6 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
             <tr class="pyg-minus"><td>− ${escapeHtml(T.pygCogs)}</td><td class="num">${fmtMoneda(pyg.cogs, moneda)}</td></tr>
             <tr class="pyg-subtotal"><td>${escapeHtml(T.pygMargenBruto)}</td><td class="num">${fmtMoneda(pyg.margen_bruto, moneda)}</td></tr>
             <tr class="pyg-minus"><td>− ${escapeHtml(T.pygGastosFijos)} <span class="pyg-sub-info">(${pyg.gastos_fijos_conceptos || 0})</span></td><td class="num">${fmtMoneda(pyg.gastos_fijos, moneda)}</td></tr>
-            ${pyg.mermas > 0 ? `<tr class="pyg-minus"><td>− ${escapeHtml(T.pygMermas)}</td><td class="num">${fmtMoneda(pyg.mermas, moneda)}</td></tr>` : ''}
             <tr class="pyg-total"><td><strong>${escapeHtml(T.pygBeneficio)}</strong></td><td class="num"><strong class="${benefClass}">${fmtMoneda(pyg.beneficio_neto, moneda)}</strong></td></tr>
             <tr class="pyg-pct"><td>${escapeHtml(T.pygMargenNeto)}</td><td class="num"><span class="${margenNetoClass}">${fmtPct(pyg.margen_neto_pct)}</span></td></tr>
         </table>

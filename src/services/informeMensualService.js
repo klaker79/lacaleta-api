@@ -354,20 +354,22 @@ async function generarInformeMensual(pool, restauranteId, mes) {
         // se tira el 10% del producto antes de venderlo, el food cost real
         // del mes es mayor. Mostrar ambos números educa al dueño sobre dónde
         // se le va el dinero (mal escandallado vs descontrol operativo).
+        // NOTA: este número es SOLO INFORMATIVO. El P&L y beneficio neto
+        // mantienen el cálculo conservador (sin restar mermas) para no
+        // cambiar la cifra que el dueño enseña a socios/inversores. Decisión
+        // de Iker 2026-05-12.
         const mermasValor = parseFloat(mermas.valor_total) || 0;
         const cogsConMermas = cogsActual + mermasValor;
         const foodCostRealPct = ingresos.mes_actual > 0
             ? Math.round((cogsConMermas / ingresos.mes_actual) * 10000) / 100
             : 0;
 
-        // P&L: ingresos − COGS − gastos fijos − mermas = beneficio neto.
-        // Las mermas son una pérdida operativa real (producto que ya
-        // pagaste pero no vendiste). El comentario anterior decía "ya están
-        // en COGS si se descontaron del stock" — eso era incorrecto, porque
-        // COGS viene de ventas_diarias_resumen (calculado al registrar venta,
-        // no al descontar stock). Sin las mermas, infraestimamos pérdida.
+        // P&L: ingresos − COGS − gastos fijos = beneficio neto operativo.
+        // Las mermas NO se restan aquí (variante conservadora). Si el dueño
+        // quiere ver el impacto real de las mermas en el beneficio, lo lee
+        // del food cost real arriba o de la sección Mermas del informe.
         const margenBruto = ingresos.mes_actual - cogsActual;
-        const beneficioNeto = margenBruto - gastosFijos.total - mermasValor;
+        const beneficioNeto = margenBruto - gastosFijos.total;
         const margenNetoPct = ingresos.mes_actual > 0
             ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
             : 0;
@@ -397,7 +399,6 @@ async function generarInformeMensual(pool, restauranteId, mes) {
                 margen_bruto: Math.round(margenBruto * 100) / 100,
                 gastos_fijos: Math.round(gastosFijos.total * 100) / 100,
                 gastos_fijos_conceptos: gastosFijos.num_conceptos,
-                mermas: Math.round(mermasValor * 100) / 100,
                 beneficio_neto: Math.round(beneficioNeto * 100) / 100,
                 margen_neto_pct: margenNetoPct
             },

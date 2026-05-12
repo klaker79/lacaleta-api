@@ -173,7 +173,7 @@ describe('informeMensualService — cálculos del P&L', () => {
         expect(r.ingresos.variacion_pct).toBeNull();
     });
 
-    test('food cost REAL incluye mermas; beneficio neto RESTA mermas también', async () => {
+    test('food cost REAL incluye mermas (informativo); P&L conservador NO las resta', async () => {
         const pool = makePoolMock({
             ingresos_actual: 10000,
             cogs_actual: 3000, // food cost ventas = 30%
@@ -186,17 +186,18 @@ describe('informeMensualService — cálculos del P&L', () => {
 
         // Food cost de ventas = 3000/10000 = 30%
         expect(r.food_cost.mes_actual_pct).toBe(30);
-        // Food cost REAL = (3000 + 500) / 10000 = 35%
+        // Food cost REAL = (3000 + 500) / 10000 = 35% (solo info, no afecta P&L)
         expect(r.food_cost.real_pct).toBe(35);
         expect(r.food_cost.cogs_con_mermas).toBe(3500);
         expect(r.food_cost.mermas_valor).toBe(500);
-        // Beneficio neto = 10000 − 3000 − 4000 − 500 = 2500
-        expect(r.pyg.beneficio_neto).toBe(2500);
-        expect(r.pyg.mermas).toBe(500);
-        expect(r.pyg.margen_neto_pct).toBe(25);
+        // Beneficio neto NO RESTA mermas (variante conservadora opción B).
+        // = 10000 − 3000 − 4000 = 3000  (NO restamos los 500€ de mermas)
+        expect(r.pyg.beneficio_neto).toBe(3000);
+        expect(r.pyg.mermas).toBeUndefined(); // No expuesto en pyg
+        expect(r.pyg.margen_neto_pct).toBe(30);
     });
 
-    test('sin mermas: food cost real == food cost ventas, P&L sin línea mermas', async () => {
+    test('sin mermas: food cost real == food cost ventas', async () => {
         const pool = makePoolMock({
             ingresos_actual: 10000,
             cogs_actual: 3500,
@@ -208,7 +209,6 @@ describe('informeMensualService — cálculos del P&L', () => {
         expect(r.food_cost.mes_actual_pct).toBe(35);
         expect(r.food_cost.real_pct).toBe(35);
         expect(r.food_cost.mermas_valor).toBe(0);
-        expect(r.pyg.mermas).toBe(0);
         expect(r.pyg.beneficio_neto).toBe(2500); // 10k - 3.5k - 4k = 2.5k
     });
 
