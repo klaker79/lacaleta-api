@@ -349,11 +349,25 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             ? Math.round((cogsActual / ingresos.mes_actual) * 10000) / 100
             : 0;
 
-        // P&L: ingresos − COGS − gastos fijos = beneficio neto aproximado.
-        // No incluye mermas (ya están en COGS si se descontaron del stock)
-        // ni amortizaciones / impuestos. Es una aproximación operativa.
+        // Food cost REAL: incluye también lo perdido por mermas. Un plato
+        // bien escandallado puede tener buen food cost por unidad, pero si
+        // se tira el 10% del producto antes de venderlo, el food cost real
+        // del mes es mayor. Mostrar ambos números educa al dueño sobre dónde
+        // se le va el dinero (mal escandallado vs descontrol operativo).
+        const mermasValor = parseFloat(mermas.valor_total) || 0;
+        const cogsConMermas = cogsActual + mermasValor;
+        const foodCostRealPct = ingresos.mes_actual > 0
+            ? Math.round((cogsConMermas / ingresos.mes_actual) * 10000) / 100
+            : 0;
+
+        // P&L: ingresos − COGS − gastos fijos − mermas = beneficio neto.
+        // Las mermas son una pérdida operativa real (producto que ya
+        // pagaste pero no vendiste). El comentario anterior decía "ya están
+        // en COGS si se descontaron del stock" — eso era incorrecto, porque
+        // COGS viene de ventas_diarias_resumen (calculado al registrar venta,
+        // no al descontar stock). Sin las mermas, infraestimamos pérdida.
         const margenBruto = ingresos.mes_actual - cogsActual;
-        const beneficioNeto = margenBruto - gastosFijos.total;
+        const beneficioNeto = margenBruto - gastosFijos.total - mermasValor;
         const margenNetoPct = ingresos.mes_actual > 0
             ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
             : 0;
@@ -370,7 +384,12 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             ingresos,
             food_cost: {
                 mes_actual_pct: foodCostPct,
-                cogs_actual: Math.round(cogsActual * 100) / 100
+                cogs_actual: Math.round(cogsActual * 100) / 100,
+                // Food cost REAL = (COGS ventas + valor mermas) / ingresos.
+                // Refleja la pérdida operativa total, no solo lo vendido.
+                real_pct: foodCostRealPct,
+                cogs_con_mermas: Math.round(cogsConMermas * 100) / 100,
+                mermas_valor: Math.round(mermasValor * 100) / 100
             },
             pyg: {
                 ingresos: Math.round(ingresos.mes_actual * 100) / 100,
@@ -378,6 +397,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
                 margen_bruto: Math.round(margenBruto * 100) / 100,
                 gastos_fijos: Math.round(gastosFijos.total * 100) / 100,
                 gastos_fijos_conceptos: gastosFijos.num_conceptos,
+                mermas: Math.round(mermasValor * 100) / 100,
                 beneficio_neto: Math.round(beneficioNeto * 100) / 100,
                 margen_neto_pct: margenNetoPct
             },
