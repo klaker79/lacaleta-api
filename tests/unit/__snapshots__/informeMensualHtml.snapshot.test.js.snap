@@ -297,6 +297,7 @@ exports[`informeMensualHtml — snapshots HTML "estado vacío" — sin actividad
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-good">0.0%</div>
                     <div class="kpi-sub">COGS: 0,00 €</div>
+                    
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventario</div>
@@ -652,6 +653,7 @@ exports[`informeMensualHtml — snapshots HTML completo en EN con moneda RM (ten
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-warn">33.8%</div>
                     <div class="kpi-sub">COGS: RM 15953,60</div>
+                    
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventory</div>
@@ -1178,6 +1180,7 @@ exports[`informeMensualHtml — snapshots HTML completo en ES con datos reales 1
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-warn">33.8%</div>
                     <div class="kpi-sub">COGS: 15953,60 €</div>
+                    
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventario</div>
@@ -1704,6 +1707,7 @@ exports[`informeMensualHtml — snapshots HTML con análisis IA vacío — secci
                     <div class="kpi-label">Food Cost</div>
                     <div class="kpi-value kpi-warn">33.8%</div>
                     <div class="kpi-sub">COGS: 15953,60 €</div>
+                    
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">Inventario</div>
