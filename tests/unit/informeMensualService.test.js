@@ -173,6 +173,45 @@ describe('informeMensualService — cálculos del P&L', () => {
         expect(r.ingresos.variacion_pct).toBeNull();
     });
 
+    test('food cost REAL incluye mermas (informativo); P&L conservador NO las resta', async () => {
+        const pool = makePoolMock({
+            ingresos_actual: 10000,
+            cogs_actual: 3000, // food cost ventas = 30%
+            gastos_fijos_total: 4000,
+            mermas_valor: 500, // dinero perdido en mermas
+            mermas_count: 5,
+            mermas_motivos: [{ motivo: 'caducidad', num: 5, valor: 500 }]
+        });
+        const r = await generarInformeMensual(pool, 3, '2026-04');
+
+        // Food cost de ventas = 3000/10000 = 30%
+        expect(r.food_cost.mes_actual_pct).toBe(30);
+        // Food cost REAL = (3000 + 500) / 10000 = 35% (solo info, no afecta P&L)
+        expect(r.food_cost.real_pct).toBe(35);
+        expect(r.food_cost.cogs_con_mermas).toBe(3500);
+        expect(r.food_cost.mermas_valor).toBe(500);
+        // Beneficio neto NO RESTA mermas (variante conservadora opción B).
+        // = 10000 − 3000 − 4000 = 3000  (NO restamos los 500€ de mermas)
+        expect(r.pyg.beneficio_neto).toBe(3000);
+        expect(r.pyg.mermas).toBeUndefined(); // No expuesto en pyg
+        expect(r.pyg.margen_neto_pct).toBe(30);
+    });
+
+    test('sin mermas: food cost real == food cost ventas', async () => {
+        const pool = makePoolMock({
+            ingresos_actual: 10000,
+            cogs_actual: 3500,
+            gastos_fijos_total: 4000,
+            mermas_valor: 0,
+            mermas_count: 0
+        });
+        const r = await generarInformeMensual(pool, 3, '2026-04');
+        expect(r.food_cost.mes_actual_pct).toBe(35);
+        expect(r.food_cost.real_pct).toBe(35);
+        expect(r.food_cost.mermas_valor).toBe(0);
+        expect(r.pyg.beneficio_neto).toBe(2500); // 10k - 3.5k - 4k = 2.5k
+    });
+
     test('redondeos: ingresos 100.005€ COGS 33.333,33€ → food_cost a 2 decimales', async () => {
         const pool = makePoolMock({
             ingresos_actual: 100005,

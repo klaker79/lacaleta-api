@@ -289,6 +289,9 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         mermasValorCol: 'Value',
         evolucion: 'Daily revenue evolution',
         sinMermas: 'No waste recorded this month — perfect.',
+        foodCostReal: 'Real food cost',
+        foodCostRealHint: 'Includes waste losses',
+        pygMermas: 'Losses (waste)',
     } : {
         titulo: 'Informe Ejecutivo Mensual',
         periodo: 'Periodo',
@@ -338,6 +341,9 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         mermasValorCol: 'Valor',
         evolucion: 'Evolución diaria de ingresos',
         sinMermas: 'Ningún registro de merma este mes — perfecto.',
+        foodCostReal: 'Food cost real',
+        foodCostRealHint: 'Incluye pérdidas por mermas',
+        pygMermas: 'Mermas (producto perdido)',
     };
 
     const fechaGen = new Date(datos.periodo.fecha_generacion).toLocaleString(
@@ -756,6 +762,12 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
                     <div class="kpi-label">${escapeHtml(T.foodCost)}</div>
                     <div class="kpi-value ${fcClass}">${fmtPct(datos.food_cost.mes_actual_pct)}</div>
                     <div class="kpi-sub">${escapeHtml(T.cogs)}: ${fmtMoneda(datos.food_cost.cogs_actual, moneda)}</div>
+                    ${datos.food_cost.mermas_valor > 0 ? `
+                    <div class="kpi-sub" style="margin-top:6px;border-top:1px dashed var(--border);padding-top:6px;">
+                        <span class="${classFoodCost(datos.food_cost.real_pct)}">${escapeHtml(T.foodCostReal)}: ${fmtPct(datos.food_cost.real_pct)}</span>
+                        <br><small>${escapeHtml(T.foodCostRealHint)}</small>
+                    </div>
+                    ` : ''}
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">${escapeHtml(T.stock)}</div>
