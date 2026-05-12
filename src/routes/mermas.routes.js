@@ -220,8 +220,13 @@ module.exports = function (pool) {
             log('info', `DEBUG - req.restauranteId value: ${req.restauranteId} (type: ${typeof req.restauranteId})`);
             */
 
+            // Filtro por mes/año: si el caller envió ambos, restringimos al
+            // periodo [primer día del mes, primer día del mes+1). Antes el
+            // backend ignoraba estos params y siempre devolvía las últimas
+            // 100 mermas → el selector del modal era cosmético. Bug detectado
+            // por Iker 2026-05-12 al cambiar entre mayo/abril.
             const result = await pool.query(`
-            SELECT 
+            SELECT
                 m.id,
                 m.ingrediente_id,
                 m.ingrediente_nombre,
@@ -235,10 +240,13 @@ module.exports = function (pool) {
                 i.nombre as ingrediente_actual
             FROM mermas m
             LEFT JOIN ingredientes i ON m.ingrediente_id = i.id
-            WHERE m.restaurante_id = $1 AND m.deleted_at IS NULL
+            WHERE m.restaurante_id = $1
+              AND m.deleted_at IS NULL
+              AND EXTRACT(MONTH FROM m.fecha) = $2
+              AND EXTRACT(YEAR FROM m.fecha) = $3
             ORDER BY m.fecha DESC, m.id DESC
-            LIMIT $2
-        `, [req.restauranteId, lim]);
+            LIMIT $4
+        `, [req.restauranteId, mesActual, anoActual, lim]);
 
             // Log reducido para producción
             log('debug', 'Mermas listadas', { count: result.rows.length, restauranteId: req.restauranteId });
