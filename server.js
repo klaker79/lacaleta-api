@@ -122,7 +122,7 @@ app.use((req, res, next) => {
     // 🔒 FIX SEGURIDAD: Solo permitir * para health checks, no para toda la API
     if (!origin || origin === '') {
         // Rutas permitidas sin origin (health checks, métricas, Uptime Kuma)
-        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password', '/api/stripe/webhook', '/api/webhooks/polar'];
+        const publicPaths = ['/', '/health', '/api/health', '/favicon.ico', '/api/metrics', '/api/heartbeat', '/api/auth/verify-email', '/api/auth/reset-password', '/api/webhooks/polar'];
         const isPublicPath = publicPaths.some(p => req.path === p || (p !== '/' && req.path.startsWith(p)));
 
         // ⚡ FIX: Permitir requests server-to-server (n8n, automations) que envían Authorization header
@@ -156,9 +156,8 @@ app.use((req, res, next) => {
     next();
 });
 
-// Parser JSON (skip for Stripe and Polar webhooks which need raw body)
+// Parser JSON (skip for Polar webhooks which need raw body for signature verification)
 app.use((req, res, next) => {
-    if (req.originalUrl === '/api/stripe/webhook') return next();
     if (req.originalUrl === '/api/webhooks/polar') return next();
     express.json({ limit: '10mb' })(req, res, next);
 });
