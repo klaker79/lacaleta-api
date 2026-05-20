@@ -29,8 +29,14 @@ const sanitizeString = (value, maxLen = 255) => {
     if (value === null || value === undefined) return null;
     const str = String(value).trim();
     if (str.length === 0) return null;
-    // Eliminar tags HTML/script (prevenir XSS stored)
-    const clean = str.replace(/<[^>]*>/g, '').trim();
+    // Eliminar `<` y `>` literales para impedir cualquier tag HTML/script.
+    // CodeQL alert "Incomplete multi-character sanitization" (2026-05-20):
+    // la regex anterior `/<[^>]*>/g` se puede bypassear con tags anidados
+    // (ej. `<scr<script>ipt>` deja contenido válido tras una pasada). Eliminar
+    // los delimitadores cierra el vector sin ambigüedad — no quedan tags
+    // posibles de reconstruir. Es defensa en profundidad: el frontend ya
+    // escapa con escapeHTML al renderizar.
+    const clean = str.replace(/[<>]/g, '').trim();
     return clean.substring(0, maxLen);
 };
 
