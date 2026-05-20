@@ -131,11 +131,23 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'empleado_id y fecha son requeridos' });
             }
 
+            // 🔒 Validación cross-tenant (auditoría 2026-05-20):
+            // El empleado_id viene del body y debe pertenecer al tenant del request.
+            // Sin esta validación, un token de tenant A podría asignar turnos a
+            // empleados de tenant B (modificación cross-tenant via ON CONFLICT).
+            const empCheck = await pool.query(
+                'SELECT id FROM empleados WHERE id = $1 AND restaurante_id = $2',
+                [empleado_id, req.restauranteId]
+            );
+            if (empCheck.rows.length === 0) {
+                return res.status(404).json({ error: 'Empleado no encontrado' });
+            }
+
             const result = await pool.query(
                 `INSERT INTO horarios (empleado_id, fecha, turno, hora_inicio, hora_fin, es_extra, notas, restaurante_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (empleado_id, fecha) DO UPDATE SET 
-                turno = EXCLUDED.turno, hora_inicio = EXCLUDED.hora_inicio, 
+             ON CONFLICT (empleado_id, fecha) DO UPDATE SET
+                turno = EXCLUDED.turno, hora_inicio = EXCLUDED.hora_inicio,
                 hora_fin = EXCLUDED.hora_fin, es_extra = EXCLUDED.es_extra, notas = EXCLUDED.notas
              RETURNING *`,
                 [empleado_id, fecha, turno || 'completo', hora_inicio, hora_fin, es_extra || false, notas, req.restauranteId]
