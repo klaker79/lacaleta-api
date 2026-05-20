@@ -719,6 +719,36 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla audit_log creada/verificada');
   } catch (e) { log('warn', 'Migración audit_log', { error: e.message }); }
 
+  // ========== MIGRACIÓN: audit_log append-only (2026-05-20) ==========
+  // Triggers BEFORE UPDATE / BEFORE DELETE que rechazan cualquier
+  // modificación o borrado de audit_log. Defensa en profundidad: incluso
+  // con permisos UPDATE/DELETE concedidos, Postgres lanza P0001 antes de
+  // tocar la fila. Para deshabilitar (sólo emergencia documentada):
+  //   ALTER TABLE audit_log DISABLE TRIGGER audit_log_prevent_update;
+  //   ALTER TABLE audit_log DISABLE TRIGGER audit_log_prevent_delete;
+  try {
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION audit_log_prevent_modification()
+      RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'audit_log is append-only — % not allowed', TG_OP
+          USING HINT = 'Rejected by audit_log_immutable trigger';
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS audit_log_prevent_update ON audit_log;
+      CREATE TRIGGER audit_log_prevent_update
+        BEFORE UPDATE ON audit_log
+        FOR EACH ROW EXECUTE FUNCTION audit_log_prevent_modification();
+
+      DROP TRIGGER IF EXISTS audit_log_prevent_delete ON audit_log;
+      CREATE TRIGGER audit_log_prevent_delete
+        BEFORE DELETE ON audit_log
+        FOR EACH ROW EXECUTE FUNCTION audit_log_prevent_modification();
+    `);
+    log('info', 'audit_log triggers append-only creados/verificados');
+  } catch (e) { log('warn', 'Migración audit_log triggers', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
