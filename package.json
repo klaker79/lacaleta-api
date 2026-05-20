@@ -31,8 +31,7 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.3",
     "resend": "^6.6.0",
-    "standardwebhooks": "^1.0.0",
-    "stripe": "^20.3.1"
+    "standardwebhooks": "^1.0.0"
   },
   "engines": {
     "node": ">=16.0.0"

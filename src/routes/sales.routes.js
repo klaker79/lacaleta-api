@@ -605,9 +605,15 @@ REGLAS:
             });
 
             // ⚡ NUEVO: También mapear códigos de variantes (COPA, BOTELLA, etc.)
+            // 2026-05-20: usar rv.precio_venta (de la variante) en lugar de r.precio_venta
+            // (de la receta padre). Para vinos por COPA esto guardaba 40€ (botella) cuando
+            // el precio real es 4€ (copa), haciendo que cantidad × precio_unitario ≠ total.
+            // COALESCE defensivo aunque init.js declara rv.precio_venta NOT NULL.
             const variantesResult = await client.query(
-                `SELECT rv.id as variante_id, rv.codigo, rv.factor, rv.nombre as variante_nombre, 
-                    r.id as receta_id, r.nombre as receta_nombre, r.precio_venta, r.ingredientes
+                `SELECT rv.id as variante_id, rv.codigo, rv.factor, rv.nombre as variante_nombre,
+                    r.id as receta_id, r.nombre as receta_nombre,
+                    COALESCE(rv.precio_venta, r.precio_venta) as precio_venta,
+                    r.ingredientes
              FROM recetas_variantes rv
              JOIN recetas r ON rv.receta_id = r.id
              WHERE r.restaurante_id = $1 AND r.deleted_at IS NULL

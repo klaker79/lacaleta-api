@@ -48,17 +48,29 @@ function getWebhookValidator() {
 }
 
 /**
- * Crea checkout session en Polar para que el cliente pague el add-on.
- * El cliente vuelve a `origin` con ?checkout=success o ?checkout=cancel.
+ * Crea checkout session en Polar para que el cliente pague una suscripción.
+ * El cliente vuelve a `origin` con ?addon=success o ?subscription=success
+ * según el tipo de producto.
  *
  * Importante: pasamos restauranteId en metadata Y como external_customer_id
- *   - metadata: el webhook lee subscription.metadata.restaurante_id
+ *   - metadata: el webhook lee subscription.metadata.restaurante_id +
+ *     addon_type para ramificar el handler
  *   - external_customer_id: si el mismo restaurante vuelve a comprar, Polar
  *     reusa el mismo customer (no duplica)
+ *
+ * @param {object} params
+ * @param {number} params.restauranteId
+ * @param {string} params.productId — UUID del producto en Polar
+ * @param {string} params.origin — URL de origen para el success redirect
+ * @param {('chat_ia'|'base')} [params.addonType='chat_ia'] — discriminador
+ *   para que el webhook handler sepa qué flujo aplicar.
  */
-async function createCheckoutSession({ restauranteId, productId, origin }) {
+async function createCheckoutSession({ restauranteId, productId, origin, addonType = 'chat_ia' }) {
     const polar = getPolar();
-    const successUrl = `${origin}/?addon=success`;
+    // Discriminamos el query param de retorno para que el frontend pueda
+    // mostrar mensajes y refrescar el estado correcto.
+    const successParam = addonType === 'base' ? 'subscription=success' : 'addon=success';
+    const successUrl = `${origin}/?${successParam}`;
 
     const checkout = await polar.checkouts.create({
         products: [productId],
@@ -66,7 +78,7 @@ async function createCheckoutSession({ restauranteId, productId, origin }) {
         externalCustomerId: `restaurante_${restauranteId}`,
         metadata: {
             restaurante_id: String(restauranteId),
-            addon_type: 'chat_ia'
+            addon_type: addonType
         }
     });
 

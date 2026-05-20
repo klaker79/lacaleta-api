@@ -53,15 +53,24 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     // ========== LOGIN ==========
     router.post('/auth/login', authLimiter, async (req, res) => {
         try {
-            const { email, password } = req.body;
+            // 2026-05-21: aceptar `identifier` (username o email) además de `email`
+            // por compat con frontends antiguos. Si el campo `identifier` no
+            // viene, caemos a `email` — mismo comportamiento que antes.
+            const { email, identifier, password } = req.body;
+            const loginIdentifier = identifier || email;
 
-            if (!email || !password) {
-                return res.status(400).json({ error: 'Email y contraseña requeridos' });
+            if (!loginIdentifier || !password) {
+                return res.status(400).json({ error: 'Usuario o email y contraseña requeridos' });
             }
 
+            // Lookup por email O por username. El UNIQUE garantiza que solo
+            // hay un match posible para cada valor.
             const result = await pool.query(
-                'SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id WHERE u.email = $1',
-                [email]
+                `SELECT u.*, r.nombre as restaurante_nombre
+                 FROM usuarios u
+                 JOIN restaurantes r ON u.restaurante_id = r.id
+                 WHERE u.email = $1 OR u.username = $1`,
+                [loginIdentifier]
             );
 
             if (result.rows.length === 0) {
@@ -118,12 +127,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 // Single restaurant: auto-select (backward-compatible)
                 const rest = restaurants[0];
                 const token = jwt.sign(
-                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
+                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, username: user.username || null, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
                     JWT_SECRET,
                     { expiresIn: '7d' }
                 );
 
-                log('info', 'Login exitoso', { userId: user.id, email, restauranteId: rest.restaurante_id });
+                log('info', 'Login exitoso', { userId: user.id, email: user.email, username: user.username, restauranteId: rest.restaurante_id });
 
                 res.cookie('auth_token', token, {
                     httpOnly: true, secure: isProduction, sameSite: 'lax',
@@ -133,7 +142,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 res.json({
                     token,
                     user: {
-                        id: user.id, email: user.email, nombre: user.nombre,
+                        id: user.id, email: user.email, username: user.username || null, nombre: user.nombre,
                         rol: rest.rol, restaurante: rest.nombre,
                         restauranteId: rest.restaurante_id,
                         isSuperAdmin: user.is_superadmin || false,
@@ -144,18 +153,18 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             } else {
                 // Multiple restaurants: require selection
                 const selectionToken = jwt.sign(
-                    { userId: user.id, email: user.email, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
+                    { userId: user.id, email: user.email, username: user.username || null, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
                     JWT_SECRET,
                     { expiresIn: '5m' }
                 );
 
-                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email, count: restaurants.length });
+                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email: user.email, username: user.username, count: restaurants.length });
 
                 res.json({
                     needsSelection: true,
                     selectionToken,
                     restaurants,
-                    user: { id: user.id, nombre: user.nombre, email: user.email }
+                    user: { id: user.id, nombre: user.nombre, email: user.email, username: user.username || null }
                 });
             }
         } catch (err) {
@@ -337,10 +346,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== CREATE ADDITIONAL RESTAURANT (for existing users) ==========
-    // Creates restaurant + Stripe customer + Checkout session.
-    // Restaurant starts as 'pending_payment'. Webhook activates it after payment.
-    const PLAN_ORDER = { starter: 1, trial: 2, profesional: 2, premium: 3 };
-    const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999 };
+    // Crea restaurante en plan_status='pending_payment'. El cliente debe pasar
+    // por el checkout de Polar (plan base 95€/mes) para que el webhook lo active.
 
     // Cleanup orphaned pending_payment restaurants for a user
     router.delete('/auth/pending-restaurant/:id', authMiddleware, async (req, res) => {
@@ -371,34 +378,16 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, plan, billing, moneda } = req.body;
+            const { nombre, moneda } = req.body;
             if (!nombre || !nombre.trim()) {
                 return res.status(400).json({ error: 'Nombre del restaurante requerido' });
             }
-            const validPlans = ['starter', 'profesional', 'premium'];
-            if (!plan || !validPlans.includes(plan)) {
-                return res.status(400).json({ error: 'Plan requerido: starter, profesional, premium' });
-            }
-            if (!billing || !['monthly', 'annual'].includes(billing)) {
-                return res.status(400).json({ error: 'Billing requerido: monthly, annual' });
-            }
 
-            // Each restaurant chooses its own plan independently
-
-            // Stripe price ID from env
-            const priceKey = `${plan}_${billing}`;
-            const PRICE_MAP = {
-                starter_monthly: process.env.STRIPE_PRICE_STARTER_MONTHLY,
-                starter_annual: process.env.STRIPE_PRICE_STARTER_ANNUAL,
-                profesional_monthly: process.env.STRIPE_PRICE_PRO_MONTHLY,
-                profesional_annual: process.env.STRIPE_PRICE_PRO_ANNUAL,
-                premium_monthly: process.env.STRIPE_PRICE_PREMIUM_MONTHLY,
-                premium_annual: process.env.STRIPE_PRICE_PREMIUM_ANNUAL
-            };
-            const priceId = PRICE_MAP[priceKey];
-            if (!priceId) {
-                return res.status(400).json({ error: 'Precio no configurado para este plan' });
-            }
+            // 2026-05-20: pricing es single-plan (95€/mes) + add-on Chat IA (30€/mes
+            // vía Polar). Ya no hay starter/profesional/premium ni Stripe.
+            // El plan base se cobra vía Polar en flujo separado (TODO: PR-2).
+            // Por ahora el restaurante se crea en pending_payment y el checkout
+            // Polar se enchufará desde una pantalla dedicada de Suscripción.
 
             await client.query('BEGIN');
 
@@ -410,12 +399,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [req.user.userId]
             );
 
-            // Create restaurant with pending_payment status
             const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restResult = await client.query(
                 `INSERT INTO restaurantes (nombre, email, plan, plan_status, max_users, moneda)
-                 VALUES ($1, $2, $3, 'pending_payment', $4, $5) RETURNING id`,
-                [sanitizeString(nombre.trim()), req.user.email, plan, PLAN_MAX_USERS[plan] || 2, safeMoneda]
+                 VALUES ($1, $2, 'base', 'pending_payment', 999, $3) RETURNING id`,
+                [sanitizeString(nombre.trim()), req.user.email, safeMoneda]
             );
             const restauranteId = restResult.rows[0].id;
 
@@ -425,45 +413,15 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [req.user.userId, restauranteId, 'admin']
             );
 
-            // Create Stripe customer + Checkout session
-            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-            let checkoutUrl = null;
-
-            if (STRIPE_SECRET_KEY) {
-                const stripe = require('stripe')(STRIPE_SECRET_KEY);
-                const customer = await stripe.customers.create({
-                    email: req.user.email,
-                    name: sanitizeString(nombre.trim()),
-                    metadata: { restaurante_id: String(restauranteId) }
-                });
-
-                await client.query(
-                    'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
-                    [customer.id, restauranteId]
-                );
-
-                const frontendUrl = process.env.FRONTEND_URL || 'https://app.mindloop.cloud';
-                const session = await stripe.checkout.sessions.create({
-                    customer: customer.id,
-                    mode: 'subscription',
-                    line_items: [{ price: priceId, quantity: 1 }],
-                    success_url: `${frontendUrl}/index.html?checkout=success&plan=${plan}&new_restaurant=${restauranteId}`,
-                    cancel_url: `${frontendUrl}/index.html?checkout=canceled&new_restaurant=${restauranteId}`,
-                    metadata: { restaurante_id: String(restauranteId), plan },
-                    subscription_data: {
-                        metadata: { restaurante_id: String(restauranteId), plan }
-                    }
-                });
-                checkoutUrl = session.url;
-            }
-
             await client.query('COMMIT');
 
             log('info', 'Restaurante creado (pending_payment)', {
-                userId: req.user.userId, restauranteId, plan, billing
+                userId: req.user.userId, restauranteId
             });
 
-            res.status(201).json({ checkoutUrl, restauranteId, plan });
+            // checkoutUrl=null hasta que se integre Polar plan base (PR-2).
+            // El frontend debe redirigir al flujo de pago de Polar tras la creación.
+            res.status(201).json({ checkoutUrl: null, restauranteId, plan: 'base' });
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error creando restaurante adicional', { error: err.message });
@@ -572,30 +530,29 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             const verificationToken = canSendEmail ? crypto.randomBytes(32).toString('hex') : null;
             const verificationExpires = canSendEmail ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null;
 
+            // 2026-05-21: autogenerar username desde la parte local del email
+            // si no se ha pasado explícitamente (Deploy 1 backward-compat).
+            // Maneja colisiones añadiendo sufijo numérico (1, 2, ..., 9, timestamp).
+            // El backend SOLO usa este lookup auxiliar — no expone el username
+            // generado al cliente todavía (eso es Deploy 2).
+            const baseUsername = (email.split('@')[0] || 'user').toLowerCase().slice(0, 40);
+            let username = baseUsername;
+            for (let suffix = 0; suffix < 10; suffix++) {
+                const candidate = suffix === 0 ? baseUsername : `${baseUsername}_${suffix}`;
+                const check = await client.query('SELECT 1 FROM usuarios WHERE username = $1', [candidate]);
+                if (check.rows.length === 0) { username = candidate; break; }
+                if (suffix === 9) { username = `${baseUsername}_${Date.now()}`; }
+            }
+
             const userResult = await client.query(
-                `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified, verification_token, verification_expires) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [restauranteId, email, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
+                `INSERT INTO usuarios (restaurante_id, email, username, password_hash, nombre, rol, email_verified, verification_token, verification_expires)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+                [restauranteId, email, username, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
             );
 
-            // Create Stripe customer if configured
-            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-            if (STRIPE_SECRET_KEY) {
-                try {
-                    const stripe = require('stripe')(STRIPE_SECRET_KEY);
-                    const customer = await stripe.customers.create({
-                        email,
-                        name: sanitizeString(nombre),
-                        metadata: { restaurante_id: String(restauranteId) }
-                    });
-                    await client.query(
-                        'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
-                        [customer.id, restauranteId]
-                    );
-                } catch (stripeErr) {
-                    log('warn', 'Error creando Stripe customer (registro continúa)', { error: stripeErr.message });
-                }
-            }
+            // 2026-05-20: pricing es single-plan vía Polar (no más Stripe).
+            // Cliente Polar no se crea aquí — se crea automáticamente al
+            // iniciar el primer checkout de plan base o add-on.
 
             // Multi-restaurant: add to junction table
             await client.query(
@@ -953,9 +910,21 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Password requerido para usuarios nuevos' });
             }
             const passwordHash = await bcrypt.hash(password, 10);
+
+            // 2026-05-21: autogenerar username desde la parte local del email
+            // (mismo patrón que /auth/register). Maneja colisiones con sufijo.
+            const baseUsername = (email.split('@')[0] || 'user').toLowerCase().slice(0, 40);
+            let username = baseUsername;
+            for (let suffix = 0; suffix < 10; suffix++) {
+                const candidate = suffix === 0 ? baseUsername : `${baseUsername}_${suffix}`;
+                const check = await pool.query('SELECT 1 FROM usuarios WHERE username = $1', [candidate]);
+                if (check.rows.length === 0) { username = candidate; break; }
+                if (suffix === 9) { username = `${baseUsername}_${Date.now()}`; }
+            }
+
             const result = await pool.query(
-                'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
-                [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
+                'INSERT INTO usuarios (restaurante_id, nombre, email, username, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, $6, TRUE) RETURNING id, nombre, email, username, rol',
+                [req.restauranteId, sanitizeString(nombre), email, username, passwordHash, nuevoRol]
             );
 
             await pool.query(
