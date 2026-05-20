@@ -9,6 +9,7 @@ const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
 const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
+const { logChange } = require('../utils/auditLog');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -1267,6 +1268,14 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             await client.query('COMMIT');
             log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id, proveedorId });
 
+            // Audit log: aprobación de compra (afecta stock + precio_medio_compra)
+            logChange(pool, {
+                req, tabla: 'compras_pendientes', operacion: 'UPDATE',
+                registroId: item.id,
+                datosAntes: { estado: 'pendiente' },
+                datosDespues: { estado: 'aprobada', ingrediente_id: item.ingrediente_id, proveedor_id: proveedorId, cantidad: item.cantidad, precio: item.precio },
+            });
+
             // ── InvoiceFlow webhook (fire-and-forget, NEVER blocks approval) ──
             const invoiceFlowUrl = process.env.INVOICEFLOW_WEBHOOK_URL;
             if (invoiceFlowUrl) {
@@ -1397,6 +1406,14 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
             await client.query('COMMIT');
             log('info', 'Batch de compras aprobado', { batchId, aprobados: resultados.aprobados, omitidos: resultados.omitidos });
+
+            // Audit log: aprobación MASIVA de compras (acción muy sensible)
+            logChange(pool, {
+                req, tabla: 'compras_pendientes', operacion: 'UPDATE',
+                registroId: 0,
+                datosAntes: { batchId, total_items: resultados.aprobados + resultados.omitidos },
+                datosDespues: { aprobados: resultados.aprobados, omitidos: resultados.omitidos },
+            });
 
             // ── Sync approved data to Google Sheets via n8n webhook (fire-and-forget) ──
             // Only fires AFTER approval with final edited data

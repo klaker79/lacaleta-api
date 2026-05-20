@@ -8,6 +8,7 @@ const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateCantidad, validateId } = require('../utils/validators');
 const { expandRecipeToBase, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
+const { logChange } = require('../utils/auditLog');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -282,6 +283,15 @@ module.exports = function (pool) {
             ]);
 
             await client.query('COMMIT');
+
+            // Audit log: cambio sensible (creación de venta + descuento de stock)
+            logChange(pool, {
+                req, tabla: 'ventas', operacion: 'INSERT',
+                registroId: ventaResult.rows[0].id,
+                datosAntes: null,
+                datosDespues: ventaResult.rows[0],
+            });
+
             res.status(201).json(ventaResult.rows[0]);
         } catch (err) {
             await client.query('ROLLBACK');
@@ -393,6 +403,15 @@ module.exports = function (pool) {
 
             await client.query('COMMIT');
             log('info', 'Venta eliminada con stock restaurado', { id: req.params.id });
+
+            // Audit log: borrado de venta (restauró stock)
+            logChange(pool, {
+                req, tabla: 'ventas', operacion: 'DELETE',
+                registroId: venta.id,
+                datosAntes: venta,
+                datosDespues: null,
+            });
+
             res.json({ message: 'Eliminado y stock restaurado', id: venta.id });
         } catch (err) {
             await client.query('ROLLBACK');
