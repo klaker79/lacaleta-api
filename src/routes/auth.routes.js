@@ -53,15 +53,24 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     // ========== LOGIN ==========
     router.post('/auth/login', authLimiter, async (req, res) => {
         try {
-            const { email, password } = req.body;
+            // 2026-05-21: aceptar `identifier` (username o email) además de `email`
+            // por compat con frontends antiguos. Si el campo `identifier` no
+            // viene, caemos a `email` — mismo comportamiento que antes.
+            const { email, identifier, password } = req.body;
+            const loginIdentifier = identifier || email;
 
-            if (!email || !password) {
-                return res.status(400).json({ error: 'Email y contraseña requeridos' });
+            if (!loginIdentifier || !password) {
+                return res.status(400).json({ error: 'Usuario o email y contraseña requeridos' });
             }
 
+            // Lookup por email O por username. El UNIQUE garantiza que solo
+            // hay un match posible para cada valor.
             const result = await pool.query(
-                'SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id WHERE u.email = $1',
-                [email]
+                `SELECT u.*, r.nombre as restaurante_nombre
+                 FROM usuarios u
+                 JOIN restaurantes r ON u.restaurante_id = r.id
+                 WHERE u.email = $1 OR u.username = $1`,
+                [loginIdentifier]
             );
 
             if (result.rows.length === 0) {
@@ -118,12 +127,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 // Single restaurant: auto-select (backward-compatible)
                 const rest = restaurants[0];
                 const token = jwt.sign(
-                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
+                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, username: user.username || null, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
                     JWT_SECRET,
                     { expiresIn: '7d' }
                 );
 
-                log('info', 'Login exitoso', { userId: user.id, email, restauranteId: rest.restaurante_id });
+                log('info', 'Login exitoso', { userId: user.id, email: user.email, username: user.username, restauranteId: rest.restaurante_id });
 
                 res.cookie('auth_token', token, {
                     httpOnly: true, secure: isProduction, sameSite: 'lax',
@@ -133,7 +142,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 res.json({
                     token,
                     user: {
-                        id: user.id, email: user.email, nombre: user.nombre,
+                        id: user.id, email: user.email, username: user.username || null, nombre: user.nombre,
                         rol: rest.rol, restaurante: rest.nombre,
                         restauranteId: rest.restaurante_id,
                         isSuperAdmin: user.is_superadmin || false,
@@ -144,18 +153,18 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             } else {
                 // Multiple restaurants: require selection
                 const selectionToken = jwt.sign(
-                    { userId: user.id, email: user.email, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
+                    { userId: user.id, email: user.email, username: user.username || null, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
                     JWT_SECRET,
                     { expiresIn: '5m' }
                 );
 
-                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email, count: restaurants.length });
+                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email: user.email, username: user.username, count: restaurants.length });
 
                 res.json({
                     needsSelection: true,
                     selectionToken,
                     restaurants,
-                    user: { id: user.id, nombre: user.nombre, email: user.email }
+                    user: { id: user.id, nombre: user.nombre, email: user.email, username: user.username || null }
                 });
             }
         } catch (err) {
