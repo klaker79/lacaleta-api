@@ -87,7 +87,8 @@ module.exports = function (pool) {
             const session = await polarService.createCheckoutSession({
                 restauranteId,
                 productId,
-                origin
+                origin,
+                addonType: 'chat_ia'
             });
             log('info', 'Polar checkout session creada', {
                 restauranteId,

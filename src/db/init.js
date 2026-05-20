@@ -719,6 +719,32 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla audit_log creada/verificada');
   } catch (e) { log('warn', 'Migración audit_log', { error: e.message }); }
 
+  // ========== MIGRACIÓN: base_subscriptions (2026-05-20) ==========
+  // Auditoría de suscripciones del plan base (95€/mes) en Polar. El gating
+  // O(1) vive en restaurantes.plan_status; esta tabla guarda histórico de
+  // eventos por subscription_id para depurar / disputas.
+  // Patrón espejo de chat_addon_subscriptions (migration 008).
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS base_subscriptions (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        polar_subscription_id TEXT UNIQUE NOT NULL,
+        polar_customer_id TEXT,
+        status TEXT NOT NULL,
+        current_period_end TIMESTAMPTZ,
+        raw_event JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_base_subs_restaurante
+        ON base_subscriptions (restaurante_id);
+      CREATE INDEX IF NOT EXISTS idx_base_subs_status
+        ON base_subscriptions (status);
+    `);
+    log('info', 'Tabla base_subscriptions creada/verificada');
+  } catch (e) { log('warn', 'Migración base_subscriptions', { error: e.message }); }
+
   // ========== MIGRACIÓN: audit_log append-only (2026-05-20) ==========
   // Triggers BEFORE UPDATE / BEFORE DELETE que rechazan cualquier
   // modificación o borrado de audit_log. Defensa en profundidad: incluso

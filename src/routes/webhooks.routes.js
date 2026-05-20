@@ -5,19 +5,22 @@
  *   Body crudo (raw). El parser global de express.json se salta esta ruta
  *   en server.js — sin eso la firma no validaría.
  *
- *   Eventos manejados (suscripción al add-on Chat IA):
+ *   Productos manejados (ramificados por metadata.addon_type):
+ *     - addon_type='chat_ia' → flag chat_addon en restaurantes +
+ *       tabla chat_addon_subscriptions
+ *     - addon_type='base'    → plan_status en restaurantes +
+ *       tabla base_subscriptions
+ *
+ *   Eventos manejados:
  *     - subscription.created  → primer alta, normalmente status="active"
  *     - subscription.active   → activación efectiva
- *     - subscription.updated  → cambios de plan/precio (no aplica aún)
+ *     - subscription.updated  → cambios de plan/precio
  *     - subscription.canceled → cancelación a fin de ciclo
  *     - subscription.revoked  → cancelación inmediata (chargeback, fraude)
  *
- *   Solo abrimos el flag chat_addon=true cuando status="active". Para
- *   canceled / revoked → chat_addon=false.
- *
- *   Idempotencia: la tabla chat_addon_subscriptions tiene UNIQUE en
- *   polar_subscription_id. Si Polar reintenta el mismo evento, el ON
- *   CONFLICT lo absorbe sin efectos duplicados.
+ *   Idempotencia: ambas tablas tienen UNIQUE en polar_subscription_id.
+ *   Si Polar reintenta el mismo evento, el ON CONFLICT lo absorbe sin
+ *   efectos duplicados.
  */
 
 const { Router } = require('express');
@@ -72,11 +75,12 @@ module.exports = function (pool) {
                 return res.status(200).json({ received: true, no_restaurante: true });
             }
 
-            // Solo nos interesan subs del producto chat_ia. Si Polar manda
-            // de otro producto (p.ej. el plan base cuando lo enchufemos),
-            // lo ignoramos aquí — habrá un handler distinto.
+            // Ramificación por tipo de producto (metadata.addon_type).
+            //   'chat_ia' → flag chat_addon + tabla chat_addon_subscriptions
+            //   'base'    → plan_status + tabla base_subscriptions
+            //   otro/nulo → 200 OK con flag other_product (no procesar)
             const addonType = data.metadata?.addon_type;
-            if (addonType && addonType !== 'chat_ia') {
+            if (addonType !== 'chat_ia' && addonType !== 'base') {
                 return res.status(200).json({ received: true, other_product: true });
             }
 
@@ -84,63 +88,99 @@ module.exports = function (pool) {
             const polarSubId = data.id;
             const polarCustomerId = data.customer?.id || data.customerId || null;
             const periodEnd = data.currentPeriodEnd ? new Date(data.currentPeriodEnd) : null;
+            const shouldEnable = status === 'active';
+            const shouldDisable = ['canceled', 'revoked', 'past_due', 'unpaid', 'incomplete_expired'].includes(status);
 
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
 
-                // Auditoría: insertar o actualizar el registro de la sub.
-                await client.query(
-                    `INSERT INTO chat_addon_subscriptions
-                       (restaurante_id, polar_subscription_id, polar_customer_id,
-                        status, current_period_end, raw_event)
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     ON CONFLICT (polar_subscription_id) DO UPDATE SET
-                       status = EXCLUDED.status,
-                       current_period_end = EXCLUDED.current_period_end,
-                       raw_event = EXCLUDED.raw_event,
-                       updated_at = NOW()`,
-                    [restauranteId, polarSubId, polarCustomerId, status, periodEnd, data]
-                );
+                if (addonType === 'chat_ia') {
+                    // ---- ADD-ON CHAT IA (30€/mes) ----
+                    await client.query(
+                        `INSERT INTO chat_addon_subscriptions
+                           (restaurante_id, polar_subscription_id, polar_customer_id,
+                            status, current_period_end, raw_event)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (polar_subscription_id) DO UPDATE SET
+                           status = EXCLUDED.status,
+                           current_period_end = EXCLUDED.current_period_end,
+                           raw_event = EXCLUDED.raw_event,
+                           updated_at = NOW()`,
+                        [restauranteId, polarSubId, polarCustomerId, status, periodEnd, data]
+                    );
 
-                // Aplicar el efecto al flag chat_addon según el status.
-                // active → true. canceled/revoked/incomplete → false.
-                const shouldEnable = status === 'active';
-                if (shouldEnable) {
-                    // Si venía de false, reseteamos contador y reset_at (nuevo ciclo).
+                    if (shouldEnable) {
+                        // Si venía de false, reseteamos contador y reset_at (nuevo ciclo).
+                        await client.query(
+                            `UPDATE restaurantes
+                             SET chat_addon = true,
+                                 chat_consultas_mes = CASE
+                                     WHEN chat_addon = false THEN 0
+                                     ELSE chat_consultas_mes
+                                 END,
+                                 chat_consultas_reset_at = CASE
+                                     WHEN chat_addon = false THEN NOW()
+                                     ELSE chat_consultas_reset_at
+                                 END
+                             WHERE id = $1`,
+                            [restauranteId]
+                        );
+                    } else if (shouldDisable) {
+                        await client.query(
+                            `UPDATE restaurantes SET chat_addon = false WHERE id = $1`,
+                            [restauranteId]
+                        );
+                    }
+                } else {
+                    // ---- PLAN BASE MINDLOOP COSTOS (95€/mes) ----
                     await client.query(
-                        `UPDATE restaurantes
-                         SET chat_addon = true,
-                             chat_consultas_mes = CASE
-                                 WHEN chat_addon = false THEN 0
-                                 ELSE chat_consultas_mes
-                             END,
-                             chat_consultas_reset_at = CASE
-                                 WHEN chat_addon = false THEN NOW()
-                                 ELSE chat_consultas_reset_at
-                             END
-                         WHERE id = $1`,
-                        [restauranteId]
+                        `INSERT INTO base_subscriptions
+                           (restaurante_id, polar_subscription_id, polar_customer_id,
+                            status, current_period_end, raw_event)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (polar_subscription_id) DO UPDATE SET
+                           status = EXCLUDED.status,
+                           current_period_end = EXCLUDED.current_period_end,
+                           raw_event = EXCLUDED.raw_event,
+                           updated_at = NOW()`,
+                        [restauranteId, polarSubId, polarCustomerId, status, periodEnd, data]
                     );
-                } else if (['canceled', 'revoked', 'past_due', 'unpaid', 'incomplete_expired'].includes(status)) {
-                    await client.query(
-                        `UPDATE restaurantes SET chat_addon = false WHERE id = $1`,
-                        [restauranteId]
-                    );
+
+                    // Mapeamos status Polar a plan_status interno.
+                    // active → 'active'. past_due → 'past_due'.
+                    // canceled/revoked/unpaid → 'canceled'.
+                    // El resto de estados intermedios (incomplete, trialing) los
+                    // dejamos en 'pending_payment' para no abrir acceso prematuro.
+                    let nextPlanStatus = null;
+                    if (shouldEnable) nextPlanStatus = 'active';
+                    else if (status === 'past_due') nextPlanStatus = 'past_due';
+                    else if (shouldDisable) nextPlanStatus = 'canceled';
+
+                    if (nextPlanStatus) {
+                        await client.query(
+                            `UPDATE restaurantes
+                             SET plan_status = $1,
+                                 plan = 'base'
+                             WHERE id = $2`,
+                            [nextPlanStatus, restauranteId]
+                        );
+                    }
                 }
 
                 await client.query('COMMIT');
                 log('info', 'Polar webhook procesado', {
                     eventType,
+                    addonType,
                     restauranteId,
-                    status,
-                    chatAddonEnabled: shouldEnable
+                    status
                 });
                 res.status(200).json({ received: true });
             } catch (err) {
                 await client.query('ROLLBACK').catch(() => {});
                 log('error', 'Polar webhook DB error', {
                     eventType,
+                    addonType,
                     restauranteId,
                     error: err.message
                 });
