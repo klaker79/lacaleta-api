@@ -215,6 +215,22 @@ module.exports = function (pool) {
             const finalNombre = body.nombre !== undefined ? (sanitizeString(body.nombre, 255) || existing.nombre) : existing.nombre;
             const finalProveedorId = body.proveedorId !== undefined ? body.proveedorId :
                 (body.proveedor_id !== undefined ? body.proveedor_id : existing.proveedor_id);
+
+            // 🔒 Validación cross-tenant del proveedor (auditoría 2026-05-20):
+            // Si el cliente envía un proveedor_id distinto al actual, debe pertenecer al
+            // mismo tenant. Sin esta validación, un token de tenant A podría asignar un
+            // proveedor de tenant B al ingrediente (contaminación de dato).
+            // Permitimos null/undefined (desasignar proveedor) sin validar.
+            if (finalProveedorId !== null && finalProveedorId !== undefined &&
+                Number(finalProveedorId) !== Number(existing.proveedor_id)) {
+                const provCheck = await pool.query(
+                    'SELECT id FROM proveedores WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                    [finalProveedorId, req.restauranteId]
+                );
+                if (provCheck.rows.length === 0) {
+                    return res.status(404).json({ error: 'Proveedor no encontrado' });
+                }
+            }
             const finalPrecio = body.precio !== undefined ? validatePrecio(body.precio) : parseFloat(existing.precio) || 0;
             const finalUnidad = body.unidad !== undefined ? body.unidad : existing.unidad;
             // 🔒 FIX CRÍTICO: Priorizar stock_actual (snake_case del backend) sobre stockActual (camelCase legacy)

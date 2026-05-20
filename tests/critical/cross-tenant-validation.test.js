@@ -201,4 +201,45 @@ describe('Cross-tenant validation — resources from other tenants should be rej
             expect(res.status).toBe(404);
         });
     });
+
+    // Añadido 2026-05-20 — auditoría detectó 2 huecos más.
+    describe('POST /api/horarios', () => {
+        it('rechaza empleado_id que no pertenece al tenant (404)', async () => {
+            if (!authToken) return;
+
+            const res = await request(API_URL)
+                .post('/api/horarios')
+                .set('Origin', ORIGIN)
+                .set('Authorization', `Bearer ${authToken}`)
+                .send({
+                    empleado_id: IMPOSSIBLY_HIGH_ID,
+                    fecha: new Date().toISOString().split('T')[0],
+                    turno: 'completo',
+                });
+
+            expect(res.status).toBe(404);
+            expect(res.body.error || '').toMatch(/Empleado/i);
+        });
+    });
+
+    describe('PUT /api/ingredients/:id (proveedor_id cross-tenant)', () => {
+        it('rechaza proveedor_id que no pertenece al tenant (404)', async () => {
+            if (!authToken || !myIngredient) return;
+
+            // Solo intentamos el escenario cross-tenant si el ingrediente actual
+            // NO tiene ya ese proveedor (cumple la condición del fix: solo valida
+            // cuando cambia el proveedor_id).
+            const res = await request(API_URL)
+                .put(`/api/ingredients/${myIngredient.id}`)
+                .set('Origin', ORIGIN)
+                .set('Authorization', `Bearer ${authToken}`)
+                .send({
+                    nombre: myIngredient.nombre,
+                    proveedor_id: IMPOSSIBLY_HIGH_ID,
+                });
+
+            expect(res.status).toBe(404);
+            expect(res.body.error || '').toMatch(/Proveedor/i);
+        });
+    });
 });

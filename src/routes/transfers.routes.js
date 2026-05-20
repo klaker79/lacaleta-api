@@ -11,6 +11,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { validateId } = require('../utils/validators');
 const { log } = require('../utils/logger');
+const { logChange } = require('../utils/auditLog');
 
 module.exports = function (pool) {
     const router = Router();
@@ -146,6 +147,14 @@ module.exports = function (pool) {
                 destino: destino_restaurante_id,
                 ingrediente: ingrediente.nombre,
                 cantidad: cantidadNum
+            });
+
+            // Audit log: transferencia entre tenants (acción muy sensible)
+            logChange(pool, {
+                req, tabla: 'transferencias_stock', operacion: 'INSERT',
+                registroId: result.rows[0].id,
+                datosAntes: null,
+                datosDespues: result.rows[0],
             });
 
             res.json({
@@ -340,6 +349,14 @@ module.exports = function (pool) {
                 destino: req.restauranteId
             });
 
+            // Audit log: aprobación de transfer (movió stock entre tenants)
+            logChange(pool, {
+                req, tabla: 'transferencias_stock', operacion: 'UPDATE',
+                registroId: transfer.id,
+                datosAntes: { estado: 'pendiente' },
+                datosDespues: { estado: 'aprobada', ingrediente: transfer.ingrediente_nombre, cantidad: transfer.cantidad },
+            });
+
             res.json({ success: true, message: 'Transferencia aprobada. Stock actualizado.' });
         } catch (err) {
             await client.query('ROLLBACK');
@@ -371,6 +388,15 @@ module.exports = function (pool) {
             }
 
             log('info', 'Transferencia rechazada', { id: req.params.id });
+
+            // Audit log: rechazo de transfer
+            logChange(pool, {
+                req, tabla: 'transferencias_stock', operacion: 'UPDATE',
+                registroId: transferId,
+                datosAntes: { estado: 'pendiente' },
+                datosDespues: { estado: 'rechazada' },
+            });
+
             res.json({ success: true, message: 'Transferencia rechazada' });
         } catch (err) {
             log('error', 'Error rechazando transferencia', { error: err.message });

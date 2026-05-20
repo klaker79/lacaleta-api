@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { validatePrecio, sanitizeString, validateId } = require('../utils/validators');
+const { logChange } = require('../utils/auditLog');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -46,6 +47,14 @@ module.exports = function (pool) {
             );
 
             log('info', 'Gasto fijo creado', { id: result.rows[0].id, concepto });
+
+            logChange(pool, {
+                req, tabla: 'gastos_fijos', operacion: 'INSERT',
+                registroId: result.rows[0].id,
+                datosAntes: null,
+                datosDespues: result.rows[0],
+            });
+
             res.status(201).json(result.rows[0]);
         } catch (err) {
             log('error', 'Error creando gasto fijo', { error: err.message });
@@ -74,6 +83,14 @@ module.exports = function (pool) {
             }
 
             log('info', 'Gasto fijo actualizado', { id, monto_mensual });
+
+            logChange(pool, {
+                req, tabla: 'gastos_fijos', operacion: 'UPDATE',
+                registroId: id,
+                datosAntes: null,
+                datosDespues: result.rows[0],
+            });
+
             res.json(result.rows[0]);
         } catch (err) {
             log('error', 'Error actualizando gasto fijo', { error: err.message });
@@ -94,6 +111,14 @@ module.exports = function (pool) {
             );
 
             log('info', 'Gasto fijo eliminado', { id });
+
+            logChange(pool, {
+                req, tabla: 'gastos_fijos', operacion: 'DELETE',
+                registroId: id,
+                datosAntes: { activo: true },
+                datosDespues: { activo: false },
+            });
+
             res.json({ message: 'Gasto fijo eliminado' });
         } catch (err) {
             log('error', 'Error eliminando gasto fijo', { error: err.message });
