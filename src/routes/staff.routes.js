@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { sanitizeString, validateNumber, validateId } = require('../utils/validators');
+const { logChange } = require('../utils/auditLog');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -45,6 +46,14 @@ module.exports = function (pool) {
             );
 
             log('info', 'Empleado creado', { nombre });
+
+            logChange(pool, {
+                req, tabla: 'empleados', operacion: 'INSERT',
+                registroId: result.rows[0].id,
+                datosAntes: null,
+                datosDespues: result.rows[0],
+            });
+
             res.status(201).json(result.rows[0]);
         } catch (err) {
             log('error', 'Error creando empleado', { error: err.message });
@@ -72,6 +81,13 @@ module.exports = function (pool) {
                 return res.status(404).json({ error: 'Empleado no encontrado' });
             }
 
+            logChange(pool, {
+                req, tabla: 'empleados', operacion: 'UPDATE',
+                registroId: id,
+                datosAntes: null,
+                datosDespues: result.rows[0],
+            });
+
             res.json(result.rows[0]);
         } catch (err) {
             log('error', 'Error actualizando empleado', { error: err.message });
@@ -89,6 +105,14 @@ module.exports = function (pool) {
                 'UPDATE empleados SET activo = false WHERE id = $1 AND restaurante_id = $2',
                 [id, req.restauranteId]
             );
+
+            logChange(pool, {
+                req, tabla: 'empleados', operacion: 'DELETE',
+                registroId: id,
+                datosAntes: { activo: true },
+                datosDespues: { activo: false },
+            });
+
             res.json({ success: true });
         } catch (err) {
             log('error', 'Error eliminando empleado', { error: err.message });
@@ -198,6 +222,15 @@ module.exports = function (pool) {
                 [req.restauranteId]
             );
             log('info', 'Todos los horarios eliminados', { count: result.rowCount });
+
+            // Audit log: borrado MASIVO de horarios (acción destructiva)
+            logChange(pool, {
+                req, tabla: 'horarios', operacion: 'DELETE',
+                registroId: 0,
+                datosAntes: { count: result.rowCount },
+                datosDespues: { motivo: 'borrado masivo manual' },
+            });
+
             res.json({ success: true, deleted: result.rowCount });
         } catch (err) {
             log('error', 'Error eliminando todos los horarios', { error: err.message });

@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { sanitizeString, validateId } = require('../utils/validators');
+const { logChange } = require('../utils/auditLog');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -95,6 +96,16 @@ module.exports = function (pool) {
 
             await client.query('COMMIT');
             log('info', `Registradas ${insertados}/${mermas.length} mermas`, { restauranteId: req.restauranteId });
+
+            // Audit log: registro de mermas (descuento de stock)
+            // registro_id = 0 porque es un batch — datos_despues guarda detalle.
+            logChange(pool, {
+                req, tabla: 'mermas', operacion: 'INSERT',
+                registroId: 0,
+                datosAntes: null,
+                datosDespues: { count: insertados, items: mermas.slice(0, 20) },
+            });
+
             res.json({ success: true, count: insertados });
         } catch (err) {
             await client.query('ROLLBACK');
@@ -336,6 +347,14 @@ module.exports = function (pool) {
                 motivo: motivo || 'manual'
             });
 
+            // Audit log: RESET masivo de mermas (acción muy destructiva)
+            logChange(pool, {
+                req, tabla: 'mermas', operacion: 'DELETE',
+                registroId: 0,
+                datosAntes: { count: deleted.rowCount, ids: deleted.rows.map(r => r.id).slice(0, 50) },
+                datosDespues: { motivo: motivo || 'manual' },
+            });
+
             res.json({
                 success: true,
                 eliminados: deleted.rowCount,
@@ -404,6 +423,15 @@ module.exports = function (pool) {
 
             await client.query('COMMIT');
             log('info', 'Merma eliminada (soft delete)', { id: req.params.id, ingrediente: merma.ingrediente_nombre });
+
+            // Audit log: borrado individual de merma (restauró stock)
+            logChange(pool, {
+                req, tabla: 'mermas', operacion: 'DELETE',
+                registroId: merma.id,
+                datosAntes: merma,
+                datosDespues: null,
+            });
+
             res.json({ success: true, message: 'Merma eliminada y stock restaurado' });
         } catch (err) {
             await client.query('ROLLBACK');
