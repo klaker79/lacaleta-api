@@ -18,13 +18,17 @@
 
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const polarService = require('../services/polarService');
 
 module.exports = function (pool) {
     const router = Router();
 
-    router.post('/subscription/checkout-base', authMiddleware, async (req, res) => {
+    // Rate-limited: cada llamada crea un checkout/session en Polar (API externa
+    // con coste). Sin limit un actor autenticado podría generar miles de
+    // sessions abandonadas y consumir cuota / saturar el portal.
+    router.post('/subscription/checkout-base', costlyApiLimiter, authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });
@@ -65,7 +69,8 @@ module.exports = function (pool) {
     // Portal Polar para gestionar la suscripción (cancelar, cambiar tarjeta,
     // descargar facturas). El mismo portal sirve para el plan base y el add-on,
     // porque ambos productos comparten customer en Polar.
-    router.post('/subscription/customer-portal', authMiddleware, async (req, res) => {
+    // Rate-limited: cada llamada crea un customer-session token en Polar.
+    router.post('/subscription/customer-portal', costlyApiLimiter, authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });
