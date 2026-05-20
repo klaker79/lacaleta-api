@@ -53,15 +53,24 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     // ========== LOGIN ==========
     router.post('/auth/login', authLimiter, async (req, res) => {
         try {
-            const { email, password } = req.body;
+            // 2026-05-21: aceptar `identifier` (username o email) además de `email`
+            // por compat con frontends antiguos. Si el campo `identifier` no
+            // viene, caemos a `email` — mismo comportamiento que antes.
+            const { email, identifier, password } = req.body;
+            const loginIdentifier = identifier || email;
 
-            if (!email || !password) {
-                return res.status(400).json({ error: 'Email y contraseña requeridos' });
+            if (!loginIdentifier || !password) {
+                return res.status(400).json({ error: 'Usuario o email y contraseña requeridos' });
             }
 
+            // Lookup por email O por username. El UNIQUE garantiza que solo
+            // hay un match posible para cada valor.
             const result = await pool.query(
-                'SELECT u.*, r.nombre as restaurante_nombre FROM usuarios u JOIN restaurantes r ON u.restaurante_id = r.id WHERE u.email = $1',
-                [email]
+                `SELECT u.*, r.nombre as restaurante_nombre
+                 FROM usuarios u
+                 JOIN restaurantes r ON u.restaurante_id = r.id
+                 WHERE u.email = $1 OR u.username = $1`,
+                [loginIdentifier]
             );
 
             if (result.rows.length === 0) {
@@ -118,12 +127,12 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 // Single restaurant: auto-select (backward-compatible)
                 const rest = restaurants[0];
                 const token = jwt.sign(
-                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
+                    { userId: user.id, restauranteId: rest.restaurante_id, email: user.email, username: user.username || null, rol: rest.rol, isSuperAdmin: user.is_superadmin || false },
                     JWT_SECRET,
                     { expiresIn: '7d' }
                 );
 
-                log('info', 'Login exitoso', { userId: user.id, email, restauranteId: rest.restaurante_id });
+                log('info', 'Login exitoso', { userId: user.id, email: user.email, username: user.username, restauranteId: rest.restaurante_id });
 
                 res.cookie('auth_token', token, {
                     httpOnly: true, secure: isProduction, sameSite: 'lax',
@@ -133,7 +142,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 res.json({
                     token,
                     user: {
-                        id: user.id, email: user.email, nombre: user.nombre,
+                        id: user.id, email: user.email, username: user.username || null, nombre: user.nombre,
                         rol: rest.rol, restaurante: rest.nombre,
                         restauranteId: rest.restaurante_id,
                         isSuperAdmin: user.is_superadmin || false,
@@ -144,18 +153,18 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             } else {
                 // Multiple restaurants: require selection
                 const selectionToken = jwt.sign(
-                    { userId: user.id, email: user.email, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
+                    { userId: user.id, email: user.email, username: user.username || null, type: 'restaurant_selection', isSuperAdmin: user.is_superadmin || false },
                     JWT_SECRET,
                     { expiresIn: '5m' }
                 );
 
-                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email, count: restaurants.length });
+                log('info', 'Login multi-restaurante: selección requerida', { userId: user.id, email: user.email, username: user.username, count: restaurants.length });
 
                 res.json({
                     needsSelection: true,
                     selectionToken,
                     restaurants,
-                    user: { id: user.id, nombre: user.nombre, email: user.email }
+                    user: { id: user.id, nombre: user.nombre, email: user.email, username: user.username || null }
                 });
             }
         } catch (err) {
@@ -521,10 +530,24 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
             const verificationToken = canSendEmail ? crypto.randomBytes(32).toString('hex') : null;
             const verificationExpires = canSendEmail ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null;
 
+            // 2026-05-21: autogenerar username desde la parte local del email
+            // si no se ha pasado explícitamente (Deploy 1 backward-compat).
+            // Maneja colisiones añadiendo sufijo numérico (1, 2, ..., 9, timestamp).
+            // El backend SOLO usa este lookup auxiliar — no expone el username
+            // generado al cliente todavía (eso es Deploy 2).
+            const baseUsername = (email.split('@')[0] || 'user').toLowerCase().slice(0, 40);
+            let username = baseUsername;
+            for (let suffix = 0; suffix < 10; suffix++) {
+                const candidate = suffix === 0 ? baseUsername : `${baseUsername}_${suffix}`;
+                const check = await client.query('SELECT 1 FROM usuarios WHERE username = $1', [candidate]);
+                if (check.rows.length === 0) { username = candidate; break; }
+                if (suffix === 9) { username = `${baseUsername}_${Date.now()}`; }
+            }
+
             const userResult = await client.query(
-                `INSERT INTO usuarios (restaurante_id, email, password_hash, nombre, rol, email_verified, verification_token, verification_expires) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                [restauranteId, email, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
+                `INSERT INTO usuarios (restaurante_id, email, username, password_hash, nombre, rol, email_verified, verification_token, verification_expires)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+                [restauranteId, email, username, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
             );
 
             // 2026-05-20: pricing es single-plan vía Polar (no más Stripe).
@@ -887,9 +910,21 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Password requerido para usuarios nuevos' });
             }
             const passwordHash = await bcrypt.hash(password, 10);
+
+            // 2026-05-21: autogenerar username desde la parte local del email
+            // (mismo patrón que /auth/register). Maneja colisiones con sufijo.
+            const baseUsername = (email.split('@')[0] || 'user').toLowerCase().slice(0, 40);
+            let username = baseUsername;
+            for (let suffix = 0; suffix < 10; suffix++) {
+                const candidate = suffix === 0 ? baseUsername : `${baseUsername}_${suffix}`;
+                const check = await pool.query('SELECT 1 FROM usuarios WHERE username = $1', [candidate]);
+                if (check.rows.length === 0) { username = candidate; break; }
+                if (suffix === 9) { username = `${baseUsername}_${Date.now()}`; }
+            }
+
             const result = await pool.query(
-                'INSERT INTO usuarios (restaurante_id, nombre, email, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, nombre, email, rol',
-                [req.restauranteId, sanitizeString(nombre), email, passwordHash, nuevoRol]
+                'INSERT INTO usuarios (restaurante_id, nombre, email, username, password_hash, rol, email_verified) VALUES ($1, $2, $3, $4, $5, $6, TRUE) RETURNING id, nombre, email, username, rol',
+                [req.restauranteId, sanitizeString(nombre), email, username, passwordHash, nuevoRol]
             );
 
             await pool.query(

@@ -589,6 +589,68 @@ async function initializeDatabase(pool) {
     log('info', 'Migración is_superadmin completada');
   } catch (e) { log('warn', 'Migración is_superadmin', { error: e.message }); }
 
+  // ========== MIGRACIÓN: usuarios.username (2026-05-21, Deploy 1 backward-compat) ==========
+  // Añade columna `username` separada del email. Backfill desde la parte local
+  // del email (antes del @). Para colisiones (ej. dos `demo@...` distintos),
+  // sufijo `_<id>` para garantizar unicidad.
+  //
+  // Diseño backward-compatible:
+  //   - Columna nullable inicialmente (se promueve a NOT NULL en Deploy 3)
+  //   - UNIQUE constraint sí desde el inicio (no podemos permitir duplicados)
+  //   - Login (POST /auth/login) acepta email O username como `identifier`
+  //   - Email sigue siendo el identificador principal hasta Deploy 3
+  //
+  // Idempotente: si ya existe la columna o el constraint, no hace nada.
+  try {
+    // 1. Añadir columna nullable
+    await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS username VARCHAR(50);`);
+
+    // 2. Backfill solo si hay filas con username NULL
+    const pendingResult = await pool.query(`SELECT COUNT(*)::int AS n FROM usuarios WHERE username IS NULL`);
+    if (pendingResult.rows[0].n > 0) {
+      // 2a. Identificar usuarios con candidate-username conflictivo (ej. dos
+      //     emails distintos que comparten parte local: demo@a.com + demo@b.com).
+      //     A esos les ponemos sufijo _<id> para garantizar unicidad.
+      await pool.query(`
+        WITH conflicts AS (
+          SELECT u.id
+          FROM usuarios u
+          WHERE u.username IS NULL
+            AND EXISTS (
+              SELECT 1 FROM usuarios u2
+              WHERE u2.id <> u.id
+                AND SPLIT_PART(u2.email, '@', 1) = SPLIT_PART(u.email, '@', 1)
+            )
+        )
+        UPDATE usuarios
+        SET username = SPLIT_PART(email, '@', 1) || '_' || id
+        WHERE id IN (SELECT id FROM conflicts);
+      `);
+
+      // 2b. Backfill resto: username = parte local del email
+      await pool.query(`
+        UPDATE usuarios
+        SET username = SPLIT_PART(email, '@', 1)
+        WHERE username IS NULL;
+      `);
+    }
+
+    // 3. Añadir UNIQUE constraint si no existe (no se puede usar IF NOT EXISTS
+    //    directamente con ADD CONSTRAINT en Postgres, así que comprobamos en pg_constraint).
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'usuarios_username_unique'
+        ) THEN
+          ALTER TABLE usuarios ADD CONSTRAINT usuarios_username_unique UNIQUE (username);
+        END IF;
+      END $$;
+    `);
+
+    log('info', 'Migración usuarios.username completada');
+  } catch (e) { log('warn', 'Migración usuarios.username', { error: e.message }); }
+
   // ========== MIGRACIÓN: Drop UNIQUE on restaurantes.email (multi-restaurant) ==========
   // Same user can own multiple restaurants, so email can't be unique
   try {
