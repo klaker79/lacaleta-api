@@ -337,10 +337,8 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== CREATE ADDITIONAL RESTAURANT (for existing users) ==========
-    // Creates restaurant + Stripe customer + Checkout session.
-    // Restaurant starts as 'pending_payment'. Webhook activates it after payment.
-    const PLAN_ORDER = { starter: 1, trial: 2, profesional: 2, premium: 3 };
-    const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999 };
+    // Crea restaurante en plan_status='pending_payment'. El cliente debe pasar
+    // por el checkout de Polar (plan base 95€/mes) para que el webhook lo active.
 
     // Cleanup orphaned pending_payment restaurants for a user
     router.delete('/auth/pending-restaurant/:id', authMiddleware, async (req, res) => {
@@ -371,34 +369,16 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     router.post('/auth/create-restaurant', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { nombre, plan, billing, moneda } = req.body;
+            const { nombre, moneda } = req.body;
             if (!nombre || !nombre.trim()) {
                 return res.status(400).json({ error: 'Nombre del restaurante requerido' });
             }
-            const validPlans = ['starter', 'profesional', 'premium'];
-            if (!plan || !validPlans.includes(plan)) {
-                return res.status(400).json({ error: 'Plan requerido: starter, profesional, premium' });
-            }
-            if (!billing || !['monthly', 'annual'].includes(billing)) {
-                return res.status(400).json({ error: 'Billing requerido: monthly, annual' });
-            }
 
-            // Each restaurant chooses its own plan independently
-
-            // Stripe price ID from env
-            const priceKey = `${plan}_${billing}`;
-            const PRICE_MAP = {
-                starter_monthly: process.env.STRIPE_PRICE_STARTER_MONTHLY,
-                starter_annual: process.env.STRIPE_PRICE_STARTER_ANNUAL,
-                profesional_monthly: process.env.STRIPE_PRICE_PRO_MONTHLY,
-                profesional_annual: process.env.STRIPE_PRICE_PRO_ANNUAL,
-                premium_monthly: process.env.STRIPE_PRICE_PREMIUM_MONTHLY,
-                premium_annual: process.env.STRIPE_PRICE_PREMIUM_ANNUAL
-            };
-            const priceId = PRICE_MAP[priceKey];
-            if (!priceId) {
-                return res.status(400).json({ error: 'Precio no configurado para este plan' });
-            }
+            // 2026-05-20: pricing es single-plan (95€/mes) + add-on Chat IA (30€/mes
+            // vía Polar). Ya no hay starter/profesional/premium ni Stripe.
+            // El plan base se cobra vía Polar en flujo separado (TODO: PR-2).
+            // Por ahora el restaurante se crea en pending_payment y el checkout
+            // Polar se enchufará desde una pantalla dedicada de Suscripción.
 
             await client.query('BEGIN');
 
@@ -410,12 +390,11 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [req.user.userId]
             );
 
-            // Create restaurant with pending_payment status
             const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restResult = await client.query(
                 `INSERT INTO restaurantes (nombre, email, plan, plan_status, max_users, moneda)
-                 VALUES ($1, $2, $3, 'pending_payment', $4, $5) RETURNING id`,
-                [sanitizeString(nombre.trim()), req.user.email, plan, PLAN_MAX_USERS[plan] || 2, safeMoneda]
+                 VALUES ($1, $2, 'base', 'pending_payment', 999, $3) RETURNING id`,
+                [sanitizeString(nombre.trim()), req.user.email, safeMoneda]
             );
             const restauranteId = restResult.rows[0].id;
 
@@ -425,45 +404,15 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [req.user.userId, restauranteId, 'admin']
             );
 
-            // Create Stripe customer + Checkout session
-            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-            let checkoutUrl = null;
-
-            if (STRIPE_SECRET_KEY) {
-                const stripe = require('stripe')(STRIPE_SECRET_KEY);
-                const customer = await stripe.customers.create({
-                    email: req.user.email,
-                    name: sanitizeString(nombre.trim()),
-                    metadata: { restaurante_id: String(restauranteId) }
-                });
-
-                await client.query(
-                    'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
-                    [customer.id, restauranteId]
-                );
-
-                const frontendUrl = process.env.FRONTEND_URL || 'https://app.mindloop.cloud';
-                const session = await stripe.checkout.sessions.create({
-                    customer: customer.id,
-                    mode: 'subscription',
-                    line_items: [{ price: priceId, quantity: 1 }],
-                    success_url: `${frontendUrl}/index.html?checkout=success&plan=${plan}&new_restaurant=${restauranteId}`,
-                    cancel_url: `${frontendUrl}/index.html?checkout=canceled&new_restaurant=${restauranteId}`,
-                    metadata: { restaurante_id: String(restauranteId), plan },
-                    subscription_data: {
-                        metadata: { restaurante_id: String(restauranteId), plan }
-                    }
-                });
-                checkoutUrl = session.url;
-            }
-
             await client.query('COMMIT');
 
             log('info', 'Restaurante creado (pending_payment)', {
-                userId: req.user.userId, restauranteId, plan, billing
+                userId: req.user.userId, restauranteId
             });
 
-            res.status(201).json({ checkoutUrl, restauranteId, plan });
+            // checkoutUrl=null hasta que se integre Polar plan base (PR-2).
+            // El frontend debe redirigir al flujo de pago de Polar tras la creación.
+            res.status(201).json({ checkoutUrl: null, restauranteId, plan: 'base' });
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error creando restaurante adicional', { error: err.message });
@@ -578,24 +527,9 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 [restauranteId, email, passwordHash, sanitizeString(nombre), 'admin', !canSendEmail, verificationToken, verificationExpires]
             );
 
-            // Create Stripe customer if configured
-            const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-            if (STRIPE_SECRET_KEY) {
-                try {
-                    const stripe = require('stripe')(STRIPE_SECRET_KEY);
-                    const customer = await stripe.customers.create({
-                        email,
-                        name: sanitizeString(nombre),
-                        metadata: { restaurante_id: String(restauranteId) }
-                    });
-                    await client.query(
-                        'UPDATE restaurantes SET stripe_customer_id = $1 WHERE id = $2',
-                        [customer.id, restauranteId]
-                    );
-                } catch (stripeErr) {
-                    log('warn', 'Error creando Stripe customer (registro continúa)', { error: stripeErr.message });
-                }
-            }
+            // 2026-05-20: pricing es single-plan vía Polar (no más Stripe).
+            // Cliente Polar no se crea aquí — se crea automáticamente al
+            // iniciar el primer checkout de plan base o add-on.
 
             // Multi-restaurant: add to junction table
             await client.query(
