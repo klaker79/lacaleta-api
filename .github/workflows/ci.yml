@@ -6,6 +6,11 @@ on:
   push:
     branches: [main, develop]
 
+# Permisos mínimos necesarios (CodeQL alert "Workflow does not contain permissions").
+# Solo lectura del repo para checkout + npm install.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
