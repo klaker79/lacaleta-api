@@ -72,6 +72,22 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
 - stock_critico → Ingredientes que hay que reponer.
 
+DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
+- diagnostico_ingrediente(nombre_o_id, dias) → USAR cuando el usuario pregunte
+  "qué pasa con X", "por qué tengo tanto/poco X", "analiza el ingrediente X",
+  "X parece raro". Devuelve stock, compras del periodo, recetas que lo usan,
+  ventas teóricas y CUADRE (kg comprados vs kg consumidos vs exceso).
+  Acepta nombre parcial (case-insensitive). Default dias=60.
+- diagnostico_receta(nombre_o_id, dias) → USAR para "analiza la receta X",
+  "qué tal va X plato", "food cost de X plato", "ventas de X".
+  Devuelve escandallo desglosado, food cost, ventas del periodo, y kg
+  consumidos estimados por ingrediente. Default dias=60.
+
+⚠️ Cuando el usuario pregunta por UN ingrediente o UNA receta concreta,
+PRIORIZA diagnostico_* sobre obtener_*. Más concreto, menos tokens, y
+hace el cuadre matemático por ti. Si la tool devuelve "alternativas",
+menciónalas al usuario por si quería otro ítem.
+
 ⚠️ RANGO DE FECHAS para tools que lo piden:
 - Formato: YYYY-MM-DD
 - hasta es EXCLUSIVE (primer día del MES SIGUIENTE).
@@ -456,6 +472,30 @@ const TOOLS = [
                 fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
             },
             required: ['fecha_desde', 'fecha_hasta']
+        }
+    },
+    {
+        name: 'diagnostico_ingrediente',
+        description: 'DIAGNÓSTICO COMPLETO de un ingrediente concreto: stock actual + valor, compras del periodo (kg + €), recetas que lo usan en su escandallo, ventas teóricas estimadas a partir de esas recetas, y CUADRE matemático entre lo comprado y lo consumido. Usa esta tool SIEMPRE que el usuario pregunte "qué pasa con X", "por qué tengo tanto/poco X", "X parece mal", "analiza el ingrediente Y", "diagnóstico de Z". Acepta nombre parcial o id exacto. Para nombres con varias coincidencias devuelve el de mayor stock + lista corta de alternativas.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                nombre_o_id: { type: 'string', description: 'Nombre parcial (case-insensitive, ej. "costela") o id numérico del ingrediente' },
+                dias: { type: 'number', description: 'Ventana de análisis en días para compras y ventas. Default 60.' }
+            },
+            required: ['nombre_o_id']
+        }
+    },
+    {
+        name: 'diagnostico_receta',
+        description: 'DIAGNÓSTICO COMPLETO de una receta concreta: escandallo (ingredientes + cantidades + rendimiento + coste cada uno), food cost y margen, ventas en el periodo (unidades + ingresos), y kg estimados consumidos de cada ingrediente. Usa esta tool cuando el usuario pregunte "analiza la receta X", "qué tal va X plato", "food cost de X", "ventas de X". Acepta nombre parcial o id.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                nombre_o_id: { type: 'string', description: 'Nombre parcial (case-insensitive) o id numérico de la receta' },
+                dias: { type: 'number', description: 'Ventana de análisis en días para ventas. Default 60.' }
+            },
+            required: ['nombre_o_id']
         }
     }
 ];
@@ -845,6 +885,277 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ORDER BY dias_stock ASC
                 LIMIT 100
             `, [restauranteId])).rows;
+
+        case 'diagnostico_ingrediente': {
+            // Resuelve nombre_o_id → fila de ingrediente (filtrado por restauranteId).
+            // Si llega un id numérico, busca exacto. Si es texto, ILIKE %x% y devuelve
+            // el de mayor stock (más relevante para el diagnóstico) + lista de alternativas.
+            const input = (args.nombre_o_id ?? '').toString().trim();
+            if (!input) throw new Error('nombre_o_id requerido');
+            const dias = Math.max(1, Math.min(365, parseInt(args.dias) || 60));
+
+            const isNumericId = /^\d+$/.test(input);
+            const candidates = (await pool.query(
+                isNumericId
+                    ? `SELECT id, nombre, stock_actual, precio, cantidad_por_formato, unidad,
+                              formato_compra, rendimiento, stock_minimo
+                       FROM ingredientes
+                       WHERE restaurante_id = $1 AND deleted_at IS NULL AND id = $2`
+                    : `SELECT id, nombre, stock_actual, precio, cantidad_por_formato, unidad,
+                              formato_compra, rendimiento, stock_minimo
+                       FROM ingredientes
+                       WHERE restaurante_id = $1 AND deleted_at IS NULL AND nombre ILIKE $2
+                       ORDER BY stock_actual DESC NULLS LAST, nombre ASC
+                       LIMIT 10`,
+                isNumericId ? [restauranteId, parseInt(input)] : [restauranteId, `%${input}%`]
+            )).rows;
+
+            if (candidates.length === 0) {
+                return { error: 'No se encontró ningún ingrediente con ese criterio', criterio: input };
+            }
+
+            const ingrediente = candidates[0];
+            const alternativas = candidates.slice(1, 5).map(c => ({ id: c.id, nombre: c.nombre, stock_actual: c.stock_actual }));
+
+            // Precio unitario real (mismo cálculo que obtener_ingredientes)
+            const precioMedioRow = (await pool.query(`
+                SELECT ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1 AND ingrediente_id = $2
+            `, [restauranteId, ingrediente.id])).rows[0];
+            const precioMedioCompra = precioMedioRow?.precio_medio_compra ? parseFloat(precioMedioRow.precio_medio_compra) : null;
+            const cpf = ingrediente.cantidad_por_formato;
+            const precio = parseFloat(ingrediente.precio) || 0;
+            const precioUnitarioReal = precioMedioCompra ?? (cpf && cpf > 0 ? precio / cpf : precio);
+            const valorStock = parseFloat(ingrediente.stock_actual || 0) * (cpf && cpf > 0 ? precio / cpf : precio);
+
+            // Compras del periodo (kg + €)
+            const compras = (await pool.query(`
+                SELECT
+                    COALESCE(SUM(cantidad_comprada), 0)::numeric(12,2) AS kg_total,
+                    COALESCE(SUM(total_compra), 0)::numeric(12,2) AS eur_total,
+                    COUNT(*) AS num_movimientos
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1 AND ingrediente_id = $2
+                  AND fecha >= CURRENT_DATE - ($3 || ' days')::interval
+            `, [restauranteId, ingrediente.id, dias])).rows[0];
+
+            // Recetas que contienen este ingrediente en su escandallo (JSONB usa "ingredienteId" camelCase)
+            const recetas = (await pool.query(`
+                SELECT
+                    r.id,
+                    r.nombre,
+                    r.categoria,
+                    r.precio_venta,
+                    r.porciones,
+                    (SELECT (ing->>'cantidad')::numeric
+                     FROM jsonb_array_elements(r.ingredientes) AS ing
+                     WHERE (ing->>'ingredienteId')::int = $2) AS cantidad_por_porcion,
+                    (SELECT (ing->>'rendimiento')::numeric
+                     FROM jsonb_array_elements(r.ingredientes) AS ing
+                     WHERE (ing->>'ingredienteId')::int = $2) AS rendimiento_en_receta
+                FROM recetas r
+                WHERE r.restaurante_id = $1
+                  AND r.deleted_at IS NULL
+                  AND r.ingredientes @> ('[{"ingredienteId": ' || $2 || '}]')::jsonb
+            `, [restauranteId, ingrediente.id])).rows;
+
+            // Para cada receta, contar ventas en el periodo y consumo teórico
+            let kgConsumidosTeoricosTotal = 0;
+            const recetasConVentas = [];
+            for (const r of recetas) {
+                const ventasRow = (await pool.query(`
+                    SELECT
+                        COUNT(*) AS num_ventas,
+                        COALESCE(SUM(cantidad), 0)::int AS unidades_vendidas,
+                        COALESCE(SUM(total), 0)::numeric(12,2) AS ingresos
+                    FROM ventas
+                    WHERE restaurante_id = $1 AND receta_id = $2 AND deleted_at IS NULL
+                      AND fecha >= CURRENT_DATE - ($3 || ' days')::interval
+                `, [restauranteId, r.id, dias])).rows[0];
+                const cantidadPorPorcion = parseFloat(r.cantidad_por_porcion) || 0;
+                const porciones = parseInt(r.porciones) || 1;
+                const unidadesVendidas = parseInt(ventasRow.unidades_vendidas) || 0;
+                // El descuento real de stock por venta es (cantidad / porciones) × unidades vendidas
+                const kgConsumidos = (cantidadPorPorcion / porciones) * unidadesVendidas;
+                kgConsumidosTeoricosTotal += kgConsumidos;
+                recetasConVentas.push({
+                    id: r.id,
+                    nombre: r.nombre,
+                    categoria: r.categoria,
+                    precio_venta: parseFloat(r.precio_venta) || 0,
+                    porciones,
+                    cantidad_por_porcion: cantidadPorPorcion,
+                    rendimiento_en_receta: r.rendimiento_en_receta ? parseFloat(r.rendimiento_en_receta) : null,
+                    unidades_vendidas: unidadesVendidas,
+                    ingresos: parseFloat(ventasRow.ingresos) || 0,
+                    kg_consumidos_teoricos: Math.round(kgConsumidos * 100) / 100
+                });
+            }
+
+            const kgComprados = parseFloat(compras.kg_total) || 0;
+            const excesoKg = Math.round((kgComprados - kgConsumidosTeoricosTotal) * 100) / 100;
+
+            return {
+                ingrediente: {
+                    id: ingrediente.id,
+                    nombre: ingrediente.nombre,
+                    unidad: ingrediente.unidad,
+                    formato_compra: ingrediente.formato_compra,
+                    cantidad_por_formato: ingrediente.cantidad_por_formato,
+                    stock_actual: parseFloat(ingrediente.stock_actual) || 0,
+                    stock_minimo: parseFloat(ingrediente.stock_minimo) || 0,
+                    rendimiento: ingrediente.rendimiento,
+                    precio_unitario_real: Math.round(precioUnitarioReal * 10000) / 10000,
+                    valor_stock: Math.round(valorStock * 100) / 100
+                },
+                compras_periodo: {
+                    dias,
+                    kg_total: parseFloat(compras.kg_total) || 0,
+                    eur_total: parseFloat(compras.eur_total) || 0,
+                    num_movimientos: parseInt(compras.num_movimientos) || 0
+                },
+                recetas_que_lo_usan: recetasConVentas,
+                cuadre: {
+                    kg_comprados: kgComprados,
+                    kg_consumidos_teoricos: Math.round(kgConsumidosTeoricosTotal * 100) / 100,
+                    exceso_kg: excesoKg,
+                    interpretacion: excesoKg > kgComprados * 0.5
+                        ? 'compras_muy_por_encima_de_consumo'
+                        : excesoKg > 0
+                        ? 'compras_ligeramente_por_encima'
+                        : 'consumo_supera_compras_o_acumulado_previo'
+                },
+                alternativas
+            };
+        }
+
+        case 'diagnostico_receta': {
+            const input = (args.nombre_o_id ?? '').toString().trim();
+            if (!input) throw new Error('nombre_o_id requerido');
+            const dias = Math.max(1, Math.min(365, parseInt(args.dias) || 60));
+
+            const isNumericId = /^\d+$/.test(input);
+            const recetaResult = (await pool.query(
+                isNumericId
+                    ? `SELECT id, nombre, categoria, precio_venta, porciones, ingredientes
+                       FROM recetas
+                       WHERE restaurante_id = $1 AND deleted_at IS NULL AND id = $2`
+                    : `SELECT id, nombre, categoria, precio_venta, porciones, ingredientes
+                       FROM recetas
+                       WHERE restaurante_id = $1 AND deleted_at IS NULL AND nombre ILIKE $2
+                       ORDER BY nombre ASC
+                       LIMIT 5`,
+                isNumericId ? [restauranteId, parseInt(input)] : [restauranteId, `%${input}%`]
+            )).rows;
+
+            if (recetaResult.length === 0) {
+                return { error: 'No se encontró ninguna receta con ese criterio', criterio: input };
+            }
+
+            const receta = recetaResult[0];
+            const alternativas = recetaResult.slice(1).map(r => ({ id: r.id, nombre: r.nombre }));
+
+            // Cargar ingredientes (para precios y nombres)
+            const { rows: ings } = await pool.query(
+                `SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.rendimiento,
+                        pcd.precio_medio_compra
+                 FROM ingredientes i
+                 LEFT JOIN (
+                     SELECT ingrediente_id,
+                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                     FROM precios_compra_diarios WHERE restaurante_id = $1
+                     GROUP BY ingrediente_id
+                 ) pcd ON pcd.ingrediente_id = i.id
+                 WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL`,
+                [restauranteId]
+            );
+            const preciosMap = new Map();
+            const ingMap = new Map();
+            for (const ing of ings) {
+                preciosMap.set(ing.id, getBackendIngredientUnitPrice(ing));
+                ingMap.set(ing.id, ing);
+            }
+
+            // Escandallo desglosado
+            const escandalloJsonb = Array.isArray(receta.ingredientes)
+                ? receta.ingredientes
+                : (typeof receta.ingredientes === 'string'
+                    ? (() => { try { return JSON.parse(receta.ingredientes); } catch { return []; } })()
+                    : []);
+            const escandallo = [];
+            let costeLote = 0;
+            for (const ing of escandalloJsonb) {
+                const ingId = parseInt(ing.ingredienteId);
+                const ingInfo = ingMap.get(ingId);
+                const cantidad = parseFloat(ing.cantidad) || 0;
+                const rendimiento = parseFloat(ing.rendimiento) || 100;
+                const precioUnitario = preciosMap.get(ingId) ?? 0;
+                const costeAjustado = rendimiento > 0 ? precioUnitario / (rendimiento / 100) : precioUnitario;
+                const costeIngrediente = costeAjustado * cantidad;
+                costeLote += costeIngrediente;
+                escandallo.push({
+                    ingrediente_id: ingId,
+                    nombre: ingInfo?.nombre || '(desconocido)',
+                    unidad: ingInfo?.unidad || '',
+                    cantidad,
+                    rendimiento_pct: rendimiento,
+                    precio_unitario_real: Math.round(precioUnitario * 10000) / 10000,
+                    coste_ingrediente: Math.round(costeIngrediente * 100) / 100
+                });
+            }
+
+            const porciones = parseInt(receta.porciones) || 1;
+            const precioVenta = parseFloat(receta.precio_venta) || 0;
+            const costePorcion = costeLote / porciones;
+            const foodCostPct = precioVenta > 0 ? (costePorcion / precioVenta) * 100 : 0;
+            const margen = precioVenta - costePorcion;
+
+            // Ventas del periodo
+            const ventas = (await pool.query(`
+                SELECT
+                    COUNT(*) AS num_ventas,
+                    COALESCE(SUM(cantidad), 0)::int AS unidades_vendidas,
+                    COALESCE(SUM(total), 0)::numeric(12,2) AS ingresos
+                FROM ventas
+                WHERE restaurante_id = $1 AND receta_id = $2 AND deleted_at IS NULL
+                  AND fecha >= CURRENT_DATE - ($3 || ' days')::interval
+            `, [restauranteId, receta.id, dias])).rows[0];
+
+            // Consumo teórico estimado por ingrediente
+            const unidadesVendidas = parseInt(ventas.unidades_vendidas) || 0;
+            const ingredientesConsumidos = escandallo.map(e => ({
+                ingrediente_id: e.ingrediente_id,
+                nombre: e.nombre,
+                unidad: e.unidad,
+                kg_o_ud_estimados: Math.round((e.cantidad / porciones) * unidadesVendidas * 100) / 100
+            }));
+
+            return {
+                receta: {
+                    id: receta.id,
+                    nombre: receta.nombre,
+                    categoria: receta.categoria,
+                    precio_venta: precioVenta,
+                    porciones
+                },
+                escandallo,
+                food_cost: {
+                    coste_lote: Math.round(costeLote * 100) / 100,
+                    coste_porcion: Math.round(costePorcion * 100) / 100,
+                    food_cost_pct: Math.round(foodCostPct * 10) / 10,
+                    margen: Math.round(margen * 100) / 100
+                },
+                ventas_periodo: {
+                    dias,
+                    num_ventas: parseInt(ventas.num_ventas) || 0,
+                    unidades_vendidas: unidadesVendidas,
+                    ingresos: parseFloat(ventas.ingresos) || 0
+                },
+                ingredientes_consumidos_estimados: ingredientesConsumidos,
+                alternativas
+            };
+        }
 
         default:
             throw new Error(`Unknown tool: ${name}`);
