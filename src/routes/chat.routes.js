@@ -200,6 +200,33 @@ module.exports = function (pool) {
     // Validación de body antes del addon gate. Razón: body inválido o vacío
     // no debe consumir la cuota mensual del cliente. Tests `400` esperan
     // que la validación corra antes que el gate (preserva contrato anterior).
+    //
+    // 2026-05-23: añadido `history` opcional (memoria conversacional mínima).
+    // Limit estricto: 6 mensajes, 4000 chars cada uno, roles user/assistant.
+    // Si llega malformado se descarta silenciosamente (no rompe la petición).
+    const MAX_HISTORY_MESSAGES = 6;
+    const MAX_HISTORY_CHAR_PER_MSG = 4000;
+
+    function sanitizeHistory(raw) {
+        if (!Array.isArray(raw)) return [];
+        const cleaned = [];
+        for (const item of raw) {
+            if (!item || typeof item !== 'object') continue;
+            const role = item.role;
+            const content = item.content;
+            if (role !== 'user' && role !== 'assistant') continue;
+            if (typeof content !== 'string') continue;
+            const trimmed = content.trim();
+            if (trimmed.length === 0) continue;
+            cleaned.push({
+                role,
+                content: trimmed.slice(0, MAX_HISTORY_CHAR_PER_MSG)
+            });
+        }
+        // Solo nos quedamos con los últimos N para limitar coste de tokens.
+        return cleaned.slice(-MAX_HISTORY_MESSAGES);
+    }
+
     function validateChatBody(req, res, next) {
         const { message } = req.body || {};
         if (!message || typeof message !== 'string' || message.trim().length === 0) {
@@ -208,6 +235,20 @@ module.exports = function (pool) {
         if (message.length > 4000) {
             return res.status(400).json({ error: 'message too long (max 4000 chars)' });
         }
+        // history opcional — saneamos y adjuntamos a req. Si no viene o es inválido,
+        // queda como []. Anthropic exige que el primer mensaje del array sea de
+        // role=user; si la última entrada saneada fuera 'user', la quitamos
+        // porque ya viene en el campo `message` del body actual.
+        const sanitized = sanitizeHistory(req.body?.history);
+        while (sanitized.length > 0 && sanitized[sanitized.length - 1].role === 'user') {
+            sanitized.pop();
+        }
+        // Si tras quitar trailing user el primer mensaje es assistant, lo quitamos
+        // (Anthropic exige primer mensaje user).
+        while (sanitized.length > 0 && sanitized[0].role === 'assistant') {
+            sanitized.shift();
+        }
+        req.chatHistory = sanitized;
         next();
     }
 
@@ -230,7 +271,8 @@ module.exports = function (pool) {
                 restauranteId,
                 lang: lang === 'en' ? 'en' : 'es',
                 restauranteNombre,
-                moneda
+                moneda,
+                history: req.chatHistory || []
             });
 
             // Preserve n8n contract: plain text response

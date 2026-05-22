@@ -1168,7 +1168,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
 // Runs the agent loop: ask model → execute tools it requests → loop until
 // it produces a final text response. Returns plain text (preserves n8n contract).
 
-async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€' }) {
+async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€', history = [] }) {
     if (!client) {
         throw new Error('Claude API not configured: ANTHROPIC_API_KEY missing');
     }
@@ -1192,7 +1192,18 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         }
     ];
 
-    const messages = [{ role: 'user', content: message }];
+    // 2026-05-23: memoria conversacional. `history` viene ya saneado del router
+    // (max 6 mensajes, roles user|assistant, trailing-user removido, leading-
+    // assistant removido). Lo prepondemos al mensaje actual del usuario para
+    // que Claude pueda resolver referencias del tipo "y ayer?".
+    // Si por algún motivo history viene mal formado aquí, defensa última:
+    // verificamos que sea array de objetos con role válido. Si no, lo ignoramos.
+    const safeHistory = Array.isArray(history)
+        ? history.filter(m => m && typeof m === 'object'
+            && (m.role === 'user' || m.role === 'assistant')
+            && typeof m.content === 'string' && m.content.trim().length > 0)
+        : [];
+    const messages = [...safeHistory, { role: 'user', content: message }];
 
     let usageAggregate = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
     let finalText = '';
