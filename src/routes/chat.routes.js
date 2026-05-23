@@ -239,7 +239,10 @@ module.exports = function (pool) {
     // GET /chat/health-check/status — devuelve si hay report nuevo no leído.
     // Endpoint barato (solo lectura BD), sin Claude. Frontend lo llama al
     // cargar el chat para decidir si pinta el badge "nuevo".
-    router.get('/chat/health-check/status', authMiddleware, async (req, res) => {
+    // Rate-limited con costlyApiLimiter por consistencia con CodeQL — aunque
+    // la query SQL es minúscula, el endpoint hace authorization y CodeQL
+    // bloquea cualquier handler con auth + sin rate-limit (regla js/missing-rate-limiting).
+    router.get('/chat/health-check/status', costlyApiLimiter, authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });

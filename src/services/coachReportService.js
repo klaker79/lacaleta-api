@@ -177,7 +177,7 @@ async function generateReportContent(pool, restauranteId, restauranteNombre, mon
         parsed = JSON.parse(jsonText);
     } catch (err) {
         log('error', 'Coach: JSON inválido', { restauranteId, raw: finalText.slice(0, 500) });
-        throw new Error('Coach: el modelo no devolvió JSON válido');
+        throw new Error('Coach: el modelo no devolvió JSON válido', { cause: err });
     }
 
     // Validación mínima de estructura
