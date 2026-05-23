@@ -1277,4 +1277,6 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
     return { text: finalText, usage: usageAggregate };
 }
 
-module.exports = { processChat, TOOLS, MODEL };
+// runTool exportado para reuso desde coachReportService — mismo set de tools,
+// mismo cliente Anthropic, distinto system prompt + post-procesado.
+module.exports = { processChat, TOOLS, MODEL, runTool };

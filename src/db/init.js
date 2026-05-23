@@ -734,6 +734,38 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla alerts creada/verificada');
   } catch (e) { log('warn', 'Migración alerts', { error: e.message }); }
 
+  // ========== MIGRACIÓN: coach_reports (2026-05-23) ==========
+  // Health Check semanal del Asistente IA. Genera 3 cards (crítico, oportunidad,
+  // acción) por restaurante una vez por semana. Cacheado para evitar regeneración
+  // múltiple — UNIQUE(restaurante_id, semana_iso) garantiza 1 report/semana.
+  //
+  // El report SOLO se genera cuando el cliente lo pide explícitamente desde el
+  // chat. No hay cron automático. La primera vez que se pide en la semana,
+  // se ejecuta Claude API + tools y se cachea. Pulsadas posteriores en la misma
+  // semana devuelven el cacheado.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS coach_reports (
+        id SERIAL PRIMARY KEY,
+        restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id) ON DELETE CASCADE,
+        semana_iso VARCHAR(8) NOT NULL,
+        critico_titulo TEXT,
+        critico_detalle TEXT,
+        oportunidad_titulo TEXT,
+        oportunidad_detalle TEXT,
+        accion_titulo TEXT,
+        accion_detalle TEXT,
+        raw_response JSONB,
+        generado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        leido_at TIMESTAMPTZ,
+        UNIQUE(restaurante_id, semana_iso)
+      );
+      CREATE INDEX IF NOT EXISTS idx_coach_reports_tenant_semana
+        ON coach_reports (restaurante_id, semana_iso DESC);
+    `);
+    log('info', 'Tabla coach_reports creada/verificada');
+  } catch (e) { log('warn', 'Migración coach_reports', { error: e.message }); }
+
   // ========== MIGRACIÓN: Columnas faltantes en ventas ==========
   try {
     await pool.query(`
