@@ -20,6 +20,7 @@ const { processChat } = require('../services/chatService');
 const polarService = require('../services/polarService');
 const { generarInformeMensual } = require('../services/informeMensualService');
 const { generarInformeHtml } = require('../services/informeMensualHtml');
+const coachReportService = require('../services/coachReportService');
 
 module.exports = function (pool) {
     const router = Router();
@@ -194,6 +195,70 @@ module.exports = function (pool) {
                 restauranteId, mes, error: err.message, stack: err.stack
             });
             res.status(500).json({ error: 'Error generando informe HTML' });
+        }
+    });
+
+    // ========== HEALTH CHECK COACH (2026-05-23) ==========
+    // POST /chat/health-check — Genera o devuelve el report semanal del Coach.
+    // Si ya existe report de la semana ISO actual → lo devuelve cacheado.
+    // Si no → invoca Claude con tools y persiste el report.
+    // Gating: chat_addon=true (igual que el chat normal). NO incrementa el
+    // contador de consultas — es bajo demanda, máximo 1 generación por semana.
+    router.post('/chat/health-check', costlyApiLimiter, authMiddleware, async (req, res) => {
+        const restauranteId = req.restauranteId;
+        if (!restauranteId) {
+            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
+        }
+        try {
+            const addonCheck = await pool.query(
+                'SELECT chat_addon, nombre, moneda FROM restaurantes WHERE id = $1',
+                [restauranteId]
+            );
+            const row = addonCheck.rows[0];
+            if (!row?.chat_addon) {
+                return res.status(403).json({ error: 'CHAT_NOT_ACTIVATED' });
+            }
+            const report = await coachReportService.getOrCreateWeeklyReport(
+                pool,
+                restauranteId,
+                row.nombre || '',
+                row.moneda || '€'
+            );
+            log('info', 'Health check generado/leído', {
+                restauranteId, semana: report.semana_iso
+            });
+            res.json(report);
+        } catch (err) {
+            log('error', '/chat/health-check failed', {
+                restauranteId, error: err.message
+            });
+            res.status(500).json({ error: 'Error generando health check' });
+        }
+    });
+
+    // GET /chat/health-check/status — devuelve si hay report nuevo no leído.
+    // Endpoint barato (solo lectura BD), sin Claude. Frontend lo llama al
+    // cargar el chat para decidir si pinta el badge "nuevo".
+    router.get('/chat/health-check/status', authMiddleware, async (req, res) => {
+        const restauranteId = req.restauranteId;
+        if (!restauranteId) {
+            return res.status(401).json({ error: 'No restaurante asociado al usuario' });
+        }
+        try {
+            const addonCheck = await pool.query(
+                'SELECT chat_addon FROM restaurantes WHERE id = $1',
+                [restauranteId]
+            );
+            if (!addonCheck.rows[0]?.chat_addon) {
+                return res.json({ has_new: false, addon_enabled: false });
+            }
+            const status = await coachReportService.getReportStatus(pool, restauranteId);
+            res.json({ ...status, addon_enabled: true });
+        } catch (err) {
+            log('error', '/chat/health-check/status failed', {
+                restauranteId, error: err.message
+            });
+            res.status(500).json({ error: 'Error obteniendo estado del health check' });
         }
     });
 
