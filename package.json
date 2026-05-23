@@ -17,14 +17,14 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.90.0",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@polar-sh/sdk": "^0.47.1",
     "@sentry/node": "^10.38.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2",
+    "express": "^4.22.2",
     "express-rate-limit": "^7.1.5",
     "helmet": "^8.1.0",
     "joi": "^18.0.2",
