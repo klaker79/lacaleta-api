@@ -38,8 +38,12 @@ function semanaISO(date = new Date()) {
     return `${year}-W${String(weekNumber).padStart(2, '0')}`;
 }
 
-const COACH_SYSTEM_PROMPT = `Eres el Asistente IA Coach de un restaurante usando MindLoop CostOS.
+function buildCoachSystemPrompt(moneda) {
+    const simbolo = moneda || '€';
+    return `Eres el Asistente IA Coach de un restaurante usando MindLoop CostOS.
 Tu trabajo: generar un Health Check semanal con EXACTAMENTE 3 cards (crítico, oportunidad, acción).
+
+La moneda de este restaurante es: ${simbolo}
 
 ═══════════════════════════════════════════════════════════
 📋 ESTRUCTURA OBLIGATORIA DEL REPORT
@@ -93,11 +97,17 @@ Devuelves JSON con esta forma EXACTA (sin markdown wrapping, JSON puro):
 2. SOLO 3 cards. Si no encuentras una clase (ej. cero críticos), sustituye
    por una oportunidad o acción adicional (siempre 3 totales).
 3. Cada card debe ser ACCIONABLE. "Tienes food cost 33%" no vale.
-   "Tu plato X tiene food cost 47% — sube precio 2€ o cambia ingrediente Y" sí.
-4. Cita SIEMPRE cifras de las tools (€, %, kg, unidades).
-5. JSON PURO sin code fences, sin texto extra antes o después.
-6. Lenguaje directo, sin emojis dentro del JSON (los pone el frontend).
+   "Tu plato X tiene food cost 47% — sube precio 2${simbolo} o cambia ingrediente Y" sí.
+4. MONEDA OBLIGATORIA: toda cifra monetaria DEBE llevar el símbolo "${simbolo}"
+   pegado al número, sin espacio. Ejemplos correctos: "22${simbolo}/ración",
+   "8,46${simbolo} margen", "coste botella 10${simbolo}", "precio venta 20${simbolo}".
+   INCORRECTO y prohibido: "22 /ración", "8,46 margen", "10 ,", "20 )".
+   Aplica también a rangos: "12${simbolo} 13${simbolo}" (NO "12 13").
+5. Cita SIEMPRE cifras de las tools con sus unidades (${simbolo}, %, kg, unidades).
+6. JSON PURO sin code fences, sin texto extra antes o después.
+7. Lenguaje directo, sin emojis dentro del JSON (los pone el frontend).
 `;
+}
 
 /**
  * Genera el contenido de un report usando Claude + tools del chat.
@@ -118,11 +128,13 @@ async function generateReportContent(pool, restauranteId, restauranteNombre, mon
     ];
 
     let finalText = '';
+    const systemPrompt = buildCoachSystemPrompt(moneda);
+
     for (let iter = 0; iter < MAX_AGENT_ITERATIONS; iter++) {
         const response = await client.messages.create({
             model: MODEL,
             max_tokens: MAX_TOKENS,
-            system: COACH_SYSTEM_PROMPT,
+            system: systemPrompt,
             tools: TOOLS,
             messages
         });
