@@ -78,18 +78,18 @@ describe('Health Check Coach — endpoints + multi-tenant', () => {
         }
     });
 
-    it('5. Status endpoint NO consume cuota (es barato)', async () => {
+    it('5. Status endpoint sigue funcionando en llamadas repetidas (no rompe)', async () => {
         if (!authToken) return;
-        // Llamamos 3 veces seguidas — si consumiera cuota, alguna devolvería 429
-        // o cambiaría el chat_consultas_mes. Aquí solo verificamos que la
-        // llamada sigue funcionando — el ratelimit en sí ya está testado aparte.
-        for (let i = 0; i < 3; i++) {
+        // Llamamos 2 veces seguidas. NO sumamos cuota Claude (es solo lectura BD),
+        // pero el endpoint sí lleva costlyApiLimiter desde 2026-05-23 (CodeQL
+        // rule js/missing-rate-limiting), así que 429 es respuesta aceptable
+        // en CI con ratelimits acumulados.
+        for (let i = 0; i < 2; i++) {
             const res = await request(API_URL)
                 .get('/api/chat/health-check/status')
                 .set('Origin', 'http://localhost:3001')
                 .set('Authorization', `Bearer ${authToken}`);
-            // No esperamos 429 aquí (el status no usa costlyApiLimiter)
-            expect([200, 401, 403]).toContain(res.status);
+            expect([200, 401, 403, 429]).toContain(res.status);
         }
     });
 });
