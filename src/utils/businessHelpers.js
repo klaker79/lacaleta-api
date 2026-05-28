@@ -84,9 +84,16 @@ function getBackendIngredientUnitPrice(row) {
  *          Mapa de ingredientes BASE con cuánto se gasta de cada uno por CADA porción
  *          vendida de la receta raíz.
  */
-async function expandRecipeToBase(receta, client, restauranteId, visited = new Set()) {
+async function expandRecipeToBase(receta, client, restauranteId, opts = {}, visited = new Set()) {
     if (!receta || visited.has(receta.id)) return [];
     visited.add(receta.id);
+    // opts.aplicarRendimiento: cuando TRUE, cada línea devuelve la cantidad CRUDA
+    //   equivalente (cantidad / rendimiento) en vez de la cantidad servida, para
+    //   que el descuento de stock refleje la merma real. Prioridad del rendimiento:
+    //   línea del escandallo (ing.rendimiento) > ingrediente base
+    //   (opts.rendimientoIngredientesMap) > 100%. Misma prioridad que el food cost.
+    // Por defecto FALSE → comportamiento histórico (cantidad servida, sin merma).
+    const { aplicarRendimiento = false, rendimientoIngredientesMap = new Map() } = opts;
     const porciones = Math.max(1, parseInt(receta.porciones) || 1);
     const items = receta.ingredientes || [];
     const acc = new Map();
@@ -105,16 +112,59 @@ async function expandRecipeToBase(receta, client, restauranteId, visited = new S
                 // silenciosamente para no romper la venta. Caller puede loguear si lo necesita.
                 continue;
             }
-            const subExpanded = await expandRecipeToBase(subRes.rows[0], client, restauranteId, new Set(visited));
+            const subExpanded = await expandRecipeToBase(subRes.rows[0], client, restauranteId, opts, new Set(visited));
             const factor = cantidad / porciones;
             for (const it of subExpanded) {
                 acc.set(it.ingredienteId, (acc.get(it.ingredienteId) || 0) + it.cantidadPorPorcion * factor);
             }
         } else {
-            acc.set(ingId, (acc.get(ingId) || 0) + cantidad / porciones);
+            let cantidadPorPorcion = cantidad / porciones;
+            if (aplicarRendimiento) {
+                // Prioridad: rendimiento de la línea del escandallo > del ingrediente base > 100.
+                let rend = parseFloat(ing.rendimiento);
+                if (!rend || rend <= 0) {
+                    rend = rendimientoIngredientesMap.get(ingId) || 100;
+                }
+                const factorRend = rend / 100;
+                if (factorRend > 0) cantidadPorPorcion = cantidadPorPorcion / factorRend;
+            }
+            acc.set(ingId, (acc.get(ingId) || 0) + cantidadPorPorcion);
         }
     }
     return Array.from(acc.entries()).map(([ingredienteId, cantidadPorPorcion]) => ({ ingredienteId, cantidadPorPorcion }));
+}
+
+/**
+ * Carga la config de descuento-con-merma de un tenant para pasar a
+ * expandRecipeToBase. Devuelve { aplicarRendimiento, rendimientoIngredientesMap }.
+ *
+ * - aplicarRendimiento: lee restaurantes.apply_yield_to_stock (default FALSE).
+ * - rendimientoIngredientesMap: solo se carga si el flag está ON (1 query), para
+ *   el fallback "ingrediente base" cuando la línea del escandallo no fija %.
+ *
+ * @param {object} client - pg client (dentro de la transacción de la venta)
+ * @param {number} restauranteId
+ * @returns {Promise<{aplicarRendimiento: boolean, rendimientoIngredientesMap: Map}>}
+ */
+async function loadYieldConfig(client, restauranteId) {
+    const flagRes = await client.query(
+        'SELECT apply_yield_to_stock FROM restaurantes WHERE id = $1',
+        [restauranteId]
+    );
+    const aplicarRendimiento = flagRes.rows[0]?.apply_yield_to_stock === true;
+    let rendimientoIngredientesMap = new Map();
+    if (aplicarRendimiento) {
+        const rendRes = await client.query(
+            'SELECT id, rendimiento FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+            [restauranteId]
+        );
+        rendimientoIngredientesMap = new Map(
+            rendRes.rows
+                .filter(r => r.rendimiento != null && parseFloat(r.rendimiento) > 0)
+                .map(r => [r.id, parseFloat(r.rendimiento)])
+        );
+    }
+    return { aplicarRendimiento, rendimientoIngredientesMap };
 }
 
 /**
@@ -326,6 +376,7 @@ module.exports = {
     calcularPrecioUnitario,
     getBackendIngredientUnitPrice,
     expandRecipeToBase,
+    loadYieldConfig,
     getRecipeCostBase,
     upsertCompraDiaria,
     recalcularPrecioPonderado,
