@@ -783,6 +783,20 @@ async function initializeDatabase(pool) {
     log('info', 'Migración restaurantes.moneda completada');
   } catch (e) { log('warn', 'Migración moneda', { error: e.message }); }
 
+  // ========== MIGRACIÓN: apply_yield_to_stock (descuento de stock con merma) ==========
+  // Cuando TRUE, POST /sales descuenta del stock la cantidad CRUDA equivalente
+  // (cantidad_escandallo / rendimiento) en lugar de solo la cantidad servida.
+  // Así el stock refleja la merma real (ej. pulpo 60% aprovechable → descuenta
+  // cantidad/0.6) y deja de inflarse. El food cost NO se ve afectado (ya aplica
+  // rendimiento por su cuenta). DEFAULT FALSE: ningún tenant existente cambia de
+  // comportamiento hasta que se active explícitamente (decisión por tenant).
+  try {
+    await pool.query(`
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS apply_yield_to_stock BOOLEAN DEFAULT FALSE;
+    `);
+    log('info', 'Migración restaurantes.apply_yield_to_stock completada');
+  } catch (e) { log('warn', 'Migración apply_yield_to_stock', { error: e.message }); }
+
   // ========== MIGRACIÓN: audit_log (B4) ==========
   // Trazabilidad de cambios sensibles. Se llena via utils/auditLog.js en
   // endpoints de UPDATE/DELETE de recetas, ingredientes, recetas_variantes.
