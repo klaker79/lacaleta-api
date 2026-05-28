@@ -171,8 +171,11 @@ module.exports = function (pool) {
                 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
                 LEFT JOIN ingredientes i
                     ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
-                LEFT JOIN ingredientes_proveedores ip_fb
-                    ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
+                LEFT JOIN LATERAL (
+                    SELECT proveedor_id FROM ingredientes_proveedores
+                    WHERE ingrediente_id = i.id AND es_proveedor_principal = TRUE
+                    LIMIT 1
+                ) ip_fb ON TRUE
                 LEFT JOIN proveedores pr_fb
                     ON pr_fb.id = ip_fb.proveedor_id AND p.proveedor_id IS NULL
                 WHERE ${where}
@@ -208,8 +211,11 @@ module.exports = function (pool) {
                     CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
                     LEFT JOIN ingredientes i
                         ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
-                    LEFT JOIN ingredientes_proveedores ip_fb
-                        ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT proveedor_id FROM ingredientes_proveedores
+                        WHERE ingrediente_id = i.id AND es_proveedor_principal = TRUE
+                        LIMIT 1
+                    ) ip_fb ON TRUE
                     WHERE ${aggWhere} AND LOWER(i.nombre) LIKE $${aggParams.length}
                 `;
             } else if (provId) {
@@ -230,8 +236,11 @@ module.exports = function (pool) {
                     CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.ingredientes, '[]'::jsonb)) AS ing
                     LEFT JOIN ingredientes i
                         ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
-                    LEFT JOIN ingredientes_proveedores ip_fb
-                        ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT proveedor_id FROM ingredientes_proveedores
+                        WHERE ingrediente_id = i.id AND es_proveedor_principal = TRUE
+                        LIMIT 1
+                    ) ip_fb ON TRUE
                     WHERE ${aggWhere}
                 `;
             } else {
