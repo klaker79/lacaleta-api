@@ -783,6 +783,31 @@ async function initializeDatabase(pool) {
     log('info', 'Migración restaurantes.moneda completada');
   } catch (e) { log('warn', 'Migración moneda', { error: e.message }); }
 
+  // ========== MIGRACIÓN: apply_yield_to_stock (descuento de stock con merma) ==========
+  // Cuando TRUE, POST /sales descuenta del stock la cantidad CRUDA equivalente
+  // (cantidad_escandallo / rendimiento) en lugar de solo la cantidad servida.
+  // Así el stock refleja la merma real (ej. pulpo 60% aprovechable → descuenta
+  // cantidad/0.6) y deja de inflarse. El food cost NO se ve afectado (ya aplica
+  // rendimiento por su cuenta).
+  //
+  // Estrategia de rollout (decidida con Iker 2026-05-29):
+  //  - Paso 1: ADD COLUMN con DEFAULT FALSE → al crear la columna, TODOS los tenants
+  //    EXISTENTES se materializan en FALSE (no cambian de comportamiento; La Nave 5
+  //    se enciende a mano con un UPDATE id=3).
+  //  - Paso 2: SET DEFAULT TRUE → los tenants NUEVOS (futuras suscripciones) nacen en
+  //    TRUE. Es inocuo hasta que configuren rendimientos < 100 (las líneas nacen en 100).
+  //  Los dos pasos son idempotentes: en re-arranques, ADD COLUMN IF NOT EXISTS es no-op
+  //  y SET DEFAULT TRUE no toca filas existentes (solo el default de futuros INSERT).
+  try {
+    await pool.query(`
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS apply_yield_to_stock BOOLEAN DEFAULT FALSE;
+    `);
+    await pool.query(`
+      ALTER TABLE restaurantes ALTER COLUMN apply_yield_to_stock SET DEFAULT TRUE;
+    `);
+    log('info', 'Migración restaurantes.apply_yield_to_stock completada (nuevos=TRUE, existentes=FALSE)');
+  } catch (e) { log('warn', 'Migración apply_yield_to_stock', { error: e.message }); }
+
   // ========== MIGRACIÓN: audit_log (B4) ==========
   // Trazabilidad de cambios sensibles. Se llena via utils/auditLog.js en
   // endpoints de UPDATE/DELETE de recetas, ingredientes, recetas_variantes.

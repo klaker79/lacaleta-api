@@ -7,7 +7,7 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateCantidad, validateId } = require('../utils/validators');
-const { expandRecipeToBase, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
+const { expandRecipeToBase, loadYieldConfig, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
 const { logChange } = require('../utils/auditLog');
 
 /**
@@ -193,7 +193,11 @@ module.exports = function (pool) {
 
             // 🧪 FIX subrecetas: expandir recursivamente a ingredientes BASE antes de descontar
             // (antes: UPDATE con ingredienteId>100000 no afectaba ninguna fila → fuga de stock silenciosa)
-            const baseIngs = await expandRecipeToBase(receta, client, req.restauranteId);
+            // 🆕 2026-05-28: si el tenant tiene apply_yield_to_stock, expandRecipeToBase
+            //    devuelve la cantidad CRUDA equivalente (cantidad / rendimiento) para que
+            //    el stock refleje la merma real. Default OFF → cantidad servida (histórico).
+            const yieldCfg = await loadYieldConfig(client, req.restauranteId);
+            const baseIngs = await expandRecipeToBase(receta, client, req.restauranteId, yieldCfg);
             const stockDeductions = []; // ⚡ FIX BUG-02: Rastrear descuentos reales
             for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngs) {
                 if (!ingId) continue;
@@ -667,6 +671,9 @@ REGLAS:
             );
             const recetasMap = new Map(todasRecetasResult.rows.map(r => [r.id, r]));
 
+            // 🆕 2026-05-28: config descuento-con-merma cargada UNA vez para todo el bulk.
+            const yieldCfgBulk = await loadYieldConfig(client, req.restauranteId);
+
             // Acumulador para resumen diario
             const resumenDiario = new Map(); // key: "recetaId-fecha", value: { cantidad, ingresos, coste }
 
@@ -758,7 +765,7 @@ REGLAS:
 
                 // 🧪 FIX subrecetas: expandir a ingredientes BASE antes de descontar stock
                 const bulkDeductions = [];
-                const baseIngsBulk = await expandRecipeToBase(receta, client, req.restauranteId);
+                const baseIngsBulk = await expandRecipeToBase(receta, client, req.restauranteId, yieldCfgBulk);
                 for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngsBulk) {
                     const cantidadADescontar = cantidadPorPorcion * cantidad * factorAplicado;
                     if (!(cantidadADescontar > 0) || !ingId) continue;
