@@ -52,12 +52,17 @@ module.exports = function (pool) {
                 ORDER BY p.fecha, i.nombre
             `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
 
-            // Ventas diarias agrupadas por día y receta
+            // Ventas diarias agrupadas por día y receta.
+            // LEFT JOIN + ventas_diarias_resumen como fallback de coste para recetas
+            // soft-eliminadas: las ventas históricas seguían reales (cobradas, en caja)
+            // pero el JOIN anterior las ocultaba → Diario mostraba menos ingresos que
+            // el Dashboard. Snapshot resuelto en businessHelpers (precio_medio_compra
+            // congelado el día de la venta).
             const ventasDiarias = await pool.query(`
                 SELECT
                     DATE(v.fecha) as fecha,
-                    r.id as receta_id,
-                    r.nombre as receta,
+                    v.receta_id,
+                    COALESCE(r.nombre, 'Receta eliminada #' || v.receta_id::text) as receta,
                     r.ingredientes as receta_ingredientes,
                     r.porciones,
                     SUM(v.cantidad) as cantidad_vendida,
@@ -65,12 +70,30 @@ module.exports = function (pool) {
                     SUM(v.total) as total_ingresos,
                     SUM(v.cantidad * COALESCE(v.factor_variante, 1)) as cantidad_ponderada
                 FROM ventas v
-                JOIN recetas r ON v.receta_id = r.id
-                WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL AND r.deleted_at IS NULL
+                LEFT JOIN recetas r ON v.receta_id = r.id AND r.deleted_at IS NULL
+                WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL
                   AND v.fecha >= $2 AND v.fecha < $3
-                GROUP BY DATE(v.fecha), r.id, r.nombre, r.ingredientes, r.porciones
-                ORDER BY DATE(v.fecha), r.nombre
+                GROUP BY DATE(v.fecha), v.receta_id, r.nombre, r.ingredientes, r.porciones
+                ORDER BY DATE(v.fecha), receta
             `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
+
+            // Snapshot histórico de coste TOTAL agregado (para fallback de recetas
+            // eliminadas). coste_ingredientes ya incluye factor_variante aplicado
+            // en sales.routes.js (línea 265), así que se usa DIRECTO sin volver a
+            // multiplicar por cantidadPonderada — eso sería doble factor_variante.
+            // Claves: `${receta_id}|${YYYY-MM-DD}` → { costeTotal }.
+            const snapshotsResult = await pool.query(`
+                SELECT receta_id, fecha::text as fecha, coste_ingredientes
+                FROM ventas_diarias_resumen
+                WHERE restaurante_id = $1
+                  AND fecha >= $2 AND fecha < $3
+            `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
+            const snapshotMap = new Map();
+            snapshotsResult.rows.forEach(s => {
+                snapshotMap.set(`${s.receta_id}|${s.fecha}`, {
+                    costeTotal: parseFloat(s.coste_ingredientes) || 0
+                });
+            });
 
             // Precios de ingredientes (prioridad canónica: ver businessHelpers.getBackendIngredientUnitPrice)
             const ingredientesPrecios = await pool.query(
@@ -168,10 +191,21 @@ module.exports = function (pool) {
                 const cantidadVendida = parseFloat(row.cantidad_vendida) || 0;
                 const totalIngresos = parseFloat(row.total_ingresos);
 
-                // Coste ponderado por factor_variante (botella vs copa, etc.)
-                const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones, row.receta_id);
-                const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
-                const costeTotal = costePorUnidad * cantidadPonderada;
+                // Coste TOTAL del bucket (día+receta).
+                // - Receta viva: cálculo en vivo, multiplicando por factor_variante
+                //   vía cantidadPonderada (botella vs copa).
+                // - Receta soft-eliminada: snapshot histórico directo de
+                //   ventas_diarias_resumen.coste_ingredientes (ya incluye
+                //   factor_variante aplicado en la inserción).
+                let costeTotal;
+                if (row.receta_ingredientes) {
+                    const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones, row.receta_id);
+                    const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
+                    costeTotal = costePorUnidad * cantidadPonderada;
+                } else {
+                    const snap = snapshotMap.get(`${row.receta_id}|${fechaStr}`);
+                    costeTotal = snap ? snap.costeTotal : 0;
+                }
                 const beneficio = totalIngresos - costeTotal;
 
                 if (!recetasData[row.receta]) {
