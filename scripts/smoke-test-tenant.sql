@@ -46,6 +46,9 @@ ingredientes_huerfanos_pivot AS (
 -- Check 2: stock_actual altísimo combinado con cantidad_por_formato > 1.
 -- Síntoma clásico de doble-multiplicación al recepcionar pedidos
 -- (incidente 22-abril). En cuentas nuevas cpf=1 siempre.
+-- Solo dispara si el ingrediente está en alguna receta (si no se cocina,
+-- no afecta food cost; productos fungibles como guantes/toallitas/mantelillos
+-- pueden tener stock alto + cpf grande legítimamente).
 stock_posible_doble_mult AS (
     SELECT
         'STOCK_POSIBLE_DOBLE_MULTIPLICACION' AS check_name,
@@ -60,6 +63,17 @@ stock_posible_doble_mult AS (
       AND i.deleted_at IS NULL
       AND i.stock_actual > 1000
       AND COALESCE(i.cantidad_por_formato, 1) > 1
+      AND EXISTS (
+          SELECT 1 FROM recetas r
+          CROSS JOIN LATERAL jsonb_array_elements(
+              CASE WHEN jsonb_typeof(r.ingredientes) = 'array'
+                   THEN r.ingredientes ELSE '[]'::jsonb END
+          ) AS elem_chk
+          WHERE r.restaurante_id = :rest_id
+            AND r.deleted_at IS NULL
+            AND (elem_chk->>'ingredienteId') ~ '^[0-9]+$'
+            AND (elem_chk->>'ingredienteId')::int = i.id
+      )
 ),
 
 -- Check 3: stock_actual negativo. Nunca debería existir (GREATEST(0,...) en
