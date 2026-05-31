@@ -486,5 +486,200 @@ module.exports = function (pool, config = {}) {
         }
     });
 
+    // ========== SMOKE TEST TENANT ==========
+    // Réplica del SQL scripts/smoke-test-tenant.sql como endpoint:
+    // tras alta de un tenant (o periódicamente), llamar a este endpoint y
+    // verificar que `ok: true`. Si alguno de los 8 checks tiene
+    // items_problematicos > 0, la cuenta NO está coherente.
+    //
+    // Severity:
+    //   high   → bug duro (datos huérfanos, stock corrupto, joins que duplican).
+    //   medium → datos que rompen UX (nombres duplicados, recetas sin escandallo).
+    //   low    → desviaciones del default (cpf != 1) — puede ser legítimo.
+    const SMOKE_TEST_SEVERITY = {
+        INGREDIENTES_HUERFANOS_PIVOT: 'high',
+        STOCK_POSIBLE_DOBLE_MULTIPLICACION: 'high',
+        STOCK_NEGATIVO: 'high',
+        INGREDIENTE_CON_2_PROVEEDORES_PRINCIPALES: 'high',
+        RECETAS_CON_INGS_INVALIDOS: 'high',
+        INGREDIENTES_NOMBRE_DUPLICADO: 'medium',
+        RECETAS_SIN_ESCANDALLO: 'medium',
+        INGREDIENTES_CPF_DISTINTO_DE_1: 'low',
+    };
+
+    router.get('/superadmin/smoke-test/:restauranteId', async (req, res) => {
+        try {
+            const restauranteIdVal = validateNumber(req.params.restauranteId);
+            if (!restauranteIdVal.valid) {
+                return res.status(400).json({ error: 'restauranteId inválido' });
+            }
+            const restauranteId = restauranteIdVal.value;
+
+            // Verificar que el tenant existe (no filtrar por deleted_at — soft-deleted
+            // también es información útil para el smoke test).
+            const tenantCheck = await pool.query(
+                'SELECT id, nombre FROM restaurantes WHERE id = $1',
+                [restauranteId]
+            );
+            if (tenantCheck.rows.length === 0) {
+                return res.status(404).json({ error: 'Tenant no encontrado' });
+            }
+
+            const result = await pool.query(`
+                WITH
+                ingredientes_huerfanos_pivot AS (
+                    SELECT
+                        'INGREDIENTES_HUERFANOS_PIVOT' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(i.id::text || ':' || i.nombre))[1:10] AS detalle
+                    FROM ingredientes i
+                    WHERE i.restaurante_id = $1
+                      AND i.deleted_at IS NULL
+                      AND i.proveedor_id IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM ingredientes_proveedores ip WHERE ip.ingrediente_id = i.id
+                      )
+                ),
+                stock_posible_doble_mult AS (
+                    SELECT
+                        'STOCK_POSIBLE_DOBLE_MULTIPLICACION' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(
+                            i.id::text || ':' || i.nombre
+                            || ' (stock=' || i.stock_actual::text
+                            || ', cpf=' || i.cantidad_por_formato::text || ')'
+                        ))[1:10] AS detalle
+                    FROM ingredientes i
+                    WHERE i.restaurante_id = $1
+                      AND i.deleted_at IS NULL
+                      AND i.stock_actual > 1000
+                      AND COALESCE(i.cantidad_por_formato, 1) > 1
+                ),
+                stock_negativo AS (
+                    SELECT
+                        'STOCK_NEGATIVO' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(i.id::text || ':' || i.nombre || ' (' || i.stock_actual::text || ')'))[1:10] AS detalle
+                    FROM ingredientes i
+                    WHERE i.restaurante_id = $1
+                      AND i.deleted_at IS NULL
+                      AND i.stock_actual < 0
+                ),
+                ingredientes_duplicados AS (
+                    SELECT
+                        'INGREDIENTES_NOMBRE_DUPLICADO' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(clave || ' -> ids: ' || ids_text))[1:10] AS detalle
+                    FROM (
+                        SELECT
+                            LOWER(TRIM(nombre)) AS clave,
+                            STRING_AGG(id::text, ', ' ORDER BY id) AS ids_text
+                        FROM ingredientes
+                        WHERE restaurante_id = $1 AND deleted_at IS NULL
+                        GROUP BY LOWER(TRIM(nombre))
+                        HAVING COUNT(*) > 1
+                    ) dup
+                ),
+                recetas_con_ings_invalidos AS (
+                    SELECT
+                        'RECETAS_CON_INGS_INVALIDOS' AS check_name,
+                        COUNT(DISTINCT r.id)::int AS items_problematicos,
+                        (ARRAY_AGG(DISTINCT r.id::text || ':' || r.nombre))[1:10] AS detalle
+                    FROM recetas r
+                    CROSS JOIN LATERAL jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(r.ingredientes) = 'array' THEN r.ingredientes ELSE '[]'::jsonb END
+                    ) AS elem
+                    WHERE r.restaurante_id = $1
+                      AND r.deleted_at IS NULL
+                      AND (elem->>'ingredienteId') ~ '^[0-9]+$'
+                      AND (elem->>'ingredienteId')::int < 100000
+                      AND NOT EXISTS (
+                          SELECT 1 FROM ingredientes i
+                          WHERE i.id = (elem->>'ingredienteId')::int
+                            AND i.restaurante_id = $1
+                            AND i.deleted_at IS NULL
+                      )
+                ),
+                recetas_sin_escandallo AS (
+                    SELECT
+                        'RECETAS_SIN_ESCANDALLO' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(r.id::text || ':' || r.nombre))[1:10] AS detalle
+                    FROM recetas r
+                    WHERE r.restaurante_id = $1
+                      AND r.deleted_at IS NULL
+                      AND LOWER(COALESCE(r.categoria, '')) NOT IN ('base', 'bebidas', 'bebida')
+                      AND (r.ingredientes IS NULL
+                           OR jsonb_typeof(r.ingredientes) != 'array'
+                           OR jsonb_array_length(r.ingredientes) = 0)
+                ),
+                ingredientes_cpf_no_uno AS (
+                    SELECT
+                        'INGREDIENTES_CPF_DISTINTO_DE_1' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(i.id::text || ':' || i.nombre || ' (cpf=' || i.cantidad_por_formato::text || ')'))[1:10] AS detalle
+                    FROM ingredientes i
+                    WHERE i.restaurante_id = $1
+                      AND i.deleted_at IS NULL
+                      AND i.cantidad_por_formato IS NOT NULL
+                      AND i.cantidad_por_formato != 1
+                ),
+                proveedor_principal_duplicado AS (
+                    SELECT
+                        'INGREDIENTE_CON_2_PROVEEDORES_PRINCIPALES' AS check_name,
+                        COUNT(*)::int AS items_problematicos,
+                        (ARRAY_AGG(i.nombre || ' (ing_id=' || ing_id::text || ', ' || cnt::text || ' principales)'))[1:10] AS detalle
+                    FROM (
+                        SELECT
+                            ip.ingrediente_id AS ing_id,
+                            COUNT(*) AS cnt
+                        FROM ingredientes_proveedores ip
+                        JOIN ingredientes i_inner ON i_inner.id = ip.ingrediente_id
+                        WHERE i_inner.restaurante_id = $1
+                          AND i_inner.deleted_at IS NULL
+                          AND ip.es_proveedor_principal = TRUE
+                        GROUP BY ip.ingrediente_id
+                        HAVING COUNT(*) > 1
+                    ) sub
+                    JOIN ingredientes i ON i.id = sub.ing_id
+                )
+                SELECT * FROM ingredientes_huerfanos_pivot
+                UNION ALL SELECT * FROM stock_posible_doble_mult
+                UNION ALL SELECT * FROM stock_negativo
+                UNION ALL SELECT * FROM ingredientes_duplicados
+                UNION ALL SELECT * FROM recetas_con_ings_invalidos
+                UNION ALL SELECT * FROM recetas_sin_escandallo
+                UNION ALL SELECT * FROM ingredientes_cpf_no_uno
+                UNION ALL SELECT * FROM proveedor_principal_duplicado
+            `, [restauranteId]);
+
+            const checks = result.rows.map(r => ({
+                check_name: r.check_name,
+                items_problematicos: r.items_problematicos,
+                severity: SMOKE_TEST_SEVERITY[r.check_name] || 'medium',
+                detalle: r.detalle || [],
+            }));
+
+            const highIssues = checks.filter(c => c.severity === 'high' && c.items_problematicos > 0);
+            const mediumIssues = checks.filter(c => c.severity === 'medium' && c.items_problematicos > 0);
+            const lowIssues = checks.filter(c => c.severity === 'low' && c.items_problematicos > 0);
+
+            res.json({
+                restauranteId,
+                restauranteNombre: tenantCheck.rows[0].nombre,
+                ok: highIssues.length === 0 && mediumIssues.length === 0,
+                summary: {
+                    high: highIssues.length,
+                    medium: mediumIssues.length,
+                    low: lowIssues.length,
+                },
+                checks,
+            });
+        } catch (err) {
+            log('error', 'Error en superadmin smoke-test', { error: err.message });
+            res.status(500).json({ error: 'Error ejecutando smoke test' });
+        }
+    });
+
     return router;
 };
