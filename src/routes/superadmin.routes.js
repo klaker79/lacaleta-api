@@ -541,6 +541,11 @@ module.exports = function (pool, config = {}) {
                       )
                 ),
                 stock_posible_doble_mult AS (
+                    -- Solo dispara si el ingrediente está en alguna receta.
+                    -- Razón: si nadie lo cocina, no afecta food cost ni invariantes
+                    -- críticas. Productos fungibles (guantes, toallitas, mantelillos)
+                    -- pueden tener stock alto + cpf grande de forma legítima sin que
+                    -- sea bug — solo se inventarían, no descuentan en ventas.
                     SELECT
                         'STOCK_POSIBLE_DOBLE_MULTIPLICACION' AS check_name,
                         COUNT(*)::int AS items_problematicos,
@@ -554,6 +559,17 @@ module.exports = function (pool, config = {}) {
                       AND i.deleted_at IS NULL
                       AND i.stock_actual > 1000
                       AND COALESCE(i.cantidad_por_formato, 1) > 1
+                      AND EXISTS (
+                          SELECT 1 FROM recetas r
+                          CROSS JOIN LATERAL jsonb_array_elements(
+                              CASE WHEN jsonb_typeof(r.ingredientes) = 'array'
+                                   THEN r.ingredientes ELSE '[]'::jsonb END
+                          ) AS elem_chk
+                          WHERE r.restaurante_id = $1
+                            AND r.deleted_at IS NULL
+                            AND (elem_chk->>'ingredienteId') ~ '^[0-9]+$'
+                            AND (elem_chk->>'ingredienteId')::int = i.id
+                      )
                 ),
                 stock_negativo AS (
                     SELECT
