@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { authMiddleware, requireSuperAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { validateNumber, sanitizeString } = require('../utils/validators');
+const { validateNumber, validateId, sanitizeString } = require('../utils/validators');
 const APP_URL = process.env.APP_URL || 'https://app.mindloop.cloud';
 const PLAN_MAX_USERS = { starter: 2, profesional: 5, premium: 999, trial: 5 };
 
@@ -509,7 +509,7 @@ module.exports = function (pool, config = {}) {
 
     router.get('/superadmin/smoke-test/:restauranteId', async (req, res) => {
         try {
-            const restauranteIdVal = validateNumber(req.params.restauranteId);
+            const restauranteIdVal = validateId(req.params.restauranteId);
             if (!restauranteIdVal.valid) {
                 return res.status(400).json({ error: 'restauranteId inválido' });
             }
