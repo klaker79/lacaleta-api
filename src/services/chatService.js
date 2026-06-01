@@ -75,9 +75,24 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
 - diagnostico_ingrediente(nombre_o_id, dias) → USAR cuando el usuario pregunte
   "qué pasa con X", "por qué tengo tanto/poco X", "analiza el ingrediente X",
-  "X parece raro". Devuelve stock, compras del periodo, recetas que lo usan,
-  ventas teóricas y CUADRE (kg comprados vs kg consumidos vs exceso).
-  Acepta nombre parcial (case-insensitive). Default dias=60.
+  "X parece raro", "por qué el sistema me sugiere precio X". Devuelve stock,
+  compras del periodo, recetas que lo usan, ventas teóricas, CUADRE
+  (kg comprados vs kg consumidos vs exceso), HISTORIAL detallado de las
+  últimas 10 compras CON desviación vs precio configurado y outliers
+  marcados, y AUTOLLENADO_APP_NUEVO_PEDIDO (lo que la app sugerirá al
+  abrir Nuevo Pedido para este ingrediente — usa "Modelo B": última
+  compra × cpf). Acepta nombre parcial (case-insensitive). Default dias=60.
+
+  CLAVE PARA EL DIAGNÓSTICO DE PRECIOS RAROS:
+  - Si el usuario pregunta "por qué me sale precio X", mira PRIMERO
+    autollenado_app_nuevo_pedido.valor_estimado — esa es la cifra que ve
+    en el modal. Su FUENTE explica de qué pedido sale.
+  - Si autollenado_app_nuevo_pedido.coincide_con_configurado=false, hay
+    desfase entre el precio histórico y el de la ficha → revisa
+    outliers_detectados para identificar el pedido culpable.
+  - NO inventes "error en precio configurado" si no hay evidencia. La
+    causa típica es un pedido con cantidad mal capturada (p.ej. 75l en
+    vez de 30l por barril) que distorsiona precio_unitario.
 - diagnostico_receta(nombre_o_id, dias) → USAR para "analiza la receta X",
   "qué tal va X plato", "food cost de X plato", "ventas de X".
   Devuelve escandallo desglosado, food cost, ventas del periodo, y kg
@@ -996,6 +1011,57 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const kgComprados = parseFloat(compras.kg_total) || 0;
             const excesoKg = Math.round((kgComprados - kgConsumidosTeoricosTotal) * 100) / 100;
 
+            // Historial detallado de últimas 10 compras (por pedido, no agregado).
+            // Necesario para que el chat pueda diagnosticar outliers como
+            // "el pedido #654 registró 75l a 1,48€/l = 110,97€ → autollenado próximo
+            // = 1,48 × 30 = 44,40€/barril que NO refleja el precio real del producto".
+            // Sin esta granularidad el LLM no puede conectar la cifra autollenada
+            // con el pedido concreto que la genera.
+            const cpfVal = cpf && cpf > 0 ? parseFloat(cpf) : 1;
+            const precioConfig = parseFloat(ingrediente.precio) || 0;
+            const historial = (await pool.query(`
+                SELECT id, fecha::text AS fecha,
+                       cantidad_comprada::numeric(12,4) AS cantidad_comprada,
+                       precio_unitario::numeric(12,4) AS precio_unitario,
+                       total_compra::numeric(12,2) AS total_compra,
+                       pedido_id
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1 AND ingrediente_id = $2
+                ORDER BY fecha DESC, id DESC
+                LIMIT 10
+            `, [restauranteId, ingrediente.id])).rows;
+
+            const historialDetallado = historial.map(h => {
+                const pu = parseFloat(h.precio_unitario) || 0;
+                const cant = parseFloat(h.cantidad_comprada) || 0;
+                const total = parseFloat(h.total_compra) || 0;
+                const precioPorFormato = Math.round(pu * cpfVal * 100) / 100;
+                const desviacionVsConfigPct = precioConfig > 0
+                    ? Math.round(((precioPorFormato - precioConfig) / precioConfig) * 100)
+                    : null;
+                return {
+                    pedido_id: h.pedido_id,
+                    fecha: h.fecha,
+                    cantidad_comprada: cant,
+                    precio_unitario: pu,
+                    total_compra: total,
+                    precio_por_formato_calculado: precioPorFormato,
+                    desviacion_vs_precio_configurado_pct: desviacionVsConfigPct,
+                    es_outlier: desviacionVsConfigPct !== null && Math.abs(desviacionVsConfigPct) > 30,
+                    nota: desviacionVsConfigPct !== null && Math.abs(desviacionVsConfigPct) > 30
+                        ? `Posible error de captura: cantidad=${cant}, precio=${pu}/u → ${precioPorFormato}€/${ingrediente.formato_compra || 'formato'} (${desviacionVsConfigPct > 0 ? '+' : ''}${desviacionVsConfigPct}% vs configurado ${precioConfig}€)`
+                        : null
+                };
+            });
+
+            // Autollenado estimado: lo que la app sugiere en "Nuevo Pedido"
+            // = última compra (precio_unitario × cpf). "Modelo B" del frontend.
+            const ultimaCompra = historialDetallado[0];
+            const autollenadoEstimado = ultimaCompra
+                ? ultimaCompra.precio_por_formato_calculado
+                : precioConfig;
+            const outliers = historialDetallado.filter(h => h.es_outlier);
+
             return {
                 ingrediente: {
                     id: ingrediente.id,
@@ -1006,8 +1072,18 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     stock_actual: parseFloat(ingrediente.stock_actual) || 0,
                     stock_minimo: parseFloat(ingrediente.stock_minimo) || 0,
                     rendimiento: ingrediente.rendimiento,
+                    precio_configurado: precioConfig,
                     precio_unitario_real: Math.round(precioUnitarioReal * 10000) / 10000,
                     valor_stock: Math.round(valorStock * 100) / 100
+                },
+                autollenado_app_nuevo_pedido: {
+                    valor_estimado: autollenadoEstimado,
+                    fuente: ultimaCompra
+                        ? `Última compra registrada (pedido #${ultimaCompra.pedido_id} del ${ultimaCompra.fecha}): precio_unitario ${ultimaCompra.precio_unitario}/u × cpf ${cpfVal} = ${autollenadoEstimado}€/${ingrediente.formato_compra || 'formato'}`
+                        : 'Sin compras históricas — usa precio configurado',
+                    coincide_con_configurado: precioConfig > 0
+                        ? Math.abs(autollenadoEstimado - precioConfig) / precioConfig < 0.1
+                        : null
                 },
                 compras_periodo: {
                     dias,
@@ -1015,6 +1091,8 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     eur_total: parseFloat(compras.eur_total) || 0,
                     num_movimientos: parseInt(compras.num_movimientos) || 0
                 },
+                historial_compras: historialDetallado,
+                outliers_detectados: outliers,
                 recetas_que_lo_usan: recetasConVentas,
                 cuadre: {
                     kg_comprados: kgComprados,
