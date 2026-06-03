@@ -5,6 +5,7 @@
 
 const SupplierRepository = require('../../../infrastructure/repositories/SupplierRepository');
 const pool = require('../../../infrastructure/database/connection');
+const onboardingService = require('../../../services/onboardingService');
 
 class SupplierController {
     /**
@@ -63,6 +64,8 @@ class SupplierController {
             const repo = new SupplierRepository(pool);
 
             const supplier = await repo.create(req.body, restaurantId);
+
+            onboardingService.markStep(pool, restaurantId, 'proveedores');
 
             res.status(201).json({
                 success: true,

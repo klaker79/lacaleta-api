@@ -7,6 +7,7 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { validatePrecio, validateCantidad, sanitizeString, validateRequired, validateId } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
+const onboardingService = require('../services/onboardingService');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -181,6 +182,7 @@ module.exports = function (pool) {
                 'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato, rendimiento) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
                 [nombreCheck.value, finalProveedorId, finalPrecio, sanitizeString(unidad, 20) || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
             );
+            onboardingService.markStep(pool, req.restauranteId, 'ingredientes');
             res.status(201).json(result.rows[0]);
         } catch (err) {
             log('error', 'Error creando ingrediente', { error: err.message });

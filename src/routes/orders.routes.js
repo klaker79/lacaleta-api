@@ -15,6 +15,7 @@ const { log } = require('../utils/logger');
 const { logChange } = require('../utils/auditLog');
 const { upsertCompraDiaria, recalcularPrecioPonderado } = require('../utils/businessHelpers');
 const { validateDate, validateNumber, validateId } = require('../utils/validators');
+const onboardingService = require('../services/onboardingService');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -174,6 +175,7 @@ module.exports = function (pool) {
             }
 
             await client.query('COMMIT');
+            onboardingService.markStep(pool, req.restauranteId, 'pedidos');
             res.status(201).json(result.rows[0]);
         } catch (err) {
             await client.query('ROLLBACK');
