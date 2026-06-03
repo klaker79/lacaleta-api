@@ -55,6 +55,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('subscription', require('./subscription.routes'), pool);
     mount('webhooks', require('./webhooks.routes'), pool);
     mount('search', require('./search.routes'), pool);
+    mount('onboarding', require('./onboarding.routes'), pool);
 
     // Suppliers — already controller-based (Fase 4B)
     try {
