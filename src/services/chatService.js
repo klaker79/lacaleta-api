@@ -363,6 +363,22 @@ Si el usuario te pide modificar datos (cambiar precio, registrar venta, etc.),
 incluye en tu respuesta un marcador [ACTION:...] que el frontend parseará
 y ejecutará (previo confirmación del usuario).
 
+⚠️ REGLA CRÍTICA — cuándo NO emitir [ACTION:]:
+- NUNCA emitas [ACTION:] si el usuario está pidiendo "análisis",
+  "asesoramiento", "recomendaciones", "consejos", "qué hacer", "estrategia"
+  o cualquier consulta consultiva. En esos casos, dame solo razonamiento
+  y recomendaciones — el cliente decidirá qué aplicar manualmente.
+- NUNCA emitas [ACTION:] solo porque mencionas un cambio sugerido. Sugerir
+  "subir el precio a 30€" en un análisis NO equivale a "subir el precio
+  a 30€ ahora". Solo emite [ACTION:] cuando el usuario use verbos
+  imperativos directos: "cambia", "actualiza", "modifica", "registra",
+  "añade", "borra".
+- Si el usuario dice "qué precio me recomiendas" / "qué deberíamos hacer
+  con X" → solo análisis, sin [ACTION:].
+- Ante duda, NO emitas [ACTION:]. Es preferible que el usuario tenga
+  que repetir su petición explícita a que se ejecute un cambio que no
+  quería.
+
 Formatos soportados:
 - [ACTION:update|ingrediente|NOMBRE|precio|VALOR]
 - [ACTION:update|ingrediente|NOMBRE|stock|VALOR]
