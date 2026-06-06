@@ -7,6 +7,34 @@ const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { nonFoodCategoriesSqlList } = require('../utils/categoriaClassifier');
+const { validateDate } = require('../utils/validators');
+const {
+    calcularDispersion,
+    calcularAmplitud,
+    calcularCalidadPrecio,
+    generarRecomendacionGlobal
+} = require('../utils/omnesCalculator');
+
+/**
+ * Resuelve el rango de fechas para queries de análisis.
+ * Si llegan `desde`/`hasta` válidos, los usa. Si no, devuelve `null`
+ * para que la query no aplique filtro temporal (comportamiento histórico
+ * = compatibilidad backward con clientes que no envían filtro).
+ *
+ * @param {string|undefined} desde - YYYY-MM-DD
+ * @param {string|undefined} hasta - YYYY-MM-DD (exclusivo)
+ * @returns {{ desde: string, hasta: string } | null}
+ */
+function resolverPeriodo(desde, hasta) {
+    if (!desde && !hasta) return null;
+    const d = validateDate(desde);
+    const h = validateDate(hasta);
+    if (!d.valid || !h.valid) return null;
+    return {
+        desde: desde,
+        hasta: hasta
+    };
+}
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -24,6 +52,17 @@ module.exports = function (pool) {
             // (OTHER_CATEGORIES) — idéntico a lo que pnl-breakdown excluye del
             // food cost. Las recetas FOOD son el complemento exacto.
             const nonFoodList = nonFoodCategoriesSqlList();
+            // Parámetros opcionales de periodo (rediseño 2026-06-05).
+            // Si llegan ambos, las ventas se filtran al rango [desde, hasta).
+            // Si NO llegan, mantenemos el comportamiento histórico (todas las
+            // ventas) para backward-compat con clientes que aún no envían filtro.
+            const periodo = resolverPeriodo(req.query.desde, req.query.hasta);
+            const ventasFiltroFecha = periodo
+                ? `AND v.fecha >= $2 AND v.fecha < $3`
+                : '';
+            const ventasParams = periodo
+                ? [req.restauranteId, periodo.desde, periodo.hasta]
+                : [req.restauranteId];
             // Query 1: TODAS las recetas activas FOOD del tenant + ventas si las hay.
             // LEFT JOIN para que las recetas activas sin ventas también entren al
             // análisis. Sin esto (INNER JOIN previo), un plato que está en la carta
@@ -39,12 +78,13 @@ module.exports = function (pool) {
                 ON v.receta_id = r.id
                AND v.restaurante_id = $1
                AND v.deleted_at IS NULL
+               ${ventasFiltroFecha}
              WHERE r.restaurante_id = $1
                AND r.deleted_at IS NULL
                AND r.activo = TRUE
                AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
              GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones`,
-                [req.restauranteId]
+                ventasParams
             );
 
             if (ventas.rows.length === 0) {
@@ -159,6 +199,83 @@ module.exports = function (pool) {
         } catch (err) {
             log('error', 'Error análisis menú', { error: err.message });
             res.status(500).json({ error: 'Error analizando menú', data: [] });
+        }
+    });
+
+
+    /**
+     * GET /analysis/omnes?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+     *
+     * Principios de Omnes — análisis avanzado de la estrategia de carta.
+     * Tres sub-análisis:
+     *   1. Dispersión: ratio precio_max / precio_min de la carta food. Ideal ≤ 2.5.
+     *   2. Amplitud de gama: distribución % en baja/media/alta. Ideal 25/50/25.
+     *   3. Relación calidad-precio: precio_medio_vendido / precio_medio_ofertado. Ideal 0.95-1.05.
+     *
+     * Excluye bebidas y categorías base (vía nonFoodCategoriesSqlList) idéntico a /menu-engineering.
+     * Multi-tenant: WHERE r.restaurante_id en todas las queries.
+     * Soft-delete: AND r.deleted_at IS NULL / v.deleted_at IS NULL.
+     * Si llegan periodos válidos, filtra ventas al rango [desde, hasta).
+     * Si NO llegan o son inválidos, usa el histórico completo (compat back).
+     */
+    router.get('/analysis/omnes', authMiddleware, async (req, res) => {
+        try {
+            const periodo = resolverPeriodo(req.query.desde, req.query.hasta);
+            const nonFoodList = nonFoodCategoriesSqlList();
+
+            const ventasFiltroFecha = periodo
+                ? `AND v.fecha >= $2 AND v.fecha < $3`
+                : '';
+            const ventasParams = periodo
+                ? [req.restauranteId, periodo.desde, periodo.hasta]
+                : [req.restauranteId];
+
+            // Query única que junta precio_venta de TODOS los platos food activos
+            // (para dispersión + amplitud) y agrega ventas en el periodo (para
+            // calidad-precio). Misma exclusión non-food que /menu-engineering.
+            const { rows } = await pool.query(
+                `SELECT r.id, r.nombre, r.precio_venta,
+                        COALESCE(SUM(v.cantidad), 0) AS cantidad_vendida
+                 FROM recetas r
+                 LEFT JOIN ventas v
+                    ON v.receta_id = r.id
+                   AND v.restaurante_id = $1
+                   AND v.deleted_at IS NULL
+                   ${ventasFiltroFecha}
+                 WHERE r.restaurante_id = $1
+                   AND r.deleted_at IS NULL
+                   AND r.activo = TRUE
+                   AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
+                   AND r.precio_venta IS NOT NULL
+                   AND r.precio_venta > 0
+                 GROUP BY r.id, r.nombre, r.precio_venta`,
+                ventasParams
+            );
+
+            const platos = rows.map(r => ({
+                id: r.id,
+                nombre: r.nombre,
+                precio_venta: parseFloat(r.precio_venta),
+                cantidad_vendida: parseFloat(r.cantidad_vendida) || 0
+            }));
+
+            const dispersion = calcularDispersion(platos);
+            const amplitud = calcularAmplitud(platos);
+            const calidadPrecio = calcularCalidadPrecio(platos);
+            const recomendacion = generarRecomendacionGlobal({
+                dispersion, amplitud, calidad_precio: calidadPrecio
+            });
+
+            res.json({
+                periodo: periodo || { desde: null, hasta: null },
+                dispersion,
+                amplitud,
+                calidad_precio: calidadPrecio,
+                recomendacion_global: recomendacion
+            });
+        } catch (err) {
+            log('error', 'Error /analysis/omnes', { error: err.message });
+            res.status(500).json({ error: 'Error calculando Principios de Omnes' });
         }
     });
 
