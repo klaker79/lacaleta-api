@@ -19,7 +19,6 @@ const { nonFoodCategoriesSqlList } = require('../utils/categoriaClassifier');
 const { validateDate } = require('../utils/validators');
 const {
     calcularDispersion,
-    calcularDispersionPorCategoria,
     calcularAmplitud,
     calcularCalidadPrecio,
     generarRecomendacionGlobal
@@ -180,7 +179,7 @@ async function getOmnesAnalysis(pool, restauranteId, opts = {}) {
         : [restauranteId];
 
     const { rows } = await pool.query(
-        `SELECT r.id, r.nombre, r.categoria, r.precio_venta,
+        `SELECT r.id, r.nombre, r.precio_venta,
                 COALESCE(SUM(v.cantidad), 0) AS cantidad_vendida
          FROM recetas r
          LEFT JOIN ventas v
@@ -194,20 +193,18 @@ async function getOmnesAnalysis(pool, restauranteId, opts = {}) {
            AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
            AND r.precio_venta IS NOT NULL
            AND r.precio_venta > 0
-         GROUP BY r.id, r.nombre, r.categoria, r.precio_venta`,
+         GROUP BY r.id, r.nombre, r.precio_venta`,
         ventasParams
     );
 
     const platos = rows.map(r => ({
         id: r.id,
         nombre: r.nombre,
-        categoria: r.categoria,
         precio_venta: parseFloat(r.precio_venta),
         cantidad_vendida: parseFloat(r.cantidad_vendida) || 0
     }));
 
     const dispersion = calcularDispersion(platos);
-    const dispersionPorCategoria = calcularDispersionPorCategoria(platos);
     const amplitud = calcularAmplitud(platos);
     const calidadPrecio = calcularCalidadPrecio(platos);
     const recomendacion = generarRecomendacionGlobal({
@@ -217,7 +214,6 @@ async function getOmnesAnalysis(pool, restauranteId, opts = {}) {
     return {
         periodo: periodo || { desde: null, hasta: null },
         dispersion,
-        dispersion_por_categoria: dispersionPorCategoria,
         amplitud,
         calidad_precio: calidadPrecio,
         recomendacion_global: recomendacion
