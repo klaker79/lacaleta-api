@@ -85,9 +85,9 @@ class SupplierRepository {
         const db = supplier.toDB();
 
         const query = `
-            INSERT INTO proveedores 
-                (nombre, contacto, telefono, email, direccion, notas, codigo, cif, ingredientes, restaurante_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO proveedores
+                (nombre, contacto, telefono, email, direccion, notas, codigo, cif, iva_pct, ingredientes, restaurante_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
         `;
 
@@ -100,6 +100,7 @@ class SupplierRepository {
             db.notas,
             db.codigo,
             db.cif,
+            db.iva_pct,
             db.ingredientes,
             restaurantId
         ]);
@@ -118,11 +119,11 @@ class SupplierRepository {
         const db = supplier.toDB();
 
         const query = `
-            UPDATE proveedores 
-            SET nombre = $1, contacto = $2, telefono = $3, email = $4, 
-                direccion = $5, notas = $6, codigo = $7, cif = $8, 
-                ingredientes = $9, fecha_actualizacion = NOW()
-            WHERE id = $10 AND restaurante_id = $11 AND deleted_at IS NULL
+            UPDATE proveedores
+            SET nombre = $1, contacto = $2, telefono = $3, email = $4,
+                direccion = $5, notas = $6, codigo = $7, cif = $8,
+                iva_pct = $9, ingredientes = $10, fecha_actualizacion = NOW()
+            WHERE id = $11 AND restaurante_id = $12 AND deleted_at IS NULL
             RETURNING *
         `;
 
@@ -135,6 +136,7 @@ class SupplierRepository {
             db.notas,
             db.codigo,
             db.cif,
+            db.iva_pct,
             db.ingredientes,
             id,
             restaurantId
