@@ -16,6 +16,10 @@ const Anthropic = require('@anthropic-ai/sdk').default;
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
+const {
+    getMenuEngineering,
+    getOmnesAnalysis
+} = require('./menuEngineeringService');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = 'claude-sonnet-4-6';
@@ -157,6 +161,32 @@ DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
   "qué tal va X plato", "food cost de X plato", "ventas de X".
   Devuelve escandallo desglosado, food cost, ventas del periodo, y kg
   consumidos estimados por ingrediente. Default dias=60.
+
+INGENIERÍA DE MENÚ Y OMNES (USAR SIEMPRE que el usuario hable de
+"matriz BCG", "estrella/puzzle/caballo/perro", "ingeniería de menú",
+"principios de omnes", "dispersión", "amplitud de gama", "calidad-precio",
+"qué plato es estrella", "qué plato retirar de la carta"):
+- analisis_menu_engineering(desde?, hasta?) → DEVUELVE EXACTAMENTE lo que
+  ve el cliente en la pestaña Análisis: array de platos con clasificación
+  Estrella / Puzzle / Caballo / Perro, popularidad (unidades), margen
+  unitario €, food cost %, coste porción €. Cada plato incluye "metricas"
+  con la media del menú (promedioPopularidad, promedioMargen ponderado
+  por ventas, promedioFoodCost) — usa ESTAS medias para hablar, no las
+  recalcules. Periodo opcional YYYY-MM-DD; si no se pasa, usa histórico
+  completo (igual que la app por defecto).
+- analisis_omnes(desde?, hasta?) → DEVUELVE EXACTAMENTE las 3 tarjetas
+  de la app: dispersion {valor, estado, precio_max, precio_min,
+  plato_max, plato_min}, amplitud {baja_pct, media_pct, alta_pct, estado,
+  desviacion, total_platos}, calidad_precio {ratio, estado, ofertado,
+  vendido, unidades_vendidas}, y recomendacion_global (frase).
+  Estados: dispersion → ok | alta | muy_alta. amplitud → equilibrada |
+  desbalance | muy_desbalanceada. calidad_precio → equilibrado | bajan |
+  suben | sin_ventas. Umbrales: dispersión ideal ≤ 2.5×; amplitud ideal
+  25/50/25; calidad-precio ideal 0.95-1.05×.
+
+⚠️ NO reinventes la clasificación BCG ni los cálculos de Omnes con
+obtener_recetas + obtener_ventas. Usa estas dos tools — son la MISMA
+fuente que la UI, garantizado.
 
 ⚠️ Cuando el usuario pregunta por UN ingrediente o UNA receta concreta,
 PRIORIZA diagnostico_* sobre obtener_*. Más concreto, menos tokens, y
@@ -633,6 +663,30 @@ const TOOLS = [
                 dias: { type: 'number', description: 'Ventana de análisis en días para ventas. Default 60.' }
             },
             required: ['nombre_o_id']
+        }
+    },
+    {
+        name: 'analisis_menu_engineering',
+        description: 'INGENIERÍA DE MENÚ (matriz BCG) — devuelve EXACTAMENTE los mismos datos que ve el cliente en la pestaña Análisis: cada plato food activo con clasificación Estrella/Puzzle/Caballo/Perro, popularidad (unidades vendidas en el periodo), margen unitario €, food cost %, coste porción, y `metricas` con la media del menú (promedioPopularidad, promedioMargen PONDERADO por ventas, promedioFoodCost). Usa esta tool SIEMPRE que el usuario hable de matriz BCG, estrella/puzzle/caballo/perro, qué plato retirar, qué plato promocionar, o ingeniería de menú. Periodo opcional YYYY-MM-DD; si no se pasa, usa histórico completo (igual que la app por defecto).',
+        input_schema: {
+            type: 'object',
+            properties: {
+                desde: { type: 'string', description: 'Inicio del periodo YYYY-MM-DD (opcional)' },
+                hasta: { type: 'string', description: 'Fin del periodo YYYY-MM-DD exclusivo (opcional)' }
+            },
+            required: []
+        }
+    },
+    {
+        name: 'analisis_omnes',
+        description: 'PRINCIPIOS DE OMNES — devuelve EXACTAMENTE las 3 tarjetas + recomendación global que ve el cliente en la pestaña Análisis. Estructura: dispersion {valor, estado, precio_max, precio_min, plato_max, plato_min}, amplitud {baja_pct, media_pct, alta_pct, estado, desviacion, total_platos}, calidad_precio {ratio, estado, ofertado, vendido, unidades_vendidas}, recomendacion_global (frase). Usa esta tool SIEMPRE que el usuario hable de dispersión, amplitud de gama, calidad-precio, ratio vendido/ofertado, principios de Omnes, o si la carta está bien diseñada como conjunto. Periodo opcional YYYY-MM-DD; si no se pasa, usa histórico completo.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                desde: { type: 'string', description: 'Inicio del periodo YYYY-MM-DD (opcional)' },
+                hasta: { type: 'string', description: 'Fin del periodo YYYY-MM-DD exclusivo (opcional)' }
+            },
+            required: []
         }
     }
 ];
@@ -1355,6 +1409,21 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ingredientes_consumidos_estimados: ingredientesConsumidos,
                 alternativas
             };
+        }
+
+        case 'analisis_menu_engineering': {
+            // Fuente única: el mismo servicio que sirve a /analysis/menu-engineering.
+            // Cualquier número que el chat dé aquí es idéntico al que ve la UI.
+            const desde = args?.desde ? parseIsoDate(args.desde, 'desde') : undefined;
+            const hasta = args?.hasta ? parseIsoDate(args.hasta, 'hasta') : undefined;
+            return await getMenuEngineering(pool, restauranteId, { desde, hasta });
+        }
+
+        case 'analisis_omnes': {
+            // Fuente única: el mismo servicio que sirve a /analysis/omnes.
+            const desde = args?.desde ? parseIsoDate(args.desde, 'desde') : undefined;
+            const hasta = args?.hasta ? parseIsoDate(args.hasta, 'hasta') : undefined;
+            return await getOmnesAnalysis(pool, restauranteId, { desde, hasta });
         }
 
         default:
