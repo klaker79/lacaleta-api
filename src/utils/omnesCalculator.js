@@ -113,6 +113,48 @@ function calcularCalidadPrecio(platos) {
 }
 
 /**
+ * 1bis. Dispersión POR CATEGORÍA — la dispersión que el cliente percibe
+ * realmente al elegir dentro de una sección (Entrantes, Principales,
+ * Postres, etc.). En España la dispersión global engaña en cartas mixtas
+ * porque mezcla precios de categorías muy distintas (un pintxo de 4 €
+ * con un solomillo de 30 €). Este desglose da la lectura honesta:
+ * "dentro de cada sección, ¿está coherente?".
+ *
+ * Sólo entran categorías con ≥ 2 platos (con 1 no hay dispersión).
+ *
+ * @param {Array<{precio_venta, categoria, nombre}>} platos
+ * @returns {Array<{categoria, valor, estado, precio_max, precio_min, plato_max, plato_min, n_platos}>}
+ *          Ordenado por n_platos desc para que las categorías con más
+ *          variedad salgan arriba.
+ */
+function calcularDispersionPorCategoria(platos) {
+    const ps = platosValidos(platos);
+    if (ps.length === 0) return [];
+    const porCat = new Map();
+    ps.forEach(p => {
+        const cat = (p.categoria || '').trim() || 'Sin categoría';
+        if (!porCat.has(cat)) porCat.set(cat, []);
+        porCat.get(cat).push(p);
+    });
+    const resultado = [];
+    porCat.forEach((lista, categoria) => {
+        if (lista.length < 2) return;
+        const dispersion = calcularDispersion(lista);
+        resultado.push({
+            categoria,
+            valor: dispersion.valor,
+            estado: dispersion.estado,
+            precio_max: dispersion.precio_max,
+            precio_min: dispersion.precio_min,
+            plato_max: dispersion.plato_max,
+            plato_min: dispersion.plato_min,
+            n_platos: lista.length
+        });
+    });
+    return resultado.sort((a, b) => b.n_platos - a.n_platos);
+}
+
+/**
  * Genera la frase de recomendación global combinando los 3 estados.
  * Máximo 3 frases, ordenadas por severidad implícita.
  */
@@ -141,6 +183,7 @@ function generarRecomendacionGlobal({ dispersion, amplitud, calidad_precio }) {
 
 module.exports = {
     calcularDispersion,
+    calcularDispersionPorCategoria,
     calcularAmplitud,
     calcularCalidadPrecio,
     generarRecomendacionGlobal

@@ -6,6 +6,7 @@
  */
 const {
     calcularDispersion,
+    calcularDispersionPorCategoria,
     calcularAmplitud,
     calcularCalidadPrecio,
     generarRecomendacionGlobal
@@ -75,6 +76,59 @@ describe('omnesCalculator.calcularDispersion', () => {
     test('input no-array → sin_datos', () => {
         expect(calcularDispersion(null).estado).toBe('sin_datos');
         expect(calcularDispersion(undefined).estado).toBe('sin_datos');
+    });
+});
+
+describe('omnesCalculator.calcularDispersionPorCategoria', () => {
+    test('array vacío → []', () => {
+        expect(calcularDispersionPorCategoria([])).toEqual([]);
+    });
+
+    test('omite categorías con 1 solo plato (no hay dispersión posible)', () => {
+        const result = calcularDispersionPorCategoria([
+            { nombre: 'A', categoria: 'entrantes', precio_venta: 10 },
+            { nombre: 'B', categoria: 'principales', precio_venta: 20 }
+        ]);
+        expect(result).toEqual([]);
+    });
+
+    test('agrupa por categoría y calcula la dispersión interna', () => {
+        const result = calcularDispersionPorCategoria([
+            { nombre: 'Pulpo', categoria: 'entrantes', precio_venta: 12 },
+            { nombre: 'Ostra', categoria: 'entrantes', precio_venta: 4 },
+            { nombre: 'Lubina', categoria: 'principales', precio_venta: 24 },
+            { nombre: 'Solomillo', categoria: 'principales', precio_venta: 30 }
+        ]);
+        expect(result).toHaveLength(2);
+        const ent = result.find(c => c.categoria === 'entrantes');
+        const pri = result.find(c => c.categoria === 'principales');
+        expect(ent.valor).toBeCloseTo(3); // 12/4
+        expect(ent.plato_max).toBe('Pulpo');
+        expect(ent.plato_min).toBe('Ostra');
+        expect(ent.n_platos).toBe(2);
+        expect(pri.valor).toBeCloseTo(1.25); // 30/24
+        expect(pri.estado).toBe('ok');
+    });
+
+    test('ordena por n_platos descendente', () => {
+        const result = calcularDispersionPorCategoria([
+            { nombre: 'A', categoria: 'pocos', precio_venta: 10 },
+            { nombre: 'B', categoria: 'pocos', precio_venta: 15 },
+            { nombre: 'C', categoria: 'muchos', precio_venta: 8 },
+            { nombre: 'D', categoria: 'muchos', precio_venta: 10 },
+            { nombre: 'E', categoria: 'muchos', precio_venta: 18 }
+        ]);
+        expect(result[0].categoria).toBe('muchos'); // 3 platos
+        expect(result[1].categoria).toBe('pocos');  // 2 platos
+    });
+
+    test('categoría vacía o null se agrupa como "Sin categoría"', () => {
+        const result = calcularDispersionPorCategoria([
+            { nombre: 'A', categoria: null, precio_venta: 8 },
+            { nombre: 'B', categoria: '', precio_venta: 15 }
+        ]);
+        expect(result).toHaveLength(1);
+        expect(result[0].categoria).toBe('Sin categoría');
     });
 });
 
