@@ -514,8 +514,10 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             await client.query('BEGIN');
 
-            // Create restaurant with 14-day trial
-            const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+            // Create restaurant with 10-day trial (Iker 2026-06-06: trial corto para forzar
+            // decisión real del cliente y evitar "uso para siempre sin pagar" si no hay gate).
+            const TRIAL_DAYS = 10;
+            const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
             const safeMoneda = moneda ? sanitizeString(String(moneda).slice(0, 10)) : '€';
             const restauranteResult = await client.query(
                 `INSERT INTO restaurantes (nombre, email, plan, plan_status, trial_ends_at, max_users, moneda)
@@ -564,30 +566,62 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
 
             if (canSendEmail) {
                 const verifyUrl = `${API_URL}/api/auth/verify-email?token=${verificationToken}`;
+                const trialEndsHuman = trialEndsAt.toLocaleDateString('es-ES', {
+                    day: '2-digit', month: 'long', year: 'numeric'
+                });
                 try {
                     await resend.emails.send({
                         from: process.env.RESEND_FROM || 'MindLoop CostOS <onboarding@resend.dev>',
                         to: email,
-                        subject: '✅ Verifica tu cuenta — MindLoop CostOS',
+                        subject: '🍽️ Bienvenido a MindLoop — tu prueba de 10 días empieza ahora',
                         html: `
-                            <div style="font-family: 'Inter', sans-serif; max-width: 500px; margin: 0 auto; padding: 30px; background: #ffffff; border-radius: 12px;">
-                                <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); border-radius: 12px; margin-bottom: 24px;">
-                                    <h1 style="color: white; margin: 0; font-size: 22px;">🍽️ MindLoop CostOS</h1>
+                            <div style="font-family: 'Inter', sans-serif; max-width: 540px; margin: 0 auto; padding: 0; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb;">
+                                <div style="padding: 24px 32px; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); text-align: center;">
+                                    <h1 style="color: white; margin: 0; font-size: 22px; font-weight: 700;">🍽️ MindLoop CostOS</h1>
+                                    <p style="color: rgba(255,255,255,0.92); margin: 6px 0 0; font-size: 13px;">Restaurant Intelligence Platform</p>
                                 </div>
-                                <p style="color: #374151; font-size: 16px;">Hola <strong>${nombre}</strong>,</p>
-                                <p style="color: #6b7280;">Gracias por registrarte. Verifica tu email para empezar:</p>
-                                <div style="text-align: center; margin: 30px 0;">
-                                    <a href="${verifyUrl}" style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">Verificar mi cuenta</a>
+                                <div style="padding: 28px 32px 8px;">
+                                    <p style="color: #111827; font-size: 17px; margin: 0 0 6px;">Hola <strong>${nombre}</strong>,</p>
+                                    <p style="color: #374151; font-size: 15px; line-height: 1.55; margin: 0 0 18px;">
+                                        Tu cuenta de MindLoop CostOS está lista. Acabas de empezar
+                                        <strong>${TRIAL_DAYS} días de prueba gratuita con acceso completo</strong>
+                                        — sin pedir tarjeta, sin compromiso.
+                                    </p>
+                                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin-bottom: 22px;">
+                                        <strong style="color: #92400e; font-size: 13px;">📅 Tu prueba termina el ${trialEndsHuman}</strong>
+                                        <p style="color: #78350f; font-size: 13px; margin: 4px 0 0; line-height: 1.45;">
+                                            Hasta ese día tienes la app completa. Después podrás suscribirte
+                                            o exportar tus datos.
+                                        </p>
+                                    </div>
+                                    <p style="color: #374151; font-size: 14px; margin: 0 0 8px;"><strong>Antes de nada, verifica tu email:</strong></p>
                                 </div>
-                                <p style="color: #9ca3af; font-size: 13px;">Este enlace expira en 24 horas.</p>
-                                <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-                                <p style="color: #9ca3af; font-size: 12px; text-align: center;">MindLoop CostOS — Restaurant Intelligence Platform</p>
+                                <div style="text-align: center; padding: 8px 32px 24px;">
+                                    <a href="${verifyUrl}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #a855f7); color: white; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px;">Verificar mi cuenta</a>
+                                    <p style="color: #9ca3af; font-size: 12px; margin: 12px 0 0;">Este enlace expira en 24 horas.</p>
+                                </div>
+                                <div style="background: #f9fafb; padding: 20px 32px; border-top: 1px solid #e5e7eb;">
+                                    <h3 style="color: #111827; font-size: 14px; font-weight: 700; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.4px;">Qué hacer en tus primeros 30 minutos</h3>
+                                    <ol style="color: #374151; font-size: 14px; line-height: 1.7; margin: 0; padding-left: 20px;">
+                                        <li>Crea tus <strong>proveedores</strong> (o importa la plantilla Excel).</li>
+                                        <li>Sube tus <strong>ingredientes</strong> con precio y formato.</li>
+                                        <li>Monta 2-3 <strong>recetas</strong> y verás su food cost real.</li>
+                                        <li>Mete tu primera <strong>compra</strong> y deja que el sistema haga el resto.</li>
+                                    </ol>
+                                    <p style="color: #6b7280; font-size: 12px; margin: 14px 0 0;">
+                                        Al entrar te guiamos paso a paso desde el spotlight del dashboard.
+                                    </p>
+                                </div>
+                                <div style="padding: 16px 32px; text-align: center; background: #ffffff;">
+                                    <p style="color: #9ca3af; font-size: 11px; margin: 0;">¿Dudas? Responde a este email y te contestamos.</p>
+                                    <p style="color: #9ca3af; font-size: 11px; margin: 6px 0 0;">MindLoop CostOS — Hecho con cariño desde Galicia 🇪🇸</p>
+                                </div>
                             </div>
                         `
                     });
-                    log('info', 'Email de verificación enviado', { email });
+                    log('info', 'Email de bienvenida + verificación enviado', { email, trial_days: TRIAL_DAYS });
                 } catch (emailErr) {
-                    log('warn', 'Error enviando email de verificación (usuario creado igualmente)', { email, error: emailErr.message });
+                    log('warn', 'Error enviando email de bienvenida (usuario creado igualmente)', { email, error: emailErr.message });
                 }
 
                 res.status(201).json({
