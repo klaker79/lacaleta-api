@@ -182,53 +182,23 @@ describe('menuEngineeringService.getOmnesAnalysis', () => {
         expect(pool.calls[0].params).toEqual([5, '2026-03-01', '2026-04-01']);
     });
 
-    test('shape de la respuesta: periodo + dispersion + dispersion_por_categoria + amplitud + calidad_precio + recomendacion_global', async () => {
+    test('shape de la respuesta: periodo + dispersion + amplitud + calidad_precio + recomendacion_global', async () => {
         const pool = fakePool([
             {
                 rows: [
-                    { id: 1, nombre: 'A', categoria: 'entrantes', precio_venta: '10', cantidad_vendida: '5' },
-                    { id: 2, nombre: 'B', categoria: 'principales', precio_venta: '25', cantidad_vendida: '3' }
+                    { id: 1, nombre: 'A', precio_venta: '10', cantidad_vendida: '5' },
+                    { id: 2, nombre: 'B', precio_venta: '25', cantidad_vendida: '3' }
                 ]
             }
         ]);
         const result = await service.getOmnesAnalysis(pool, 1);
         expect(Object.keys(result).sort()).toEqual(
-            ['amplitud', 'calidad_precio', 'dispersion', 'dispersion_por_categoria', 'periodo', 'recomendacion_global']
+            ['amplitud', 'calidad_precio', 'dispersion', 'periodo', 'recomendacion_global']
         );
-        // Dispersión global: 25/10 = 2.5×
+        // Dispersión: 25/10 = 2.5×
         expect(result.dispersion.valor).toBeCloseTo(2.5);
         expect(result.dispersion.plato_max).toBe('B');
         expect(result.dispersion.plato_min).toBe('A');
-        // Por categoría: cada cat solo tiene 1 plato → array vacío
-        expect(result.dispersion_por_categoria).toEqual([]);
-    });
-
-    test('dispersion_por_categoria solo incluye categorías con ≥ 2 platos', async () => {
-        const pool = fakePool([
-            {
-                rows: [
-                    { id: 1, nombre: 'Pulpo', categoria: 'entrantes', precio_venta: '12', cantidad_vendida: '5' },
-                    { id: 2, nombre: 'Ostra', categoria: 'entrantes', precio_venta: '4', cantidad_vendida: '3' },
-                    { id: 3, nombre: 'Lubina', categoria: 'principales', precio_venta: '24', cantidad_vendida: '2' },
-                    { id: 4, nombre: 'Solomillo', categoria: 'principales', precio_venta: '30', cantidad_vendida: '1' },
-                    { id: 5, nombre: 'Tarta', categoria: 'postres', precio_venta: '6', cantidad_vendida: '4' }
-                ]
-            }
-        ]);
-        const result = await service.getOmnesAnalysis(pool, 1);
-        // entrantes y principales tienen 2 platos cada uno; postres solo 1
-        const cats = result.dispersion_por_categoria.map(c => c.categoria);
-        expect(cats).toContain('entrantes');
-        expect(cats).toContain('principales');
-        expect(cats).not.toContain('postres');
-        // entrantes: 12/4 = 3×
-        const ent = result.dispersion_por_categoria.find(c => c.categoria === 'entrantes');
-        expect(ent.valor).toBeCloseTo(3);
-        // principales: 30/24 = 1.25×
-        const pri = result.dispersion_por_categoria.find(c => c.categoria === 'principales');
-        expect(pri.valor).toBeCloseTo(1.25);
-        // Verifica que la global cuenta TODOS (incluida la tarta): 30/4 = 7.5×
-        expect(result.dispersion.valor).toBeCloseTo(7.5);
     });
 });
 
