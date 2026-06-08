@@ -4,6 +4,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
 // 2026-06-08: requirePlan retirado. El gating ahora es global en server.js
 // (modelo single-plan: Self/Pro con misma funcionalidad).
 const { log } = require('../utils/logger');
@@ -23,7 +24,7 @@ module.exports = function (pool) {
     // que tanto los endpoints REST como las tools del chat IA usen el mismo
     // cálculo. UNA fuente de verdad — sin riesgo de divergencia entre la UI
     // y lo que el chat responde.
-    router.get('/analysis/menu-engineering', authMiddleware, async (req, res) => {
+    router.get('/analysis/menu-engineering', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             const resultado = await getMenuEngineering(pool, req.restauranteId, {
                 desde: req.query.desde,
@@ -44,7 +45,7 @@ module.exports = function (pool) {
      *   2. Amplitud de gama: distribución % en baja/media/alta. Ideal 25/50/25.
      *   3. Relación calidad-precio: precio_medio_vendido / precio_medio_ofertado. Ideal 0.95-1.05.
      */
-    router.get('/analysis/omnes', authMiddleware, async (req, res) => {
+    router.get('/analysis/omnes', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             const resultado = await getOmnesAnalysis(pool, req.restauranteId, {
                 desde: req.query.desde,
