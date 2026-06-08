@@ -4,7 +4,8 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
-const { requirePlan } = require('../middleware/planGate');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
+// 2026-06-08: requirePlan retirado. El gating ahora es global en server.js.
 const { log } = require('../utils/logger');
 const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 
@@ -28,7 +29,7 @@ module.exports = function (pool) {
         'default': 7
     };
 
-    router.get('/intelligence/freshness', authMiddleware, requirePlan('starter'), async (req, res) => {
+    router.get('/intelligence/freshness', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             // 🔒 cantidadRecibida con fallback a cantidad (auditoria A1-C3):
             //    para pedidos en estado 'recibido', cantidadRecibida puede diferir
@@ -95,7 +96,7 @@ module.exports = function (pool) {
     });
 
     // ========== 🧠 INTELIGENCIA - PLAN COMPRAS ==========
-    router.get('/intelligence/purchase-plan', authMiddleware, requirePlan('starter'), async (req, res) => {
+    router.get('/intelligence/purchase-plan', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             const targetDay = parseInt(req.query.day) || 6; // Sábado por defecto
             const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -161,7 +162,7 @@ module.exports = function (pool) {
         '2026-10-12', '2026-11-01', '2026-12-06', '2026-12-08', '2026-12-25'
     ];
 
-    router.get('/intelligence/overstock', authMiddleware, requirePlan('starter'), async (req, res) => {
+    router.get('/intelligence/overstock', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             // Calcular día efectivo (festivos = sábado)
             const hoy = new Date().toISOString().split('T')[0];
@@ -225,7 +226,7 @@ module.exports = function (pool) {
     });
 
     // ========== 🧠 INTELIGENCIA - REVISION PRECIOS ==========
-    router.get('/intelligence/price-check', authMiddleware, requirePlan('starter'), async (req, res) => {
+    router.get('/intelligence/price-check', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             const TARGET_FOOD_COST = 35;
             const ALERT_THRESHOLD = 40;
