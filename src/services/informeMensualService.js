@@ -164,7 +164,7 @@ async function getCambiosPrecio(pool, restauranteId, rango, limit = 10) {
             ROUND(((actual.precio - anterior.precio) / anterior.precio * 100)::numeric, 2) AS variacion_pct
         FROM actual
         JOIN anterior USING (ingrediente_id)
-        JOIN ingredientes i ON i.id = actual.ingrediente_id AND i.deleted_at IS NULL
+        JOIN ingredientes i ON i.id = actual.ingrediente_id AND i.restaurante_id = $1 AND i.deleted_at IS NULL
         WHERE anterior.precio > 0
           AND ABS((actual.precio - anterior.precio) / anterior.precio) > 0.10
         ORDER BY ABS((actual.precio - anterior.precio) / anterior.precio) DESC

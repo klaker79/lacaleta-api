@@ -62,7 +62,9 @@ const TENANT_TABLES = [
     'api_tokens',
     'usuario_restaurantes',
     'chat_addon_subscriptions',
-    'transferencias_stock' // origen/destino, ambos tenants
+    'transferencias_stock', // origen/destino, ambos tenants
+    'coach_reports', // 2026-06-08 audit
+    'onboarding_progress'
 ];
 
 // Archivos enteros que están EXENTOS de la regla (justificación arriba).

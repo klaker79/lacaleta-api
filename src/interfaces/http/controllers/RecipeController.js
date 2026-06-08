@@ -51,9 +51,13 @@ class RecipeController {
                     .filter(id => id);
 
                 if (ingredientIds.length > 0) {
+                    // 🛡️ Multi-tenancy (2026-06-08): añadir AND restaurante_id.
+                    // Antes, si la JSONB de una receta contenia ingrediente_id de
+                    // otro tenant (manipulacion via PUT), GET devolvia nombre/precio
+                    // del ingrediente ajeno. Defense-in-depth.
                     const ingredientQuery = await pool.query(
-                        'SELECT id, nombre, unidad, precio FROM ingredientes WHERE id = ANY($1)',
-                        [ingredientIds]
+                        'SELECT id, nombre, unidad, precio FROM ingredientes WHERE id = ANY($1) AND restaurante_id = $2 AND deleted_at IS NULL',
+                        [ingredientIds, restaurante_id]
                     );
                     const ingredientMap = {};
                     ingredientQuery.rows.forEach(ing => {
