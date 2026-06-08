@@ -298,6 +298,87 @@ app.get('/api/health', async (req, res) => {
 });
 
 
+// ========== 🔒 GATING GLOBAL DE SUSCRIPCIÓN (2026-06-08) ==========
+// Modelo single-plan (Self/Pro): tras trial caducado, TODO se apaga hasta pago.
+// Este middleware se aplica ANTES de mountRoutes y bloquea cualquier ruta /api/*
+// que no esté en la whitelist EXENTAS (login, pago, webhooks Polar...).
+//
+// Whitelist explicada:
+//   /api/auth/*          → login, logout, verify, switch-restaurant, my-restaurants
+//   /api/subscription/*  → checkout, customer-portal (para que pueda PAGAR)
+//   /api/webhooks/*      → webhooks de Polar (necesario para que la activación llegue)
+//   /api/chat-addon/customer-portal → portal compatibilidad con grandfathered
+//   /api/system/*        → health checks
+//   /api/debug/*         → debug (ya tiene su propio requireAdmin)
+//   /api/superadmin/*    → panel admin global (multi-tenant, lo gestiona Iker)
+//   /api/integrations/*  → integraciones N8N/admin
+//   /api/onboarding/*    → progreso de onboarding (lo ven los del trial activo)
+const SUBSCRIPTION_EXEMPT_PATHS = [
+    '/auth/',
+    '/subscription/',
+    '/webhooks/',
+    '/chat-addon/customer-portal',
+    '/system/',
+    '/debug/',
+    '/superadmin/',
+    '/integrations/',
+    '/onboarding/',
+];
+const jwtForGate = require('jsonwebtoken');
+app.use('/api', async (req, res, next) => {
+    try {
+        // 1. Skip rutas exentas (login, pago, webhooks)
+        if (SUBSCRIPTION_EXEMPT_PATHS.some(p => req.path.startsWith(p))) {
+            return next();
+        }
+        // 2. Leer token sin fallar si no hay (las rutas que requieren auth tienen
+        //    su propio authMiddleware que devolverá 401 después).
+        let token = req.cookies?.auth_token;
+        if (!token) {
+            const authHeader = req.headers.authorization;
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                token = authHeader.split(' ')[1];
+            }
+        }
+        if (!token || tokenBlacklist.has(token)) return next();
+        let decoded;
+        try {
+            decoded = jwtForGate.verify(token, process.env.JWT_SECRET);
+        } catch {
+            return next(); // token inválido → que el authMiddleware de la ruta devuelva 401
+        }
+        const restauranteId = decoded.restauranteId;
+        if (!restauranteId) return next();
+        // 3. Chequear estado de la suscripción
+        const { rows } = await pool.query(
+            'SELECT plan, plan_status, trial_ends_at FROM restaurantes WHERE id = $1',
+            [restauranteId]
+        );
+        if (rows.length === 0) return next();
+        const { plan, plan_status, trial_ends_at } = rows[0];
+        // 4. Reglas de paso
+        if (plan_status === 'active') return next();
+        if (plan === 'trial' && trial_ends_at && new Date(trial_ends_at) > new Date()) return next();
+        // 5. Bloqueo → 403 SUBSCRIPTION_REQUIRED
+        const reason = (plan === 'trial' && trial_ends_at && new Date(trial_ends_at) <= new Date())
+            ? 'trial_expired'
+            : (plan_status === 'cancelled' || plan_status === 'past_due')
+                ? 'cancelled'
+                : 'no_subscription';
+        return res.status(403).json({
+            error: 'SUBSCRIPTION_REQUIRED',
+            reason,
+            trial_ended_at: reason === 'trial_expired' ? trial_ends_at : undefined,
+            plan,
+            plan_status,
+        });
+    } catch (err) {
+        // Fail-open: en caso de error de BD, dejar pasar para no bloquear toda la app
+        log('error', 'global subscription gate failed', { error: err.message });
+        return next();
+    }
+});
+
 // ========== MONTAR RUTAS (extraídas a src/routes/) ==========
 const mountRoutes = require("./src/routes");
 let routeMountErrors = [];

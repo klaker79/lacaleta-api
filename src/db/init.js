@@ -382,6 +382,18 @@ async function initializeDatabase(pool) {
         `);
   } catch (e) { log('warn', 'Migración proveedores.codigo', { error: e.message }); }
 
+  // Migration 013 (2026-06-06): IVA habitual por proveedor.
+  // SOLO display en el modal de recepción para cuadrar con el albarán.
+  // NO se aplica a precio_medio_compra ni a ninguna fórmula crítica.
+  try {
+    await pool.query(`
+            ALTER TABLE proveedores
+                ADD COLUMN IF NOT EXISTS iva_pct NUMERIC(5,2)
+                    CHECK (iva_pct IS NULL OR (iva_pct >= 0 AND iva_pct <= 100));
+        `);
+    log('info', 'Migración 013 proveedores.iva_pct completada');
+  } catch (e) { log('warn', 'Migración 013 proveedores.iva_pct', { error: e.message }); }
+
   // Añadir columnas para verificación de email
   try {
     await pool.query(`

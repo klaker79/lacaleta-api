@@ -224,9 +224,11 @@ async function getOrCreateWeeklyReport(pool, restauranteId, restauranteNombre = 
         const row = cached.rows[0];
         // Marcar como leído si era la primera vez
         if (!row.leido_at) {
+            // 🛡️ Defense-in-depth: añadir restaurante_id al WHERE aunque row.id
+            // viene de un SELECT scoped (linea 213) — Iker 2026-06-08.
             await pool.query(
-                'UPDATE coach_reports SET leido_at = NOW() WHERE id = $1',
-                [row.id]
+                'UPDATE coach_reports SET leido_at = NOW() WHERE id = $1 AND restaurante_id = $2',
+                [row.id, restauranteId]
             );
         }
         return formatReport(row);
