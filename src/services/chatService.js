@@ -1326,10 +1326,25 @@ async function runTool(name, pool, restauranteId, args = {}) {
             );
             const preciosMap = new Map();
             const ingMap = new Map();
+            const rendimientoBaseMap = new Map();
             for (const ing of ings) {
                 preciosMap.set(ing.id, getBackendIngredientUnitPrice(ing));
                 ingMap.set(ing.id, ing);
+                if (ing.rendimiento) rendimientoBaseMap.set(ing.id, parseFloat(ing.rendimiento));
             }
+
+            // 🆕 (2026-06-08) Cargar TODAS las recetas del tenant para resolver subrecetas.
+            // Antes el escandallo desglosado trataba ingredienteId > 100000 (convención de
+            // subreceta) como ingrediente normal → ingMap.get devolvía undefined → coste 0.
+            // El chat reportaba food cost INFRAVALORADO. Iker lo detectó hoy con PULPO A GRELLA
+            // que usa AJADA (0,55 EUR/porción): chat decía 33,80%, real 36,3%.
+            const { rows: todasRecetas } = await pool.query(
+                `SELECT id, nombre, categoria, precio_venta, porciones, ingredientes
+                 FROM recetas
+                 WHERE restaurante_id = $1 AND deleted_at IS NULL`,
+                [restauranteId]
+            );
+            const recetasMap = new Map(todasRecetas.map(r => [r.id, r]));
 
             // Escandallo desglosado
             const escandalloJsonb = Array.isArray(receta.ingredientes)
@@ -1338,16 +1353,47 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     ? (() => { try { return JSON.parse(receta.ingredientes); } catch { return []; } })()
                     : []);
             const escandallo = [];
-            let costeLote = 0;
             for (const ing of escandalloJsonb) {
                 const ingId = parseInt(ing.ingredienteId);
-                const ingInfo = ingMap.get(ingId);
                 const cantidad = parseFloat(ing.cantidad) || 0;
+                // ¿Es subreceta? Convención: ingredienteId > 100000 → subreceta_id = ingId − 100000
+                if (ingId > 100000) {
+                    const subRecetaId = ingId - 100000;
+                    const subReceta = recetasMap.get(subRecetaId);
+                    if (!subReceta) {
+                        escandallo.push({
+                            ingrediente_id: ingId,
+                            nombre: '(subreceta no encontrada)',
+                            unidad: 'porción',
+                            cantidad,
+                            rendimiento_pct: 100,
+                            precio_unitario_real: 0,
+                            coste_ingrediente: 0
+                        });
+                        continue;
+                    }
+                    // Coste total de la subreceta (recursivo) / porciones = coste por porción
+                    const costeLoteSub = getRecipeCostBase(subReceta, preciosMap, recetasMap, rendimientoBaseMap);
+                    const porcionesSub = parseInt(subReceta.porciones) || 1;
+                    const costePorcionSub = costeLoteSub / porcionesSub;
+                    const costeLinea = costePorcionSub * cantidad;
+                    escandallo.push({
+                        ingrediente_id: ingId,
+                        nombre: subReceta.nombre + ' (subreceta)',
+                        unidad: 'porción',
+                        cantidad,
+                        rendimiento_pct: 100,
+                        precio_unitario_real: Math.round(costePorcionSub * 10000) / 10000,
+                        coste_ingrediente: Math.round(costeLinea * 100) / 100
+                    });
+                    continue;
+                }
+                // Ingrediente base normal
+                const ingInfo = ingMap.get(ingId);
                 const rendimiento = parseFloat(ing.rendimiento) || 100;
                 const precioUnitario = preciosMap.get(ingId) ?? 0;
                 const costeAjustado = rendimiento > 0 ? precioUnitario / (rendimiento / 100) : precioUnitario;
                 const costeIngrediente = costeAjustado * cantidad;
-                costeLote += costeIngrediente;
                 escandallo.push({
                     ingrediente_id: ingId,
                     nombre: ingInfo?.nombre || '(desconocido)',
@@ -1358,6 +1404,10 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     coste_ingrediente: Math.round(costeIngrediente * 100) / 100
                 });
             }
+
+            // Coste total del lote: usar getRecipeCostBase que expande subrecetas correctamente
+            // (mismo helper que usa resumen_food_cost_recetas para que los números coincidan).
+            const costeLote = getRecipeCostBase(receta, preciosMap, recetasMap, rendimientoBaseMap);
 
             const porciones = parseInt(receta.porciones) || 1;
             const precioVenta = parseFloat(receta.precio_venta) || 0;
