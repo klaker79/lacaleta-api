@@ -58,6 +58,30 @@ const OTHER_CATEGORIES = [
 ];
 
 /**
+ * Categorías que técnicamente son comida pero NO deben contar como "plato
+ * normal" en el análisis de Omnes (Iker 2026-06-09): cargos / extras /
+ * complementos / unidades sueltas. El análisis de Omnes mide la estrategia
+ * de carta como un cliente normal la percibe — pedir una guarnición o un
+ * pincho no es elegir un plato principal. Si entran al cálculo desvirtúan
+ * la dispersión y la amplitud (PAN POR PERSONA a 1€ frente a SOLOMILLO a
+ * 30€ no es una "carta dispersa", es un cubierto vs un plato).
+ *
+ * Solo afecta a Omnes. Los food cost, P&L, dashboard, etc. siguen contando
+ * estos productos normalmente.
+ *
+ * Acepta singular y plural, con y sin tilde.
+ */
+const OMNES_EXCLUDED_CATEGORIES = [
+    'pincho', 'pinchos',
+    'aperitivo', 'aperitivos',
+    'tapa', 'tapas',
+    'extra', 'extras',
+    'guarnicion', 'guarniciones',
+    'guarnición', 'guarniciones',
+    'aceite', 'aceites'
+];
+
+/**
  * Devuelve el bucket canónico (FOOD / BEVERAGE / OTHER) para una
  * categoría dada.
  *
@@ -114,17 +138,45 @@ function otherCategoriesSqlList() {
         .join(', ');
 }
 
+/**
+ * Lista SQL escapada de categorías a excluir del análisis de Omnes.
+ * Combina las categorías non-food (bebidas + suministros + base) con las
+ * `OMNES_EXCLUDED_CATEGORIES` (extras semánticos: pincho, aperitivo, tapa,
+ * extra, guarnición, aceite). El análisis de Omnes solo mira "platos
+ * principales tal cual los percibe el cliente".
+ *
+ * @returns {string}
+ */
+function omnesExcludedCategoriesSqlList() {
+    return [...BEVERAGE_CATEGORIES, ...OTHER_CATEGORIES, ...OMNES_EXCLUDED_CATEGORIES]
+        .map(c => `'${c.replace(/'/g, "''")}'`)
+        .join(', ');
+}
+
+function isOmnesExcluded(categoria) {
+    if (categoria === null || categoria === undefined) return false;
+    const c = String(categoria).toLowerCase().trim();
+    if (!c) return false;
+    if (BEVERAGE_CATEGORIES.includes(c)) return true;
+    if (OTHER_CATEGORIES.includes(c)) return true;
+    if (OMNES_EXCLUDED_CATEGORIES.includes(c)) return true;
+    return false;
+}
+
 module.exports = {
     FOOD_BUCKET,
     BEVERAGE_BUCKET,
     OTHER_BUCKET,
     BEVERAGE_CATEGORIES,
     OTHER_CATEGORIES,
+    OMNES_EXCLUDED_CATEGORIES,
     classifyCategoria,
     isBeverage,
     isOther,
     isFood,
+    isOmnesExcluded,
     nonFoodCategoriesSqlList,
     beverageCategoriesSqlList,
-    otherCategoriesSqlList
+    otherCategoriesSqlList,
+    omnesExcludedCategoriesSqlList
 };

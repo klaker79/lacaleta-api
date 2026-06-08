@@ -15,7 +15,7 @@
  */
 
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
-const { nonFoodCategoriesSqlList } = require('../utils/categoriaClassifier');
+const { nonFoodCategoriesSqlList, omnesExcludedCategoriesSqlList } = require('../utils/categoriaClassifier');
 const { validateDate } = require('../utils/validators');
 const {
     calcularDispersion,
@@ -171,7 +171,13 @@ async function getMenuEngineering(pool, restauranteId, opts = {}) {
  */
 async function getOmnesAnalysis(pool, restauranteId, opts = {}) {
     const periodo = resolverPeriodo(opts.desde, opts.hasta);
-    const nonFoodList = nonFoodCategoriesSqlList();
+    // Iker 2026-06-09: el análisis de Omnes mide la estrategia de carta
+    // como un cliente normal la percibe — pidiendo platos principales. Por
+    // eso excluimos bebidas, suministros/base (no se venden directamente),
+    // Y además extras semánticos (pincho, aperitivo, tapa, extra, guarnición,
+    // aceite). Si entraran al cálculo, un PAN POR PERSONA a 1€ o una OSTRA a
+    // 4€ inflarían la dispersión sin que reflejen una decisión real de carta.
+    const excludedList = omnesExcludedCategoriesSqlList();
 
     const ventasFiltroFecha = periodo ? `AND v.fecha >= $2 AND v.fecha < $3` : '';
     const ventasParams = periodo
@@ -190,7 +196,7 @@ async function getOmnesAnalysis(pool, restauranteId, opts = {}) {
          WHERE r.restaurante_id = $1
            AND r.deleted_at IS NULL
            AND r.activo = TRUE
-           AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
+           AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${excludedList})
            AND r.precio_venta IS NOT NULL
            AND r.precio_venta > 0
          GROUP BY r.id, r.nombre, r.precio_venta`,
