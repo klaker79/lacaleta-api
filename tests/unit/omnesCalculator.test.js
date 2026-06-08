@@ -76,6 +76,52 @@ describe('omnesCalculator.calcularDispersion', () => {
         expect(calcularDispersion(null).estado).toBe('sin_datos');
         expect(calcularDispersion(undefined).estado).toBe('sin_datos');
     });
+
+    test('N < 10 → usa min/max (sin percentiles)', () => {
+        const platos = Array.from({ length: 5 }, (_, i) => ({
+            precio_venta: 10 + i * 2, nombre: 'P' + i
+        }));
+        const r = calcularDispersion(platos);
+        expect(r.usa_percentiles).toBe(false);
+        expect(r.precio_min).toBe(10);
+        expect(r.precio_max).toBe(18);
+        expect(r.total_platos).toBe(5);
+    });
+
+    test('N >= 10 → usa percentiles p5/p95, ignora outliers extremos', () => {
+        // Carta tipo La Nave 5: 44 platos entre 12-30€ + outliers BOGAVANTE/PAN
+        const cuerpo = Array.from({ length: 42 }, (_, i) => ({
+            precio_venta: 12 + i * 0.4, nombre: 'Plato' + i
+        }));
+        const platos = [
+            { precio_venta: 1, nombre: 'PAN POR PERSONA' },        // outlier bajo
+            ...cuerpo,
+            { precio_venta: 160, nombre: 'BOGAVANTE' }             // outlier alto
+        ];
+        const r = calcularDispersion(platos);
+        expect(r.usa_percentiles).toBe(true);
+        expect(r.total_platos).toBe(44);
+        // p5 (índice 2) y p95 (índice 41) ignoran los outliers
+        expect(r.plato_min).not.toBe('PAN POR PERSONA');
+        expect(r.plato_max).not.toBe('BOGAVANTE');
+        expect(r.valor).toBeLessThan(5); // sin outliers el ratio es razonable
+    });
+
+    test('N exactamente 10 → ya usa percentiles', () => {
+        const platos = Array.from({ length: 10 }, (_, i) => ({
+            precio_venta: 10 + i * 2, nombre: 'P' + i
+        }));
+        const r = calcularDispersion(platos);
+        expect(r.usa_percentiles).toBe(true);
+        expect(r.total_platos).toBe(10);
+    });
+
+    test('N = 9 → usa min/max (umbral)', () => {
+        const platos = Array.from({ length: 9 }, (_, i) => ({
+            precio_venta: 10 + i * 2, nombre: 'P' + i
+        }));
+        expect(calcularDispersion(platos).usa_percentiles).toBe(false);
+    });
 });
 
 describe('omnesCalculator.calcularAmplitud', () => {
