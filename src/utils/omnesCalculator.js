@@ -23,15 +23,51 @@ function platosValidos(platos) {
 /**
  * 1. Dispersión = precio_max / precio_min.
  * Ideal ≤ 2.5.
+ *
+ * Para cartas con suficientes platos (N ≥ MIN_PLATOS_PERCENTILES) usamos
+ * los percentiles p5 y p95 en lugar del mínimo y máximo absolutos. Así
+ * recortamos outliers naturalmente: cargos automáticos (PAN POR PERSONA,
+ * CUBIERTO) en el extremo bajo y platos puntuales (BOGAVANTE de oferta,
+ * MARISCO especial) en el extremo alto dejan de inflar artificialmente
+ * el ratio. Es el estándar estadístico para análisis de carta.
+ *
+ * Si la carta es pequeña (N < MIN_PLATOS_PERCENTILES) los percentiles
+ * caerían sobre los mismos extremos, así que mantenemos min/max para
+ * no introducir ruido.
+ *
+ * El campo `usa_percentiles` permite al frontend / chat avisar al cliente
+ * de que el cálculo ignoró los outliers.
  */
+const MIN_PLATOS_PERCENTILES = 10;
+
 function calcularDispersion(platos) {
     const ps = platosValidos(platos);
     if (ps.length === 0) {
-        return { valor: null, estado: 'sin_datos', precio_max: null, precio_min: null, plato_max: null, plato_min: null };
+        return {
+            valor: null, estado: 'sin_datos',
+            precio_max: null, precio_min: null,
+            plato_max: null, plato_min: null,
+            usa_percentiles: false, total_platos: 0
+        };
     }
     const ordenados = [...ps].sort((a, b) => a.precio_venta - b.precio_venta);
-    const min = ordenados[0];
-    const max = ordenados[ordenados.length - 1];
+    const n = ordenados.length;
+
+    let idxMin, idxMax, usaPercentiles;
+    if (n >= MIN_PLATOS_PERCENTILES) {
+        // p5: floor(N * 0.05). N=44 → 2 (ignoramos 2 más baratos).
+        // p95: ceil(N * 0.95) - 1. N=44 → 41 (ignoramos 2 más caros).
+        idxMin = Math.floor(n * 0.05);
+        idxMax = Math.max(idxMin, Math.ceil(n * 0.95) - 1);
+        usaPercentiles = true;
+    } else {
+        idxMin = 0;
+        idxMax = n - 1;
+        usaPercentiles = false;
+    }
+
+    const min = ordenados[idxMin];
+    const max = ordenados[idxMax];
     const valor = max.precio_venta / min.precio_venta;
     let estado;
     if (valor <= 2.5) estado = 'ok';
@@ -43,7 +79,9 @@ function calcularDispersion(platos) {
         precio_max: max.precio_venta,
         precio_min: min.precio_venta,
         plato_max: max.nombre,
-        plato_min: min.nombre
+        plato_min: min.nombre,
+        usa_percentiles: usaPercentiles,
+        total_platos: n
     };
 }
 
