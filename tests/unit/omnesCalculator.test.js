@@ -77,50 +77,62 @@ describe('omnesCalculator.calcularDispersion', () => {
         expect(calcularDispersion(undefined).estado).toBe('sin_datos');
     });
 
-    test('N < 10 → usa min/max (sin percentiles)', () => {
+    test('carta uniforme sin outliers → filtro NO se aplica', () => {
         const platos = Array.from({ length: 5 }, (_, i) => ({
-            precio_venta: 10 + i * 2, nombre: 'P' + i
+            precio_venta: 10 + i * 2, nombre: 'P' + i  // 10, 12, 14, 16, 18
         }));
         const r = calcularDispersion(platos);
-        expect(r.usa_percentiles).toBe(false);
+        expect(r.filtro_outliers_aplicado).toBe(false);
+        expect(r.platos_excluidos).toBe(0);
         expect(r.precio_min).toBe(10);
         expect(r.precio_max).toBe(18);
         expect(r.total_platos).toBe(5);
     });
 
-    test('N >= 10 → usa percentiles p5/p95, ignora outliers extremos', () => {
-        // Carta tipo La Nave 5: 44 platos entre 12-30€ + outliers BOGAVANTE/PAN
-        const cuerpo = Array.from({ length: 42 }, (_, i) => ({
-            precio_venta: 12 + i * 0.4, nombre: 'Plato' + i
-        }));
+    test('carta pequeña con outlier de unidad (OSTRA 4€ vs mediana 15) → se excluye', () => {
+        // Caso Demo Trattoria: OSTRA es por unidad, no plato
         const platos = [
-            { precio_venta: 1, nombre: 'PAN POR PERSONA' },        // outlier bajo
-            ...cuerpo,
-            { precio_venta: 160, nombre: 'BOGAVANTE' }             // outlier alto
+            { precio_venta: 4, nombre: 'OSTRA' },
+            { precio_venta: 12, nombre: 'PASTA' },
+            { precio_venta: 15, nombre: 'PIZZA' },        // mediana
+            { precio_venta: 18, nombre: 'RISOTTO' },
+            { precio_venta: 25, nombre: 'OSSOBUCO' }
         ];
         const r = calcularDispersion(platos);
-        expect(r.usa_percentiles).toBe(true);
-        expect(r.total_platos).toBe(44);
-        // p5 (índice 2) y p95 (índice 41) ignoran los outliers
+        expect(r.filtro_outliers_aplicado).toBe(true);
+        expect(r.platos_excluidos).toBe(1);
+        expect(r.plato_min).not.toBe('OSTRA');
+        expect(r.total_platos).toBe(5);
+    });
+
+    test('carta grande con outliers extremos (PAN 1€ + BOGAVANTE 160€) → ambos excluidos', () => {
+        // Caso La Nave 5: 42 platos en rango normal + 2 outliers
+        const cuerpo = Array.from({ length: 42 }, (_, i) => ({
+            precio_venta: 12 + i * 0.4, nombre: 'Plato' + i  // 12 a 28.4
+        }));
+        const platos = [
+            { precio_venta: 1, nombre: 'PAN POR PERSONA' },
+            ...cuerpo,
+            { precio_venta: 160, nombre: 'BOGAVANTE' }
+        ];
+        const r = calcularDispersion(platos);
+        expect(r.filtro_outliers_aplicado).toBe(true);
+        expect(r.platos_excluidos).toBeGreaterThanOrEqual(2);
         expect(r.plato_min).not.toBe('PAN POR PERSONA');
         expect(r.plato_max).not.toBe('BOGAVANTE');
-        expect(r.valor).toBeLessThan(5); // sin outliers el ratio es razonable
+        expect(r.valor).toBeLessThan(5);
     });
 
-    test('N exactamente 10 → ya usa percentiles', () => {
-        const platos = Array.from({ length: 10 }, (_, i) => ({
-            precio_venta: 10 + i * 2, nombre: 'P' + i
-        }));
+    test('salvaguarda: si el filtro deja <2 platos, usa todos', () => {
+        // Caso patológico: precios muy dispersos donde mediana/2.5 deja casi nada
+        const platos = [
+            { precio_venta: 1, nombre: 'A' },
+            { precio_venta: 100, nombre: 'B' }
+        ];
         const r = calcularDispersion(platos);
-        expect(r.usa_percentiles).toBe(true);
-        expect(r.total_platos).toBe(10);
-    });
-
-    test('N = 9 → usa min/max (umbral)', () => {
-        const platos = Array.from({ length: 9 }, (_, i) => ({
-            precio_venta: 10 + i * 2, nombre: 'P' + i
-        }));
-        expect(calcularDispersion(platos).usa_percentiles).toBe(false);
+        // No se cae con sin_datos; calcula sobre los 2 originales
+        expect(r.estado).not.toBe('sin_datos');
+        expect(r.total_platos).toBe(2);
     });
 });
 
