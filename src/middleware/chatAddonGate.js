@@ -1,22 +1,28 @@
 /**
- * chatAddonGate — middleware para POST /chat.
+ * chatAddonGate — middleware para POST /chat (CUOTA mensual de consultas).
+ *
+ * IMPORTANTE (2026-06-08): este middleware YA NO chequea `chat_addon`. En el
+ * modelo single-plan (Self/Pro), el chat IA viene INCLUIDO en cualquier plan
+ * activo. La validación de "tiene derecho a usar la app" la hace ahora
+ * `requireActiveSubscription` (que se aplica en chat.routes.js junto con este
+ * middleware). Aquí solo gestionamos la CUOTA de 300 consultas/mes.
+ *
+ * El campo `chat_addon` se mantiene en BD por compatibilidad histórica con los
+ * 12 tenants grandfathered (mayo 2026), pero ya no se lee como gate. Si en
+ * el futuro se separa el chat como add-on de pago, vuelve el check.
  *
  * Comportamiento:
- *   1. Lee el estado del add-on y contador del restaurante actual.
- *   2. Si el contador se incrementaría a más del límite tras consumir
- *      esta consulta, rechaza con 429 (cuota agotada).
- *   3. Si el reset_at lleva > 30 días, lo resetea perezosamente.
- *   4. Si chat_addon === false → 403 (CHAT_NOT_ACTIVATED).
- *   5. Si todo OK → incrementa contador en BBDD ATÓMICAMENTE
- *      (UPDATE ... RETURNING) y deja pasar al handler.
+ *   1. Lee el contador del restaurante.
+ *   2. Si el reset_at lleva > 30 días, lo resetea perezosamente.
+ *   3. Si el contador llegaría al límite, rechaza con 429 (cuota agotada).
+ *   4. Si todo OK → incrementa contador ATÓMICAMENTE (UPDATE ... RETURNING).
  *
  * Por qué ATOMIC: dos consultas concurrentes podrían leer 299, decidir que
  * ambas pasan y dejar el contador en 301. El UPDATE ... RETURNING garantiza
  * exclusión mutua a nivel de fila.
  *
- * Por qué reset perezoso (no cron): no necesitamos un cron — al primer
- * acceso post-reset_at+30d el middleware detecta y resetea. Más simple,
- * sin dependencias adicionales.
+ * Por qué reset perezoso (no cron): al primer acceso post-reset_at+30d el
+ * middleware detecta y resetea. Sin dependencias adicionales.
  */
 
 const { log } = require('../utils/logger');
@@ -36,8 +42,7 @@ function chatAddonGate(pool) {
             await client.query('BEGIN');
 
             const lockResult = await client.query(
-                `SELECT chat_addon,
-                        chat_consultas_mes,
+                `SELECT chat_consultas_mes,
                         chat_consultas_reset_at,
                         chat_consultas_reset_at + INTERVAL '${RESET_INTERVAL_DAYS} days' AS next_reset
                  FROM restaurantes
@@ -49,15 +54,11 @@ function chatAddonGate(pool) {
                 await client.query('ROLLBACK');
                 return res.status(404).json({ error: 'Restaurante no encontrado' });
             }
-            const { chat_addon, chat_consultas_mes, next_reset } = lockResult.rows[0];
+            const { chat_consultas_mes, next_reset } = lockResult.rows[0];
 
-            if (!chat_addon) {
-                await client.query('ROLLBACK');
-                return res.status(403).json({
-                    error: 'CHAT_NOT_ACTIVATED',
-                    message: 'El add-on Chat IA no está activado para este restaurante.'
-                });
-            }
+            // (2026-06-08) check de chat_addon eliminado — single-plan model:
+            // el chat IA viene incluido en cualquier plan activo. requireActiveSubscription
+            // ya rechaza si no hay plan vigente, así que aquí solo gestionamos cuota.
 
             // Reset perezoso: si el ciclo mensual ha caducado, ponemos contador a 0
             // y avanzamos reset_at en bloques de 30 días hasta colocarnos en el futuro.
