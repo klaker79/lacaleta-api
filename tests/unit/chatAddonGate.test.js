@@ -58,22 +58,26 @@ function mockReqRes(restauranteId = 3) {
 }
 
 describe('chatAddonGate', () => {
-    test('addon=false → 403 CHAT_NOT_ACTIVATED, no llama next', async () => {
+    test('chat_addon ya NO se chequea (modelo single-plan 2026-06-08) — deja pasar y cuenta cuota', async () => {
+        // En el modelo single-plan, el chat IA va incluido en cualquier plan
+        // activo (lo gatea el subscription middleware global en server.js).
+        // chatAddonGate solo gestiona la cuota mensual.
+        // Antes: si chat_addon=false → 403 CHAT_NOT_ACTIVATED.
+        // Ahora: chat_addon es irrelevante, pasa si hay cuota.
         const pool = makePoolMock({
             row: {
-                chat_addon: false,
                 chat_consultas_mes: 0,
                 chat_consultas_reset_at: new Date(),
                 next_reset: new Date(Date.now() + 30 * 86400000)
             }
         });
-        const { req, res, next, getNextCalled, getStatus, getPayload } = mockReqRes();
+        const { req, res, next, getNextCalled, getStatus } = mockReqRes();
         await chatAddonGate(pool)(req, res, next);
-        expect(getStatus()).toBe(403);
-        expect(getPayload()).toMatchObject({ error: 'CHAT_NOT_ACTIVATED' });
-        expect(getNextCalled()).toBe(false);
-        // Debe rollback (no hubo commit)
-        expect(pool.queries.some(q => /ROLLBACK/i.test(q.sql))).toBe(true);
+        expect(getNextCalled()).toBe(true);
+        expect(getStatus()).toBe(200);
+        expect(req.chatQuota).toEqual({ used: 1, limit: CHAT_MONTHLY_LIMIT });
+        // Commit hubo (se contó la consulta)
+        expect(pool.queries.some(q => /COMMIT/i.test(q.sql))).toBe(true);
     });
 
     test('addon=true con cuota disponible → next() y contador +1', async () => {
