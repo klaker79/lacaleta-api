@@ -71,9 +71,11 @@ const OTHER_CATEGORIES = [
  *
  * Acepta singular y plural, con y sin tilde.
  */
-// Iker 2026-06-09: ACEITE NO se excluye. Es un plato real que se vende como
-// producto (aceite gourmet a la mesa). Confundí su mensaje inicial al añadirlo
-// — los otros 5 sí son extras genuinos.
+// Esta lista es por NOMBRE DE CATEGORÍA, no por producto. La forma correcta de
+// sacar un ítem concreto (ACEITE 1,50€, PAN POR PERSONA, OSTRAS, OURIZOS...) del
+// análisis de carta es ponerle `categoria='extra'` en su receta — así cae aquí.
+// (No metemos 'aceite' como categoría: el ACEITE de La Nave 5 es categoria
+// 'alimentos' y se reclasifica a 'extra' en datos, no por nombre.)
 const OMNES_EXCLUDED_CATEGORIES = [
     'pincho', 'pinchos',
     'aperitivo', 'aperitivos',
@@ -144,7 +146,7 @@ function otherCategoriesSqlList() {
  * Lista SQL escapada de categorías a excluir del análisis de Omnes.
  * Combina las categorías non-food (bebidas + suministros + base) con las
  * `OMNES_EXCLUDED_CATEGORIES` (extras semánticos: pincho, aperitivo, tapa,
- * extra, guarnición, aceite). El análisis de Omnes solo mira "platos
+ * extra, guarnición). El análisis de Omnes solo mira "platos
  * principales tal cual los percibe el cliente".
  *
  * @returns {string}

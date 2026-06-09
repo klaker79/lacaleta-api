@@ -15,7 +15,7 @@
  */
 
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
-const { nonFoodCategoriesSqlList, omnesExcludedCategoriesSqlList } = require('../utils/categoriaClassifier');
+const { omnesExcludedCategoriesSqlList } = require('../utils/categoriaClassifier');
 const { validateDate } = require('../utils/validators');
 const {
     calcularDispersion,
@@ -46,7 +46,13 @@ function resolverPeriodo(desde, hasta) {
  */
 async function getMenuEngineering(pool, restauranteId, opts = {}) {
     const periodo = resolverPeriodo(opts.desde, opts.hasta);
-    const nonFoodList = nonFoodCategoriesSqlList();
+    // BCG y Omnes deben analizar el MISMO universo de platos. Antes el BCG
+    // excluía solo no-food (bebidas/base) y dejaba entrar los extras
+    // (extra/tapa/pincho/guarnición/aperitivo), así que PAN POR PERSONA o un
+    // ACEITE de 1,50€ salían como caballo/perro aunque NO son platos. Ahora
+    // usa la misma exclusión que Omnes (omnesExcludedCategoriesSqlList, que es
+    // superset de no-food + extras). Unificado 2026-06-09.
+    const excludedList = omnesExcludedCategoriesSqlList();
 
     const ventasFiltroFecha = periodo ? `AND v.fecha >= $2 AND v.fecha < $3` : '';
     const ventasParams = periodo
@@ -66,7 +72,7 @@ async function getMenuEngineering(pool, restauranteId, opts = {}) {
          WHERE r.restaurante_id = $1
            AND r.deleted_at IS NULL
            AND r.activo = TRUE
-           AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${nonFoodList})
+           AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${excludedList})
          GROUP BY r.id, r.nombre, r.categoria, r.precio_venta, r.ingredientes, r.porciones`,
         ventasParams
     );
