@@ -4,7 +4,9 @@
  * ═══════════════════════════════════════════════════
  *
  * Cubre el contrato HTTP de los endpoints añadidos 2026-05-23:
- *   - POST /chat/health-check → requiere auth, gating por chat_addon
+ *   - POST /chat/health-check → requiere auth + suscripción activa (gate global).
+ *     Single-plan (2026-06-09): el Coach va INCLUIDO en el plan; ya NO se chequea
+ *     chat_addon, así que este endpoint nunca debe devolver CHAT_NOT_ACTIVATED.
  *   - GET  /chat/health-check/status → barato, sin tokens
  *
  * No invoca Claude real en CI (caro y dependiente de la API). Solo verifica
@@ -68,14 +70,18 @@ describe('Health Check Coach — endpoints + multi-tenant', () => {
             .set('Origin', 'http://localhost:3001')
             .set('Authorization', `Bearer ${authToken}`);
 
-        // Posibles status según config de CI:
-        //   200 — chat_addon=true + Claude key + datos suficientes (raro en CI)
-        //   403 — chat_addon=false (CHAT_NOT_ACTIVATED, lo más común)
+        // Posibles status según config de CI (single-plan 2026-06-09):
+        //   200 — plan activo + Claude key + datos suficientes (raro en CI)
+        //   403 — SUBSCRIPTION_REQUIRED si el tenant de test no tiene plan vigente
+        //         (lo emite el gate global de server.js, NO este endpoint)
         //   500 — ANTHROPIC_API_KEY missing o JSON inválido del modelo
         //   429 — ratelimit acumulado
         expect([200, 403, 429, 500]).toContain(res.status);
         if (res.status === 403) {
-            expect(res.body.error).toBe('CHAT_NOT_ACTIVATED');
+            // Regresión: el gate de chat_addon se eliminó. El único 403 legítimo
+            // ahora es el del gate global de suscripción.
+            expect(res.body.error).not.toBe('CHAT_NOT_ACTIVATED');
+            expect(res.body.error).toBe('SUBSCRIPTION_REQUIRED');
         }
     });
 });
