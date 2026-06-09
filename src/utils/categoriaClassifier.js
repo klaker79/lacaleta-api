@@ -71,14 +71,16 @@ const OTHER_CATEGORIES = [
  *
  * Acepta singular y plural, con y sin tilde.
  */
+// Iker 2026-06-09: ACEITE NO se excluye. Es un plato real que se vende como
+// producto (aceite gourmet a la mesa). Confundí su mensaje inicial al añadirlo
+// — los otros 5 sí son extras genuinos.
 const OMNES_EXCLUDED_CATEGORIES = [
     'pincho', 'pinchos',
     'aperitivo', 'aperitivos',
     'tapa', 'tapas',
     'extra', 'extras',
     'guarnicion', 'guarniciones',
-    'guarnición', 'guarniciones',
-    'aceite', 'aceites'
+    'guarnición'
 ];
 
 /**
