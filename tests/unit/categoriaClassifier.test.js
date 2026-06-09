@@ -34,17 +34,21 @@ describe('categoriaClassifier — buckets existentes', () => {
 });
 
 describe('categoriaClassifier.isOmnesExcluded', () => {
-    test('pincho / aperitivo / tapa / extra / guarnición / aceite → excluidos', () => {
-        ['pincho', 'aperitivo', 'tapa', 'extra', 'guarnicion', 'aceite']
+    test('pincho / aperitivo / tapa / extra / guarnición → excluidos', () => {
+        ['pincho', 'aperitivo', 'tapa', 'extra', 'guarnicion']
             .forEach(cat => {
                 expect(isOmnesExcluded(cat)).toBe(true);
             });
     });
     test('plural también acepta', () => {
-        ['pinchos', 'aperitivos', 'tapas', 'extras', 'guarniciones', 'aceites']
+        ['pinchos', 'aperitivos', 'tapas', 'extras', 'guarniciones']
             .forEach(cat => {
                 expect(isOmnesExcluded(cat)).toBe(true);
             });
+    });
+    test('aceite NO se excluye (Iker 2026-06-09: es plato vendible real)', () => {
+        expect(isOmnesExcluded('aceite')).toBe(false);
+        expect(isOmnesExcluded('aceites')).toBe(false);
     });
     test('con tilde y sin tilde', () => {
         expect(isOmnesExcluded('guarnición')).toBe(true);
