@@ -888,7 +888,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
         }
     });
 
-    router.put('/restaurant/comida-personal', authMiddleware, async (req, res) => {
+    router.put('/restaurant/comida-personal', authMiddleware, requireAdmin, async (req, res) => {
         try {
             const activa = req.body?.activa === true;
             await pool.query(
