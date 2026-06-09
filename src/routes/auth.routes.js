@@ -874,6 +874,34 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
         }
     });
 
+    // ========== OPT-IN COMIDA DE PERSONAL (por restaurante) ==========
+    router.get('/restaurant/comida-personal', authMiddleware, async (req, res) => {
+        try {
+            const r = await pool.query(
+                'SELECT comida_personal_activa FROM restaurantes WHERE id = $1',
+                [req.restauranteId]
+            );
+            res.json({ activa: r.rows[0]?.comida_personal_activa === true });
+        } catch (err) {
+            log('error', 'Error leyendo comida_personal_activa', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    router.put('/restaurant/comida-personal', authMiddleware, async (req, res) => {
+        try {
+            const activa = req.body?.activa === true;
+            await pool.query(
+                'UPDATE restaurantes SET comida_personal_activa = $1 WHERE id = $2',
+                [activa, req.restauranteId]
+            );
+            res.json({ activa });
+        } catch (err) {
+            log('error', 'Error guardando comida_personal_activa', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     router.post('/team/invite', authMiddleware, requireAdmin, async (req, res) => {
         try {
             const { nombre, email, password, rol } = req.body;
