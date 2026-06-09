@@ -394,6 +394,17 @@ async function initializeDatabase(pool) {
     log('info', 'Migración 013 proveedores.iva_pct completada');
   } catch (e) { log('warn', 'Migración 013 proveedores.iva_pct', { error: e.message }); }
 
+  // 🍽️ Migración 014: opt-in de "comida de personal" por restaurante.
+  // Apagado por defecto → la función es invisible (sin casilla en pedidos, sin
+  // pestaña) salvo que el restaurante la active en Configuración.
+  try {
+    await pool.query(`
+            ALTER TABLE restaurantes
+                ADD COLUMN IF NOT EXISTS comida_personal_activa BOOLEAN NOT NULL DEFAULT FALSE;
+        `);
+    log('info', 'Migración 014 restaurantes.comida_personal_activa completada');
+  } catch (e) { log('warn', 'Migración 014 restaurantes.comida_personal_activa', { error: e.message }); }
+
   // Añadir columnas para verificación de email
   try {
     await pool.query(`
