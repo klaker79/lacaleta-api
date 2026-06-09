@@ -76,6 +76,7 @@ describe('omnesCalculator.calcularDispersion', () => {
         expect(calcularDispersion(null).estado).toBe('sin_datos');
         expect(calcularDispersion(undefined).estado).toBe('sin_datos');
     });
+
 });
 
 describe('omnesCalculator.calcularAmplitud', () => {

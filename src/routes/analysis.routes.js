@@ -24,8 +24,20 @@ module.exports = function (pool) {
     // que tanto los endpoints REST como las tools del chat IA usen el mismo
     // cálculo. UNA fuente de verdad — sin riesgo de divergencia entre la UI
     // y lo que el chat responde.
+    // Helper: forzar siempre cálculo fresco. Sin esto el navegador puede
+    // cachear el response (vimos 304 Not Modified en producción cuando la
+    // BD cambia pero el cliente sigue viendo datos viejos). Estos análisis
+    // dependen de cambios diarios (ventas, recetas, categorías) — nunca
+    // deben servirse desde cache HTTP.
+    function setNoCache(res) {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+    }
+
     router.get('/analysis/menu-engineering', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
+            setNoCache(res);
             const resultado = await getMenuEngineering(pool, req.restauranteId, {
                 desde: req.query.desde,
                 hasta: req.query.hasta
@@ -47,6 +59,7 @@ module.exports = function (pool) {
      */
     router.get('/analysis/omnes', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
+            setNoCache(res);
             const resultado = await getOmnesAnalysis(pool, req.restauranteId, {
                 desde: req.query.desde,
                 hasta: req.query.hasta

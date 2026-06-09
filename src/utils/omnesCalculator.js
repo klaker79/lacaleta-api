@@ -23,11 +23,23 @@ function platosValidos(platos) {
 /**
  * 1. Dispersión = precio_max / precio_min.
  * Ideal ≤ 2.5.
+ *
+ * El filtrado de "platos no normales" (PAN, OSTRA por unidad, GUARNICIÓN,
+ * APERITIVO, PINCHO, TAPA, EXTRA, ACEITE, BEBIDAS, SUMINISTROS, BASE) se
+ * hace en el SQL del servicio antes de pasar aquí — ver
+ * `menuEngineeringService.getOmnesAnalysis` + `omnesExcludedCategoriesSqlList`
+ * en `categoriaClassifier.js`. Aquí ya recibimos solo platos principales,
+ * así que el cálculo es directo y honesto: max/min absolutos del conjunto
+ * que el cliente realmente quiere medir.
  */
 function calcularDispersion(platos) {
     const ps = platosValidos(platos);
     if (ps.length === 0) {
-        return { valor: null, estado: 'sin_datos', precio_max: null, precio_min: null, plato_max: null, plato_min: null };
+        return {
+            valor: null, estado: 'sin_datos',
+            precio_max: null, precio_min: null,
+            plato_max: null, plato_min: null
+        };
     }
     const ordenados = [...ps].sort((a, b) => a.precio_venta - b.precio_venta);
     const min = ordenados[0];
