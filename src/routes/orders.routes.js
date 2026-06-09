@@ -94,10 +94,14 @@ module.exports = function (pool) {
                 }
             }
             if (Array.isArray(ingredientes) && ingredientes.length > 0) {
-                const ingIds = ingredientes
+                // Set: una línea puede repetir ingredienteId (p.ej. al DIVIDIR una
+                // línea en producción + comida personal, o al añadir el mismo
+                // ingrediente dos veces). El conteo se hace sobre IDs únicos, porque
+                // la query SELECT ... WHERE id = ANY() devuelve filas distintas.
+                const ingIds = [...new Set(ingredientes
                     .filter(it => it.tipo !== 'ajuste')
                     .map(it => it.ingredienteId || it.ingrediente_id)
-                    .filter(Boolean);
+                    .filter(Boolean))];
                 if (ingIds.length > 0) {
                     const ingCheck = await client.query(
                         'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
@@ -226,10 +230,14 @@ module.exports = function (pool) {
             // Audit 2026-05-03 — antes este endpoint sólo verificaba que el pedido
             // pertenecía al tenant, no los IDs nuevos del body.
             if (Array.isArray(ingredientes) && ingredientes.length > 0) {
-                const ingIds = ingredientes
+                // Set: una línea puede repetir ingredienteId (p.ej. al DIVIDIR una
+                // línea en producción + comida personal, o al añadir el mismo
+                // ingrediente dos veces). El conteo se hace sobre IDs únicos, porque
+                // la query SELECT ... WHERE id = ANY() devuelve filas distintas.
+                const ingIds = [...new Set(ingredientes
                     .filter(it => it.tipo !== 'ajuste')
                     .map(it => it.ingredienteId || it.ingrediente_id)
-                    .filter(Boolean);
+                    .filter(Boolean))];
                 if (ingIds.length > 0) {
                     const ingCheck = await client.query(
                         'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
