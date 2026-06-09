@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { authMiddleware, requireAdmin, tokenBlacklist } = require('../middleware/auth');
-const { authLimiter } = require('../middleware/rateLimit');
+const { authLimiter, globalLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { sanitizeString } = require('../utils/validators');
 // URLs parametrizadas (env vars con fallback para backwards-compat)
@@ -875,7 +875,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
     });
 
     // ========== OPT-IN COMIDA DE PERSONAL (por restaurante) ==========
-    router.get('/restaurant/comida-personal', authMiddleware, async (req, res) => {
+    router.get('/restaurant/comida-personal', globalLimiter, authMiddleware, async (req, res) => {
         try {
             const r = await pool.query(
                 'SELECT comida_personal_activa FROM restaurantes WHERE id = $1',
@@ -888,7 +888,7 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
         }
     });
 
-    router.put('/restaurant/comida-personal', authMiddleware, requireAdmin, async (req, res) => {
+    router.put('/restaurant/comida-personal', authLimiter, authMiddleware, requireAdmin, async (req, res) => {
         try {
             const activa = req.body?.activa === true;
             await pool.query(
