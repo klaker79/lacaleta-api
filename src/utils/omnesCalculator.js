@@ -38,7 +38,8 @@ function calcularDispersion(platos) {
         return {
             valor: null, estado: 'sin_datos',
             precio_max: null, precio_min: null,
-            plato_max: null, plato_min: null
+            plato_max: null, plato_min: null,
+            mas_caros: [], mas_baratos: []
         };
     }
     const ordenados = [...ps].sort((a, b) => a.precio_venta - b.precio_venta);
@@ -49,13 +50,22 @@ function calcularDispersion(platos) {
     if (valor <= 2.5) estado = 'ok';
     else if (valor <= 3.5) estado = 'alta';
     else estado = 'muy_alta';
+    // Top 3 caros y top 3 baratos (con nombre + precio). Sirven para que el
+    // dueño detecte de un vistazo ítems mal categorizados (una bebida o un
+    // extra que se cuela en los extremos) sin abrir nada. Si hay menos de 3
+    // platos, slice devuelve los que haya.
+    const mapPlato = p => ({ nombre: p.nombre, precio: p.precio_venta });
+    const mas_baratos = ordenados.slice(0, 3).map(mapPlato);
+    const mas_caros = ordenados.slice(-3).reverse().map(mapPlato);
     return {
         valor: Math.round(valor * 100) / 100,
         estado,
         precio_max: max.precio_venta,
         precio_min: min.precio_venta,
         plato_max: max.nombre,
-        plato_min: min.nombre
+        plato_min: min.nombre,
+        mas_caros,
+        mas_baratos
     };
 }
 

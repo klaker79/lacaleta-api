@@ -72,6 +72,49 @@ describe('omnesCalculator.calcularDispersion', () => {
         expect(r.precio_max).toBe(15);
     });
 
+    test('mas_caros y mas_baratos: top 3 / bottom 3 con nombre+precio', () => {
+        const r = calcularDispersion([
+            { precio_venta: 5, nombre: 'E' },
+            { precio_venta: 45, nombre: 'A' },
+            { precio_venta: 8, nombre: 'D' },
+            { precio_venta: 26, nombre: 'B' },
+            { precio_venta: 19, nombre: 'C' }
+        ]);
+        // más caros: 45, 26, 19 (desc)
+        expect(r.mas_caros).toEqual([
+            { nombre: 'A', precio: 45 },
+            { nombre: 'B', precio: 26 },
+            { nombre: 'C', precio: 19 }
+        ]);
+        // más baratos: 5, 8, 19 (asc)
+        expect(r.mas_baratos).toEqual([
+            { nombre: 'E', precio: 5 },
+            { nombre: 'D', precio: 8 },
+            { nombre: 'C', precio: 19 }
+        ]);
+    });
+
+    test('menos de 3 platos → mas_caros/mas_baratos con los que haya', () => {
+        const r = calcularDispersion([
+            { precio_venta: 10, nombre: 'A' },
+            { precio_venta: 20, nombre: 'B' }
+        ]);
+        expect(r.mas_caros).toEqual([
+            { nombre: 'B', precio: 20 },
+            { nombre: 'A', precio: 10 }
+        ]);
+        expect(r.mas_baratos).toEqual([
+            { nombre: 'A', precio: 10 },
+            { nombre: 'B', precio: 20 }
+        ]);
+    });
+
+    test('sin_datos → mas_caros/mas_baratos vacíos', () => {
+        const r = calcularDispersion([]);
+        expect(r.mas_caros).toEqual([]);
+        expect(r.mas_baratos).toEqual([]);
+    });
+
     test('input no-array → sin_datos', () => {
         expect(calcularDispersion(null).estado).toBe('sin_datos');
         expect(calcularDispersion(undefined).estado).toBe('sin_datos');
