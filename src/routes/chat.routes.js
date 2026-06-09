@@ -36,8 +36,7 @@ module.exports = function (pool) {
         }
         try {
             const result = await pool.query(
-                `SELECT chat_addon,
-                        chat_consultas_mes,
+                `SELECT chat_consultas_mes,
                         chat_consultas_reset_at,
                         chat_consultas_reset_at + INTERVAL '${RESET_INTERVAL_DAYS} days' AS next_reset
                  FROM restaurantes
@@ -48,8 +47,13 @@ module.exports = function (pool) {
                 return res.status(404).json({ error: 'Restaurante no encontrado' });
             }
             const row = result.rows[0];
+            // Single-plan (2026-06-09): el chat IA viene INCLUIDO en cualquier plan
+            // activo. Si la petición llega hasta aquí, el gate global de suscripción
+            // (server.js) ya garantizó plan activo / trial vigente, así que el chat
+            // SIEMPRE está habilitado. `chat_addon` se conserva en BD solo para la
+            // auditoría Polar de los tenants grandfathered; ya no es un gate.
             res.json({
-                enabled: row.chat_addon,
+                enabled: true,
                 used: row.chat_consultas_mes,
                 limit: CHAT_MONTHLY_LIMIT,
                 resets_at: row.next_reset
@@ -131,7 +135,8 @@ module.exports = function (pool) {
     // GET /chat/informe-mensual?mes=YYYY-MM — devuelve JSON con los datos
     // del mes para componer el informe ejecutivo. Solo lectura, sin coste
     // de tokens (NO pasa por chatAddonGate porque no consume cuota Claude).
-    // Verifica chat_addon=true manualmente sin incrementar contador.
+    // Single-plan (2026-06-09): incluido en cualquier plan activo — el gate
+    // global de suscripción (server.js) ya bloquea a quien no tiene plan vigente.
     router.get('/chat/informe-mensual', authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
@@ -139,13 +144,6 @@ module.exports = function (pool) {
         }
         const mes = req.query.mes; // 'YYYY-MM' opcional
         try {
-            const addonCheck = await pool.query(
-                'SELECT chat_addon FROM restaurantes WHERE id = $1',
-                [restauranteId]
-            );
-            if (!addonCheck.rows[0]?.chat_addon) {
-                return res.status(403).json({ error: 'CHAT_NOT_ACTIVATED' });
-            }
             const informe = await generarInformeMensual(pool, restauranteId, mes);
             res.json(informe);
         } catch (err) {
@@ -170,13 +168,10 @@ module.exports = function (pool) {
         const lang = req.query.lang === 'en' ? 'en' : 'es';
         try {
             const r = await pool.query(
-                'SELECT chat_addon, nombre, moneda FROM restaurantes WHERE id = $1',
+                'SELECT nombre, moneda FROM restaurantes WHERE id = $1',
                 [restauranteId]
             );
-            const row = r.rows[0];
-            if (!row?.chat_addon) {
-                return res.status(403).json({ error: 'CHAT_NOT_ACTIVATED' });
-            }
+            const row = r.rows[0] || {};
             const datos = await generarInformeMensual(pool, restauranteId, mes);
             const { html, usage } = await generarInformeHtml({
                 datos,
@@ -202,22 +197,20 @@ module.exports = function (pool) {
     // POST /chat/health-check — Genera o devuelve el report semanal del Coach.
     // Si ya existe report de la semana ISO actual → lo devuelve cacheado.
     // Si no → invoca Claude con tools y persiste el report.
-    // Gating: chat_addon=true (igual que el chat normal). NO incrementa el
-    // contador de consultas — es bajo demanda, máximo 1 generación por semana.
+    // Single-plan (2026-06-09): el Coach viene INCLUIDO en cualquier plan activo
+    // (gate global de suscripción en server.js). NO incrementa el contador de
+    // consultas — es bajo demanda, máximo 1 generación por semana.
     router.post('/chat/health-check', costlyApiLimiter, authMiddleware, async (req, res) => {
         const restauranteId = req.restauranteId;
         if (!restauranteId) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });
         }
         try {
-            const addonCheck = await pool.query(
-                'SELECT chat_addon, nombre, moneda FROM restaurantes WHERE id = $1',
+            const restRow = await pool.query(
+                'SELECT nombre, moneda FROM restaurantes WHERE id = $1',
                 [restauranteId]
             );
-            const row = addonCheck.rows[0];
-            if (!row?.chat_addon) {
-                return res.status(403).json({ error: 'CHAT_NOT_ACTIVATED' });
-            }
+            const row = restRow.rows[0] || {};
             const report = await coachReportService.getOrCreateWeeklyReport(
                 pool,
                 restauranteId,
@@ -248,13 +241,10 @@ module.exports = function (pool) {
             return res.status(401).json({ error: 'No restaurante asociado al usuario' });
         }
         try {
-            const addonCheck = await pool.query(
-                'SELECT chat_addon FROM restaurantes WHERE id = $1',
-                [restauranteId]
-            );
-            if (!addonCheck.rows[0]?.chat_addon) {
-                return res.json({ has_new: false, addon_enabled: false });
-            }
+            // Single-plan (2026-06-09): el Coach viene incluido en el plan. El gate
+            // global de suscripción (server.js) ya bloqueó a quien no tiene plan
+            // vigente. `addon_enabled` se mantiene en true por compatibilidad con
+            // el frontend (chat-widget.js lee este campo para pintar el badge).
             const status = await coachReportService.getReportStatus(pool, restauranteId);
             res.json({ ...status, addon_enabled: true });
         } catch (err) {
