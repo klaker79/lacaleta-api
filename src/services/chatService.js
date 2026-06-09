@@ -16,6 +16,7 @@ const Anthropic = require('@anthropic-ai/sdk').default;
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
+const { prorratearGastosFijos } = require('../utils/prorrateo');
 const {
     getMenuEngineering,
     getOmnesAnalysis
@@ -130,7 +131,7 @@ LISTAS / DETALLE (para análisis por ítem concreto):
 AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "mejor"):
 - resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
 - resumen_ventas_periodo(fecha_desde, fecha_hasta) → Total ingresos, nº tickets, ticket medio, top recetas.
-- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos, margen bruto/neto.
+- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos (mes completo + PRORRATEADO al periodo) y margen bruto/neto. Para el beneficio del periodo usa SIEMPRE gastos_fijos_periodo y margen_neto_aprox (ya prorrateados), NUNCA gastos_fijos_mes. Si periodo.parcial=true (mes en curso, periodo.dias_periodo días), DILO al usuario y no extrapoles a importes mensuales sin avisar. Indica siempre el rango de fechas usado. Si mencionas un "coste fijo por día", calcúlalo SIEMPRE como gastos_fijos_mes / días naturales del mes (≈30), NUNCA como gastos_fijos_mes / días transcurridos: la tarifa diaria de junio es 6700/30 = 223 €/día, no 6700/9.
 - resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
 - resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
@@ -614,7 +615,7 @@ const TOOLS = [
     },
     {
         name: 'resumen_pyg',
-        description: 'P&L (Pérdidas y Ganancias) AGREGADO EXACTO de un rango de fechas: ingresos totales, coste productos (COGS), margen bruto, gastos fijos del mes, beneficio neto, food cost %. Usa esto para preguntas de P&L, "cuenta de resultados", "beneficio del mes".',
+        description: 'P&L (Pérdidas y Ganancias) AGREGADO EXACTO de un rango de fechas: ingresos, COGS, margen bruto, gastos fijos y beneficio neto, food cost %. Los gastos fijos se devuelven en DOS campos: gastos_fijos_mes (mes completo, referencia) y gastos_fijos_periodo (PRORRATEADO a los días reales del periodo). margen_neto_aprox usa el prorrateado. Si el periodo es el mes en curso, `periodo.parcial=true` y `periodo.dias_periodo` indica los días reales — avisa al usuario de que el mes está incompleto. Usa esto para P&L, "cuenta de resultados", "beneficio del mes".',
         input_schema: {
             type: 'object',
             properties: {
@@ -909,11 +910,27 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const ingresos = parseFloat(ventas.ingresos) || 0;
             const compras_periodo = parseFloat(compras.total_compras) || 0;
             const gastos_fijos_mes = parseFloat(gastos.gastos_fijos_mes) || 0;
+            // Prorrateo de gastos fijos a los días reales del periodo. Evita el
+            // artefacto de comparar ingresos de un mes parcial (p.ej. 9 días)
+            // contra un mes entero de fijos. Para un mes cerrado, el prorrateo
+            // da el importe completo (sin cambio de comportamiento).
+            const hoy = new Date();
+            const hoyExclusivo = new Date(Date.UTC(
+                hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() + 1
+            )).toISOString().slice(0, 10);
+            const pr = prorratearGastosFijos(gastos_fijos_mes, desde, hasta, hoyExclusivo);
             const fc_total = ingresos > 0 ? +(100 * cogs_periodo / ingresos).toFixed(1) : null;
             const fc_food  = ing_food > 0 ? +(100 * cogs_food / ing_food).toFixed(1) : null;
             const fc_bev   = ing_beverage > 0 ? +(100 * cogs_beverage / ing_beverage).toFixed(1) : null;
+            const margen_neto = Math.round((ingresos - cogs_periodo - pr.gastos_fijos_periodo) * 100) / 100;
             return {
-                periodo: { desde, hasta },
+                periodo: {
+                    desde,
+                    hasta,
+                    hasta_efectivo: pr.hasta_efectivo,
+                    dias_periodo: pr.dias_periodo,
+                    parcial: pr.parcial
+                },
                 ingresos,
                 cogs_periodo,
                 compras_periodo,
@@ -925,10 +942,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ingresos_food: ing_food,
                 ingresos_beverage: ing_beverage,
                 gastos_fijos_mes,
-                margen_bruto: ingresos - cogs_periodo,
-                margen_neto_aprox: ingresos - cogs_periodo - gastos_fijos_mes,
+                gastos_fijos_periodo: pr.gastos_fijos_periodo,
+                margen_bruto: Math.round((ingresos - cogs_periodo) * 100) / 100,
+                margen_neto_aprox: margen_neto,
                 num_tickets: parseInt(ventas.num_tickets) || 0,
-                nota: 'cogs_periodo es el COGS real calculado con Jack Miller sobre cada venta (fuente: ventas_diarias_resumen). USA food_cost_pct (o el split food/beverage) para reportar food cost al usuario. compras_periodo es sólo cash-flow de albaranes recibidos y NO debe usarse para food cost.'
+                nota: `cogs_periodo es el COGS real (Jack Miller, fuente ventas_diarias_resumen). USA food_cost_pct (o split food/beverage) para food cost; compras_periodo es solo cash-flow de albaranes, NO food cost. IMPORTANTE: gastos_fijos_periodo ya está PRORRATEADO a los ${pr.dias_periodo} días reales del periodo (gastos_fijos_mes es la referencia de un mes completo). USA gastos_fijos_periodo y margen_neto_aprox para el beneficio del periodo, NUNCA gastos_fijos_mes. ${pr.parcial ? `El periodo es PARCIAL (${pr.dias_periodo} días, hasta ${pr.hasta_efectivo}): indícalo claramente al usuario y NO extrapoles a "necesitas facturar X al mes" sin avisar de que el mes está incompleto.` : ''} Indica SIEMPRE el rango de fechas exacto en tu respuesta.`
             };
         }
 
