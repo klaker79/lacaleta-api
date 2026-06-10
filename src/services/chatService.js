@@ -135,6 +135,7 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 - resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos (mes completo + PRORRATEADO al periodo) y margen bruto/neto. Para el beneficio del periodo usa SIEMPRE gastos_fijos_periodo y margen_neto_aprox (ya prorrateados), NUNCA gastos_fijos_mes. Si periodo.parcial=true (mes en curso, periodo.dias_periodo días), DILO al usuario y no extrapoles a importes mensuales sin avisar. Indica siempre el rango de fechas usado. Si mencionas un "coste fijo por día", calcúlalo SIEMPRE como gastos_fijos_mes / días naturales del mes (≈30), NUNCA como gastos_fijos_mes / días transcurridos: la tarifa diaria de junio es 6700/30 = 223 €/día, no 6700/9.
 - resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
 - resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
+- resumen_mermas(fecha_desde, fecha_hasta) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost.
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
 - stock_critico → Ingredientes que hay que reponer.
 
@@ -644,6 +645,18 @@ const TOOLS = [
         }
     },
     {
+        name: 'resumen_mermas',
+        description: 'Mermas y pérdidas registradas en un rango: total perdido (€), nº de registros, desglose por MOTIVO (incluye "Ajuste de inventario", que son las diferencias detectadas en los recuentos físicos de stock) y top ingredientes con más pérdida. Usa esto para "cuánto he perdido en mermas", "cuánto sumaron los ajustes de inventario/recuento", "qué producto se me echa a perder más". IMPORTANTE: las mermas NO entran en el food cost ni en el COGS (eso sale de las ventas).',
+        input_schema: {
+            type: 'object',
+            properties: {
+                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
+                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
+            },
+            required: ['fecha_desde', 'fecha_hasta']
+        }
+    },
+    {
         name: 'diagnostico_ingrediente',
         description: 'DIAGNÓSTICO COMPLETO de un ingrediente concreto: stock actual + valor, compras del periodo (kg + €), recetas que lo usan en su escandallo, ventas teóricas estimadas a partir de esas recetas, y CUADRE matemático entre lo comprado y lo consumido. Usa esta tool SIEMPRE que el usuario pregunte "qué pasa con X", "por qué tengo tanto/poco X", "X parece mal", "analiza el ingrediente Y", "diagnóstico de Z". Acepta nombre parcial o id exacto. Para nombres con varias coincidencias devuelve el de mayor stock + lista corta de alternativas.',
         input_schema: {
@@ -1035,6 +1048,44 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 LIMIT 20
             `, [restauranteId, desde, hasta])).rows;
             return { periodo: { desde, hasta }, total, por_proveedor: porProveedor };
+        }
+
+        case 'resumen_mermas': {
+            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
+            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const total = (await pool.query(`
+                SELECT COALESCE(SUM(valor_perdida), 0)::numeric(12,2) AS total_perdida,
+                       COUNT(*)::int AS num_registros
+                FROM mermas
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+            `, [restauranteId, desde, hasta])).rows[0];
+            const porMotivo = (await pool.query(`
+                SELECT COALESCE(motivo, 'Otros') AS motivo,
+                       COALESCE(SUM(valor_perdida), 0)::numeric(12,2) AS perdida,
+                       COUNT(*)::int AS registros
+                FROM mermas
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+                GROUP BY motivo
+                ORDER BY perdida DESC
+            `, [restauranteId, desde, hasta])).rows;
+            const topIngredientes = (await pool.query(`
+                SELECT ingrediente_nombre AS ingrediente,
+                       COALESCE(SUM(cantidad), 0)::numeric(12,2) AS cantidad_total,
+                       COALESCE(SUM(valor_perdida), 0)::numeric(12,2) AS perdida,
+                       COUNT(*)::int AS veces
+                FROM mermas
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+                GROUP BY ingrediente_nombre
+                ORDER BY perdida DESC
+                LIMIT 10
+            `, [restauranteId, desde, hasta])).rows;
+            return {
+                periodo: { desde, hasta },
+                total,
+                por_motivo: porMotivo,
+                top_ingredientes: topIngredientes,
+                nota: 'Las mermas NO entran en el food cost ni en el COGS (eso sale de las ventas). El motivo "Ajuste de inventario" son las diferencias detectadas en los recuentos físicos de stock. Este número es la pérdida real registrada en el periodo.'
+            };
         }
 
         case 'resumen_inventario':
