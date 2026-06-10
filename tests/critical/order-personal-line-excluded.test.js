@@ -199,3 +199,76 @@ describe('POST/PUT /api/orders — línea dividida (ingredienteId duplicado) no 
         }
     });
 });
+
+/**
+ * REGRESIÓN: la pestaña Búsqueda (GET /api/search?tipo=compras) NO debe incluir
+ * las líneas de comida personal — ni en las filas ni en el gasto.
+ * (Las líneas personal van solo a su pestaña; no son gasto del restaurante.)
+ */
+describe('GET /api/search compras — excluye líneas de comida personal', () => {
+    let authToken;
+    let ingNormal;
+    let ingPersonal;
+    let orderId;
+    const desde = new Date().toISOString().split('T')[0];
+    const hasta = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+    beforeAll(async () => {
+        authToken = await global.getAuthToken();
+        if (!authToken) return;
+        const res = await request(API_URL)
+            .get('/api/ingredients')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+        if (res.status === 200 && res.body.length >= 2) {
+            ingNormal = res.body[0].id;
+            ingPersonal = res.body[1].id;
+        }
+    });
+
+    it('1. Crea pedido recibido: línea normal (10) + personal (20), total 30', async () => {
+        if (!authToken || !ingNormal || !ingPersonal) return;
+        const res = await request(API_URL)
+            .post('/api/orders')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`)
+            .send({
+                proveedorId: null,
+                fecha: desde,
+                estado: 'recibido',
+                total: 30,
+                ingredientes: [
+                    { ingredienteId: ingNormal, cantidad: 1, cantidadRecibida: 1, precioReal: 10, precioUnitario: 10 },
+                    { ingredienteId: ingPersonal, cantidad: 1, cantidadRecibida: 1, precioReal: 20, precioUnitario: 20, personal: true }
+                ]
+            });
+        expect([200, 201]).toContain(res.status);
+        orderId = res.body.id;
+    });
+
+    it('2. /search compras: fila normal SÍ, personal NO; gasto del pedido = 10', async () => {
+        if (!authToken || !orderId) return;
+        const res = await request(API_URL)
+            .get(`/api/search?tipo=compras&desde=${desde}&hasta=${hasta}&limit=2000`)
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+        expect(res.status).toBe(200);
+
+        const idOf = r => (r.ingrediente_id || r.ingredienteId);
+        const filasPedido = res.body.resultados.filter(r => r.pedido_id === orderId);
+
+        expect(filasPedido.some(r => idOf(r) === ingNormal)).toBe(true);
+        expect(filasPedido.some(r => idOf(r) === ingPersonal)).toBe(false);
+        const sumaPedido = filasPedido.reduce((s, r) => s + (parseFloat(r.subtotal) || 0), 0);
+        expect(Math.round(sumaPedido * 100) / 100).toBe(10);
+    });
+
+    afterAll(async () => {
+        if (authToken && orderId) {
+            await request(API_URL)
+                .delete(`/api/orders/${orderId}`)
+                .set('Origin', 'http://localhost:3001')
+                .set('Authorization', `Bearer ${authToken}`);
+        }
+    });
+});
