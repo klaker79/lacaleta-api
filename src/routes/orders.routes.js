@@ -94,10 +94,14 @@ module.exports = function (pool) {
                 }
             }
             if (Array.isArray(ingredientes) && ingredientes.length > 0) {
-                const ingIds = ingredientes
+                // Set: una línea puede repetir ingredienteId (p.ej. al DIVIDIR una
+                // línea en producción + comida personal, o al añadir el mismo
+                // ingrediente dos veces). El conteo se hace sobre IDs únicos, porque
+                // la query SELECT ... WHERE id = ANY() devuelve filas distintas.
+                const ingIds = [...new Set(ingredientes
                     .filter(it => it.tipo !== 'ajuste')
                     .map(it => it.ingredienteId || it.ingrediente_id)
-                    .filter(Boolean);
+                    .filter(Boolean))];
                 if (ingIds.length > 0) {
                     const ingCheck = await client.query(
                         'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
@@ -141,8 +145,9 @@ module.exports = function (pool) {
                 const fechaCompra = fecha ? new Date(fecha) : new Date();
 
                 for (const item of ingredientes) {
-                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
-                    if (item.tipo === 'ajuste') continue;
+                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) y líneas de
+                    // COMIDA PERSONAL: ninguno cuenta en el Diario / food cost / precio medio.
+                    if (item.tipo === 'ajuste' || item.personal === true) continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
@@ -166,7 +171,7 @@ module.exports = function (pool) {
                 // Recalcular precio ponderado de cada ingrediente para que el inventario
                 // (precio_medio = precio / cpf) refleje las compras reales.
                 for (const item of ingredientes) {
-                    if (item.tipo === 'ajuste') continue;
+                    if (item.tipo === 'ajuste' || item.personal === true) continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     if (ingId) await recalcularPrecioPonderado(client, ingId, req.restauranteId);
                 }
@@ -225,10 +230,14 @@ module.exports = function (pool) {
             // Audit 2026-05-03 — antes este endpoint sólo verificaba que el pedido
             // pertenecía al tenant, no los IDs nuevos del body.
             if (Array.isArray(ingredientes) && ingredientes.length > 0) {
-                const ingIds = ingredientes
+                // Set: una línea puede repetir ingredienteId (p.ej. al DIVIDIR una
+                // línea en producción + comida personal, o al añadir el mismo
+                // ingrediente dos veces). El conteo se hace sobre IDs únicos, porque
+                // la query SELECT ... WHERE id = ANY() devuelve filas distintas.
+                const ingIds = [...new Set(ingredientes
                     .filter(it => it.tipo !== 'ajuste')
                     .map(it => it.ingredienteId || it.ingrediente_id)
-                    .filter(Boolean);
+                    .filter(Boolean))];
                 if (ingIds.length > 0) {
                     const ingCheck = await client.query(
                         'SELECT id FROM ingredientes WHERE id = ANY($1::int[]) AND restaurante_id = $2 AND deleted_at IS NULL',
@@ -282,8 +291,9 @@ module.exports = function (pool) {
                 }
 
                 for (const item of ingredientes) {
-                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) — solo afectan al total, no al Diario
-                    if (item.tipo === 'ajuste') continue;
+                    // 🔒 Saltar items de tipo 'ajuste' (envases/bonificaciones) y líneas de
+                    // COMIDA PERSONAL: ninguno cuenta en el Diario / food cost / precio medio.
+                    if (item.tipo === 'ajuste' || item.personal === true) continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario) || 0;
                     const cantidad = parseFloat(item.cantidadRecibida || item.cantidad) || 0;
@@ -305,7 +315,7 @@ module.exports = function (pool) {
 
                 // Recalcular precio ponderado de cada ingrediente afectado tras la recepción.
                 for (const item of ingredientes) {
-                    if (item.tipo === 'ajuste') continue;
+                    if (item.tipo === 'ajuste' || item.personal === true) continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     if (ingId) await recalcularPrecioPonderado(client, ingId, req.restauranteId);
                 }
@@ -380,8 +390,8 @@ module.exports = function (pool) {
                     // Usar UPDATE-subtract + DELETE-if-≤0 como fallback
                     log('warn', 'Pedido sin filas con pedido_id, usando fallback legacy', { pedidoId: pedido.id });
                     for (const item of ingredientes) {
-                        // 🔒 Saltar items de tipo 'ajuste' (no están en el Diario)
-                        if (item.tipo === 'ajuste') continue;
+                        // 🔒 Saltar 'ajuste' y COMIDA PERSONAL (nunca se escribieron en el Diario)
+                        if (item.tipo === 'ajuste' || item.personal === true) continue;
                         const ingId = item.ingredienteId || item.ingrediente_id;
                         const cantidadRecibida = parseFloat(item.cantidadRecibida || item.cantidad || 0);
                         const precioReal = parseFloat(item.precioReal || item.precioUnitario || item.precio_unitario || 0);
@@ -426,7 +436,7 @@ module.exports = function (pool) {
                 // revisión manual. El rollback actual es correcto para el flujo vivo
                 // (POST /orders + PUT /orders/:id de recepción) desde 2026-04-15.
                 for (const item of ingredientes) {
-                    if (item.tipo === 'ajuste') continue; // Ajustes no afectan al stock
+                    if (item.tipo === 'ajuste' || item.personal === true) continue; // Ajustes y comida personal no afectan al stock
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     const stockARevertir = parseFloat(item.cantidadRecibida || item.cantidad || 0);
 
@@ -465,7 +475,7 @@ module.exports = function (pool) {
                 // eliminación del pedido recibido. Sin esto, `precio` queda con el valor
                 // ponderado que incluía las compras de este pedido (ya borradas).
                 for (const item of ingredientes) {
-                    if (item.tipo === 'ajuste') continue;
+                    if (item.tipo === 'ajuste' || item.personal === true) continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     if (ingId) await recalcularPrecioPonderado(client, ingId, req.restauranteId);
                 }

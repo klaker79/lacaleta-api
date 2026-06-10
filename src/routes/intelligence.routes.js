@@ -54,6 +54,7 @@ module.exports = function (pool) {
                   AND p.fecha_recepcion >= CURRENT_DATE - INTERVAL '7 days'
                   AND COALESCE(ing->>'estado', '') <> 'no-entregado'
                   AND COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) > 0
+                  AND COALESCE((ing->>'personal')::boolean, false) = false
             )
             SELECT 
                 i.id,

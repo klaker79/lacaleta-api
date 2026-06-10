@@ -26,6 +26,7 @@
  */
 
 const { log } = require('../utils/logger');
+const { personalCostExpr } = require('../utils/personalCost');
 
 function rangoMes(mes) {
     // mes: 'YYYY-MM' o null/undefined → mes actual
@@ -226,11 +227,13 @@ async function getGastosFijosMes(pool, restauranteId) {
 
 async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
     // Cuánto se compró a cada proveedor en el mes + mes anterior para variación.
-    // Se basa en pedidos.total (cash-flow real de albaranes).
+    // Se basa en pedidos.total (cash-flow real de albaranes), RESTANDO el coste de
+    // las líneas de comida personal (no son gasto del restaurante; van a su pestaña).
+    const gastoExpr = `COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0)::numeric`;
     const sql = `
         WITH actual AS (
             SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
-                   COALESCE(SUM(p.total), 0)::numeric AS gasto
+                   ${gastoExpr} AS gasto
             FROM pedidos p
             LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
             WHERE p.restaurante_id = $1
@@ -240,7 +243,7 @@ async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
         ),
         anterior AS (
             SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
-                   COALESCE(SUM(p.total), 0)::numeric AS gasto
+                   ${gastoExpr} AS gasto
             FROM pedidos p
             LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
             WHERE p.restaurante_id = $1
