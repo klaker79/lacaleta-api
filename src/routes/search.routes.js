@@ -23,6 +23,7 @@
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
+const { personalCostExpr } = require('../utils/personalCost');
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -176,6 +177,7 @@ module.exports = function (pool) {
                 LEFT JOIN proveedores pr_fb
                     ON pr_fb.id = ip_fb.proveedor_id AND p.proveedor_id IS NULL
                 WHERE ${where}
+                  AND COALESCE((ing->>'personal')::boolean, false) = false
                 ORDER BY p.fecha DESC, p.id DESC
                 LIMIT $${params.length}
             `;
@@ -211,6 +213,7 @@ module.exports = function (pool) {
                     LEFT JOIN ingredientes_proveedores ip_fb
                         ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
                     WHERE ${aggWhere} AND LOWER(i.nombre) LIKE $${aggParams.length}
+                      AND COALESCE((ing->>'personal')::boolean, false) = false
                 `;
             } else if (provId) {
                 // When filtering by proveedor (with fallback), need the JOIN too
@@ -233,13 +236,17 @@ module.exports = function (pool) {
                     LEFT JOIN ingredientes_proveedores ip_fb
                         ON ip_fb.ingrediente_id = i.id AND ip_fb.es_proveedor_principal = TRUE
                     WHERE ${aggWhere}
+                      AND COALESCE((ing->>'personal')::boolean, false) = false
                 `;
             } else {
+                // 🍽️ Restar el coste de las líneas de comida personal de p.total
+                // (p.total las incluye). Mismo COALESCE de cantidad/precio que las
+                // filas de arriba → cuadra al céntimo. No toca pedidos sin personal.
                 aggQuery = `
                     SELECT
                         COUNT(DISTINCT p.id)::int AS num_pedidos,
                         COUNT(*)::int AS total_registros,
-                        COALESCE(SUM(p.total), 0)::numeric(12,2) AS total_importe
+                        COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0)::numeric(12,2) AS total_importe
                     FROM pedidos p
                     WHERE ${aggWhere}
                 `;

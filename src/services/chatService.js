@@ -17,6 +17,7 @@ const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
 const { prorratearGastosFijos } = require('../utils/prorrateo');
+const { personalCostExpr } = require('../utils/personalCost');
 const {
     getMenuEngineering,
     getOmnesAnalysis
@@ -778,8 +779,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
         case 'obtener_pedidos':
             // precioReal / precioUnitario are UNIT prices in the JSONB.
             // subtotal = (cantidadRecibida || cantidad) × unit price; 'no-entregado' → 0.
+            // 🍽️ Excluye las líneas de comida personal (no son gasto del restaurante;
+            // van a su pestaña). El total del pedido se muestra ya descontado.
             return (await pool.query(`
-                SELECT p.id, p.fecha, p.estado, p.total,
+                SELECT p.id, p.fecha, p.estado,
+                       (p.total - ${personalCostExpr('p')})::numeric(12,2) AS total,
                        pr.nombre as proveedor_nombre,
                        i.nombre as ingrediente, i.unidad,
                        COALESCE((ing->>'cantidadRecibida')::numeric, (ing->>'cantidad')::numeric) as cantidad,
@@ -797,6 +801,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
                 LEFT JOIN ingredientes i ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
                 WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL
+                  AND COALESCE((ing->>'personal')::boolean, false) = false
                 ORDER BY p.fecha DESC
                 LIMIT 300
             `, [restauranteId])).rows;
@@ -860,9 +865,9 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
             `, [restauranteId, desde, hasta])).rows[0];
             const compras = (await pool.query(`
-                SELECT COALESCE(SUM(total), 0)::numeric(12,2) AS total_compras
-                FROM pedidos
-                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+                SELECT COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0)::numeric(12,2) AS total_compras
+                FROM pedidos p
+                WHERE p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL
             `, [restauranteId, desde, hasta])).rows[0];
             // COGS real: se calcula en el momento de cada venta con la fórmula Jack Miller
             // (precio_unitario × cantidad / porciones / rendimiento × factor_variante) y se
@@ -1009,15 +1014,18 @@ async function runTool(name, pool, restauranteId, args = {}) {
         case 'resumen_compras_periodo': {
             const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
             const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            // 🍽️ Resta el coste de las líneas de comida personal de p.total: no son
+            // gasto del restaurante (van a su pestaña). Así el P&L del chat no infla
+            // compras ni food cost.
             const total = (await pool.query(`
-                SELECT COALESCE(SUM(total), 0)::numeric(12,2) AS total_compras,
+                SELECT COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0)::numeric(12,2) AS total_compras,
                        COUNT(*) AS num_pedidos
-                FROM pedidos
-                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+                FROM pedidos p
+                WHERE p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL
             `, [restauranteId, desde, hasta])).rows[0];
             const porProveedor = (await pool.query(`
                 SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
-                       COALESCE(SUM(p.total), 0)::numeric(12,2) AS gasto,
+                       COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0)::numeric(12,2) AS gasto,
                        COUNT(*) AS num_pedidos
                 FROM pedidos p
                 LEFT JOIN proveedores pr ON p.proveedor_id = pr.id

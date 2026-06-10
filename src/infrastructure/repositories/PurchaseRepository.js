@@ -4,6 +4,7 @@
  */
 
 const Purchase = require('../../domain/entities/Purchase');
+const { personalCostExpr } = require('../../utils/personalCost');
 
 class PurchaseRepository {
     constructor(pool) {
@@ -187,13 +188,15 @@ class PurchaseRepository {
      * Calcula el total de pedidos en un período
      */
     async getTotalByDateRange(startDate, endDate, restaurantId) {
+        // 🍽️ Resta el coste de las líneas de comida personal (no son gasto del
+        // restaurante; van a su pestaña aparte).
         const query = `
-            SELECT COALESCE(SUM(total), 0) as total
-            FROM pedidos
-            WHERE restaurante_id = $1 
-              AND fecha >= $2 
-              AND fecha <= $3
-              AND deleted_at IS NULL
+            SELECT COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0) as total
+            FROM pedidos p
+            WHERE p.restaurante_id = $1
+              AND p.fecha >= $2
+              AND p.fecha <= $3
+              AND p.deleted_at IS NULL
         `;
         const result = await this.pool.query(query, [restaurantId, startDate, endDate]);
         return parseFloat(result.rows[0].total);
