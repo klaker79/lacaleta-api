@@ -225,6 +225,19 @@ async function getGastosFijosMes(pool, restauranteId) {
     };
 }
 
+async function getComidaPersonalMes(pool, restauranteId, rango) {
+    // 🍽️ Gasto en comida de personal del mes (líneas personal de los pedidos).
+    // Es un GASTO operativo aparte: resta al beneficio neto, pero NO es food cost
+    // ni COGS ni entra en compras/gasto por proveedor.
+    const sql = `
+        SELECT COALESCE(SUM(${personalCostExpr('p')}), 0)::numeric AS total
+        FROM pedidos p
+        WHERE p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL
+    `;
+    const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin]);
+    return parseFloat(r.rows[0].total) || 0;
+}
+
 async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
     // Cuánto se compró a cada proveedor en el mes + mes anterior para variación.
     // Se basa en pedidos.total (cash-flow real de albaranes), RESTANDO el coste de
@@ -333,7 +346,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
     try {
         const [
             restaurante, ingresos, topRentables, topProblematicos, cambiosPrecio,
-            stock, cogsActual, gastosFijos, topProveedores, mermas, evolucion
+            stock, cogsActual, gastosFijos, topProveedores, mermas, evolucion, comidaPersonal
         ] = await Promise.all([
             getRestaurante(pool, restauranteId),
             getIngresos(pool, restauranteId, rango),
@@ -345,7 +358,8 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             getGastosFijosMes(pool, restauranteId),
             getTopProveedores(pool, restauranteId, rango, 8),
             getMermasMes(pool, restauranteId, rango),
-            getEvolucionDiaria(pool, restauranteId, rango)
+            getEvolucionDiaria(pool, restauranteId, rango),
+            getComidaPersonalMes(pool, restauranteId, rango)
         ]);
 
         const foodCostPct = ingresos.mes_actual > 0
@@ -367,12 +381,12 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             ? Math.round((cogsConMermas / ingresos.mes_actual) * 10000) / 100
             : 0;
 
-        // P&L: ingresos − COGS − gastos fijos = beneficio neto operativo.
-        // Las mermas NO se restan aquí (variante conservadora). Si el dueño
-        // quiere ver el impacto real de las mermas en el beneficio, lo lee
-        // del food cost real arriba o de la sección Mermas del informe.
+        // P&L: ingresos − COGS − gastos fijos − comida de personal = beneficio neto.
+        // 🍽️ La comida de personal SÍ resta (es gasto operativo real), pero NO es food
+        // cost (no toca cogs/food_cost_pct). Las mermas NO se restan aquí (variante
+        // conservadora; ver food cost real arriba y la sección Mermas).
         const margenBruto = ingresos.mes_actual - cogsActual;
-        const beneficioNeto = margenBruto - gastosFijos.total;
+        const beneficioNeto = margenBruto - gastosFijos.total - comidaPersonal;
         const margenNetoPct = ingresos.mes_actual > 0
             ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
             : 0;
@@ -402,6 +416,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
                 margen_bruto: Math.round(margenBruto * 100) / 100,
                 gastos_fijos: Math.round(gastosFijos.total * 100) / 100,
                 gastos_fijos_conceptos: gastosFijos.num_conceptos,
+                comida_personal: Math.round(comidaPersonal * 100) / 100,
                 beneficio_neto: Math.round(beneficioNeto * 100) / 100,
                 margen_neto_pct: margenNetoPct
             },
