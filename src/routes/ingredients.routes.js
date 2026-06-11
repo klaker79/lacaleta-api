@@ -154,7 +154,7 @@ module.exports = function (pool) {
 
     router.post('/ingredients', authMiddleware, async (req, res) => {
         try {
-            const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato, rendimiento } = req.body;
+            const { nombre, proveedorId, proveedor_id, precio, unidad, stockActual, stock_actual, stockMinimo, stock_minimo, familia, formato_compra, cantidad_por_formato, rendimiento, alergenos } = req.body;
 
             // 🔒 Validar nombre requerido
             const nombreCheck = validateRequired(nombre, 'Nombre');
@@ -177,10 +177,13 @@ module.exports = function (pool) {
             const finalRendimiento = Number.isFinite(rendimientoRaw) && rendimientoRaw > 0
                 ? Math.min(100, Math.max(1, rendimientoRaw))
                 : 100;
+            // 🔒 Alergenos: array JSONB de códigos. Si no es array, []. Se almacena
+            // con JSON.stringify (columna JSONB DEFAULT '[]').
+            const finalAlergenos = Array.isArray(alergenos) ? alergenos : [];
 
             const result = await pool.query(
-                'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato, rendimiento) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
-                [nombreCheck.value, finalProveedorId, finalPrecio, sanitizeString(unidad, 20) || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
+                'INSERT INTO ingredientes (nombre, proveedor_id, precio, unidad, stock_actual, stock_minimo, familia, restaurante_id, formato_compra, cantidad_por_formato, rendimiento, alergenos) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
+                [nombreCheck.value, finalProveedorId, finalPrecio, sanitizeString(unidad, 20) || 'kg', finalStockActual, finalStockMinimo, finalFamilia, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento, JSON.stringify(finalAlergenos)]
             );
             onboardingService.markStep(pool, req.restauranteId, 'ingredientes');
             res.status(201).json(result.rows[0]);
@@ -261,6 +264,12 @@ module.exports = function (pool) {
             const finalRendimiento = body.rendimiento !== undefined
                 ? clampRendimiento(body.rendimiento)
                 : clampRendimiento(existing.rendimiento);
+            // 🔒 Alergenos: merge igual que rendimiento — preservar si no viene en el body.
+            // Si viene pero no es array, []. pg devuelve JSONB ya parseado (array),
+            // de ahí el fallback a [] cuando existing.alergenos no es array.
+            const finalAlergenos = body.alergenos !== undefined
+                ? (Array.isArray(body.alergenos) ? body.alergenos : [])
+                : (Array.isArray(existing.alergenos) ? existing.alergenos : []);
 
             // Log para debug (remover en producción)
             log('info', 'Actualizando ingrediente con preservación de datos', {
@@ -272,8 +281,8 @@ module.exports = function (pool) {
             // 🔒 deleted_at IS NULL: evita resucitar un ingrediente soft-eliminado vía PUT
             // fecha_actualizacion = NOW(): util para diagnostico (saber cuando se edito por ultima vez)
             const result = await pool.query(
-                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12, fecha_actualizacion=NOW() WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
-                [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento]
+                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12, alergenos=$13, fecha_actualizacion=NOW() WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
+                [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento, JSON.stringify(finalAlergenos)]
             );
 
             // ⚡ SYNC: si el precio del ingrediente cambio, propagarlo al precio del proveedor
