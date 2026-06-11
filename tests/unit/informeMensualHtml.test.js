@@ -251,6 +251,24 @@ describe('renderHtml — integración (sin Claude)', () => {
         expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
     });
 
+    test('P&L: la línea "Comida de personal" aparece cuando hay gasto (>0)', () => {
+        const datos = makeDatos({
+            pyg: {
+                ingresos: 10000, cogs: 3500, margen_bruto: 6500,
+                gastos_fijos: 4000, gastos_fijos_conceptos: 5,
+                comida_personal: 600, beneficio_neto: 1900, margen_neto_pct: 19
+            }
+        });
+        const html = renderHtml({ datos, analisis: ANALISIS_OK, restauranteNombre: 'OK', moneda: '€', lang: 'es' });
+        expect(html).toContain('Comida de personal');
+    });
+
+    test('P&L: sin comida de personal (0) la línea NO aparece', () => {
+        const datos = makeDatos(); // pyg sin comida_personal
+        const html = renderHtml({ datos, analisis: ANALISIS_OK, restauranteNombre: 'OK', moneda: '€', lang: 'es' });
+        expect(html).not.toContain('Comida de personal');
+    });
+
     test('Multi-currency RM: NO aparece "€" en ningún sitio del HTML', () => {
         const datos = makeDatos({ restaurante: { nombre: 'KL Resto', moneda: 'RM' } });
         const html = renderHtml({

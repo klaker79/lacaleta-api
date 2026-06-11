@@ -540,8 +540,9 @@ async function initializeDatabase(pool) {
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato DECIMAL(10, 3);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento INTEGER DEFAULT 100;
+            ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS alergenos JSONB DEFAULT '[]';
         `);
-    log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento verificadas');
+    log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento/alergenos verificadas');
   } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
 
   // Columna formato_override en compras_pendientes (para selector de formato en revisión de albaranes)
