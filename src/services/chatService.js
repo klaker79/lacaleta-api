@@ -203,6 +203,11 @@ PRIORIZA diagnostico_* sobre obtener_*. Más concreto, menos tokens, y
 hace el cuadre matemático por ti. Si la tool devuelve "alternativas",
 menciónalas al usuario por si quería otro ítem.
 
+⚠️ RENDIMIENTO/MERMA — NO lo metas en el cuadre de kg de stock:
+- El rendimiento (yield %) afecta SOLO al COSTE: coste_ajustado = precio / (rendimiento/100). Un rendimiento bajo ENCARECE la ración, NO cambia los kg que salen del stock.
+- El cuadre compras-vs-consumo (kg comprados vs kg consumidos vs exceso) va en kg de RECETA: el stock se descuenta por (cantidad_por_porción / porciones) × ventas, SIN aplicar rendimiento. Por eso "kg_consumidos" YA es el consumo real de stock.
+- NUNCA digas que "el rendimiento reduce/aumenta el consumo de kg" ni lo uses para explicar un exceso de compras. Rendimiento = food cost; cuadre de stock = kg de receta. Son cosas distintas, no las mezcles.
+
 ⚠️ RANGO DE FECHAS para tools que lo piden:
 - Formato: YYYY-MM-DD
 - hasta es EXCLUSIVE (primer día del MES SIGUIENTE).
