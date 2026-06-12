@@ -226,9 +226,14 @@ describe('POST /api/sales/bulk — TPV bulk import (n8n path)', () => {
             expect([200, 201]).toContain(bulkRes.status);
             expect(bulkRes.body.procesados).toBeGreaterThanOrEqual(1);
 
-            // 4. Stock debe ser 9 (10 − 4/4×1), NO 6 (bug ×porciones)
-            const ingAfter = await hdrs(request(API_URL).get(`/api/ingredients/${ingId}`));
-            const stockAfter = parseFloat(ingAfter.body.stock_actual);
+            // 4. Stock debe ser 9 (10 − 4/4×1), NO 6 (bug ×porciones).
+            // (No existe GET /ingredients/:id — se busca en el listado.)
+            const ingList = await hdrs(request(API_URL).get('/api/ingredients'));
+            const ingAfter = Array.isArray(ingList.body)
+                ? ingList.body.find(i => i.id === ingId)
+                : null;
+            expect(ingAfter).toBeTruthy();
+            const stockAfter = parseFloat(ingAfter.stock_actual);
             expect(stockAfter).toBeCloseTo(9, 2);
             console.log(`✅ Bulk con porciones=4: stock 10 → ${stockAfter} (esperado 9)`);
 
