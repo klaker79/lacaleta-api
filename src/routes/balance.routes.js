@@ -1228,7 +1228,14 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 restauranteId: req.restauranteId
             });
 
-            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+            // 🔒 Guardia FOR UPDATE + deleted_at (multitenant-scan v2, 2026-06-12):
+            // sin el filtro, aprobar una compra de un ingrediente borrado seguía
+            // adelante sin sumar stock (movimiento perdido en silencio).
+            const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+            if (ingRow.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'El ingrediente de esta compra ya no existe (fue eliminado)' });
+            }
 
             // 🛡️ Guardrail: rechazar cantidades absurdas ANTES de tocar ninguna tabla.
             // Si lo pusiéramos después de upsertCompraDiaria/updateProveedorPrecio,
@@ -1361,7 +1368,17 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     restauranteId: req.restauranteId
                 });
 
-                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+                // 🔒 Guardia FOR UPDATE + deleted_at (multitenant-scan v2, 2026-06-12).
+                // En batch NO abortamos toda la transacción: el item del ingrediente
+                // borrado se cuenta como omitido y el resto del lote sigue.
+                const ingRow = await client.query('SELECT id, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [item.ingrediente_id, req.restauranteId]);
+                if (ingRow.rows.length === 0) {
+                    log('warn', 'Batch approve: ingrediente borrado — item omitido', {
+                        ingrediente: item.ingrediente_nombre, itemId: item.id
+                    });
+                    resultados.omitidos = (resultados.omitidos || 0) + 1;
+                    continue;
+                }
 
                 // 🛡️ Guardrail: validar ANTES de tocar Diario/proveedor_precios.
                 // Antes estaba después de las escrituras: el `continue` saltaba

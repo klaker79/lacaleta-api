@@ -457,15 +457,22 @@ module.exports = function (pool) {
                     }
 
                     if (stockARevertir > 0 && ingId) {
-                        await client.query(
-                            'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                        // 🔒 Guardia FOR UPDATE + deleted_at (multitenant-scan v2,
+                        // 2026-06-12): con un ingrediente borrado se salta el revert
+                        // con warn, en vez de seguir en silencio sobre una fila muerta.
+                        const lockRevert = await client.query(
+                            'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                             [ingId, req.restauranteId]
                         );
+                        if (lockRevert.rows.length === 0) {
+                            log('warn', 'Revert de stock saltado — ingrediente borrado', { pedidoId: pedido.id, ingredienteId: ingId });
+                            continue;
+                        }
                         await client.query(
                             `UPDATE ingredientes
                          SET stock_actual = GREATEST(0, stock_actual - $1),
                              ultima_actualizacion_stock = NOW()
-                         WHERE id = $2 AND restaurante_id = $3`,
+                         WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
                             [stockARevertir, ingId, req.restauranteId]
                         );
                     }
