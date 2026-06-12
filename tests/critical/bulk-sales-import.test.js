@@ -237,12 +237,25 @@ describe('POST /api/sales/bulk — TPV bulk import (n8n path)', () => {
             expect(stockAfter).toBeCloseTo(9, 2);
             console.log(`✅ Bulk con porciones=4: stock 10 → ${stockAfter} (esperado 9)`);
 
-            // localizar la venta para cleanup
+            // 5. ROUND-TRIP (blindaje 2026-06-12): borrar la venta debe devolver
+            // el stock EXACTAMENTE a 10 (restauración simétrica vía stock_deductions).
             const salesRes = await hdrs(request(API_URL).get(`/api/sales?fecha=${fecha}`));
             if (Array.isArray(salesRes.body)) {
                 const s = salesRes.body.find(v => v.receta_id === recId);
                 if (s) saleId = s.id;
             }
+            expect(saleId).toBeTruthy();
+            const delRes = await hdrs(request(API_URL).delete(`/api/sales/${saleId}`));
+            expect([200, 204]).toContain(delRes.status);
+            saleId = null; // ya borrada — que el finally no lo reintente
+
+            const ingList2 = await hdrs(request(API_URL).get('/api/ingredients'));
+            const ingRestored = Array.isArray(ingList2.body)
+                ? ingList2.body.find(i => i.id === ingId)
+                : null;
+            expect(ingRestored).toBeTruthy();
+            expect(parseFloat(ingRestored.stock_actual)).toBeCloseTo(10, 2);
+            console.log('✅ Round-trip: venta borrada → stock restaurado a 10 exacto');
         } finally {
             // Cleanup en orden inverso (best-effort)
             if (saleId) await hdrs(request(API_URL).delete(`/api/sales/${saleId}`));

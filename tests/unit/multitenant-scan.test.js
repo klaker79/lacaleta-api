@@ -33,6 +33,12 @@ const fs = require('fs');
 const path = require('path');
 
 const ROUTES_DIR = path.join(__dirname, '..', '..', 'src', 'routes');
+// 🛡️ v2 (auditoría 2026-06-12): los services con SQL también se escanean.
+// El leak de chatService.js:1141 (JOIN a proveedores sin tenant) vivía aquí.
+const SERVICES_DIR = path.join(__dirname, '..', '..', 'src', 'services');
+const UTILS_SQL_FILES = [
+    path.join(__dirname, '..', '..', 'src', 'utils', 'businessHelpers.js'),
+];
 
 // Tablas con columna restaurante_id (verified contra database-schema.md
 // y `\d <tabla>` en producción). Si añades una tabla tenant-scoped al
@@ -130,6 +136,17 @@ function readRouteFiles() {
         }));
 }
 
+// 🛡️ v2: services con SQL (mismas reglas que routes).
+function readServiceFiles() {
+    if (!fs.existsSync(SERVICES_DIR)) return [];
+    return fs.readdirSync(SERVICES_DIR)
+        .filter(f => f.endsWith('.js'))
+        .map(f => ({
+            file: `services/${f}`,
+            content: fs.readFileSync(path.join(SERVICES_DIR, f), 'utf8')
+        }));
+}
+
 /**
  * Extrae todos los template literals que parecen SQL del contenido.
  * Detecta:
@@ -149,7 +166,16 @@ function extractSqlLiterals(content) {
     let m;
     while ((m = re.exec(content)) !== null) {
         const lit = m[1];
-        if (/\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH)\b/i.test(lit)) {
+        // Forma REAL de SQL, case-sensitive (el codebase respeta SQL caps).
+        // Evita falsos positivos con prosa (ej. el system prompt de Omnes en
+        // chatService.js menciona "recetas/proveedores" sin ser una query).
+        const looksLikeSql =
+            (/\bSELECT\b/.test(lit) && /\bFROM\b/.test(lit)) ||
+            /\bINSERT\s+INTO\b/.test(lit) ||
+            (/\bUPDATE\b/.test(lit) && /\bSET\b/.test(lit)) ||
+            /\bDELETE\s+FROM\b/.test(lit) ||
+            (/\bWITH\b/.test(lit) && /\bAS\s*\(/.test(lit));
+        if (looksLikeSql) {
             out.push(lit);
         }
     }
@@ -187,7 +213,7 @@ function hasDynamicWhere(sql) {
 }
 
 describe('Multi-tenant: queries con tablas tenant-scoped DEBEN filtrar por restaurante_id', () => {
-    const files = readRouteFiles();
+    const files = [...readRouteFiles(), ...readServiceFiles()];
 
     test('al menos hay archivos de rutas para analizar (sanity check)', () => {
         expect(files.length).toBeGreaterThan(5);
@@ -218,6 +244,66 @@ describe('Multi-tenant: queries con tablas tenant-scoped DEBEN filtrar por resta
                 throw new Error(
                     `Queries SIN restaurante_id en ${file}:\n\n` +
                     violations.join('\n\n')
+                );
+            }
+        });
+    });
+});
+
+// ============================================================
+// 🛡️ v2 (auditoría 2026-06-12): locks FOR UPDATE en tablas con
+// soft-delete DEBEN incluir `deleted_at IS NULL`.
+//
+// Bug class que previene: lockear/actualizar una fila soft-deleted.
+// Tres casos reales arreglados en la auditoría (DELETE /sales restore,
+// POST /daily/purchases/bulk, transfers origen/destino): el lock sin
+// deleted_at no devolvía filas con un ingrediente borrado pero el flujo
+// seguía y el movimiento de stock se perdía EN SILENCIO.
+// ============================================================
+const SOFT_DELETE_TABLES = ['ingredientes', 'recetas', 'ventas', 'pedidos', 'mermas', 'proveedores'];
+
+describe('Locks FOR UPDATE en tablas soft-delete incluyen deleted_at IS NULL', () => {
+    const allFiles = [
+        ...readRouteFiles(),
+        ...readServiceFiles(),
+        ...UTILS_SQL_FILES.filter(p => fs.existsSync(p)).map(p => ({
+            file: `utils/${path.basename(p)}`,
+            content: fs.readFileSync(p, 'utf8'),
+        })),
+    ];
+
+    // También los archivos exentos del scan de tenant (auth/superadmin/etc.)
+    // entran aquí: el soft-delete aplica igual en sus locks.
+    for (const f of EXCEPTION_FILES) {
+        const p = path.join(ROUTES_DIR, f);
+        if (fs.existsSync(p)) {
+            allFiles.push({ file: f, content: fs.readFileSync(p, 'utf8') });
+        }
+    }
+
+    allFiles.forEach(({ file, content }) => {
+        if (!/FOR UPDATE/i.test(content)) return;
+
+        test(`${file}: cada FOR UPDATE sobre tabla soft-delete lleva deleted_at IS NULL`, () => {
+            const violations = [];
+            // Examina tanto template literals como strings normales con SQL.
+            const literals = [
+                ...extractSqlLiterals(content),
+                ...(content.match(/'([^']*FOR UPDATE[^']*)'/gi) || []).map(s => s.slice(1, -1)),
+                ...(content.match(/"([^"]*FOR UPDATE[^"]*)"/gi) || []).map(s => s.slice(1, -1)),
+            ];
+            for (const sql of literals) {
+                if (!/FOR UPDATE/i.test(sql)) continue;
+                const softTables = SOFT_DELETE_TABLES.filter(t => new RegExp(`\\b${t}\\b`, 'i').test(sql));
+                if (softTables.length === 0) continue;
+                if (/deleted_at\s+IS\s+NULL/i.test(sql)) continue;
+                violations.push(`  tablas=${softTables.join(',')}\n  sql=${normalizeSql(sql).slice(0, 180)}…`);
+            }
+            if (violations.length > 0) {
+                throw new Error(
+                    `FOR UPDATE sin deleted_at IS NULL en ${file}:\n\n` +
+                    violations.join('\n\n') +
+                    '\n\nUn lock sin deleted_at puede operar sobre una fila borrada (soft-delete) y perder el movimiento en silencio.'
                 );
             }
         });
