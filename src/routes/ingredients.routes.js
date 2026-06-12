@@ -167,6 +167,19 @@ module.exports = function (pool) {
             const finalStockActual = validateCantidad(stockActual ?? stock_actual);
             const finalStockMinimo = validateCantidad(stockMinimo ?? stock_minimo);
             const finalProveedorId = proveedorId ?? proveedor_id ?? null;
+            // 🔒 AUDITORÍA 2026-06-12 (MT-1): el proveedor debe pertenecer al MISMO
+            // tenant. Sin esta validación, un token de tenant A podía crear un
+            // ingrediente apuntando a un proveedor de tenant B (misma clase de vuln
+            // que se cerró en el PUT el 2026-05-20; el POST había quedado sin parchear).
+            if (finalProveedorId !== null && finalProveedorId !== undefined) {
+                const provCheck = await pool.query(
+                    'SELECT id FROM proveedores WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                    [finalProveedorId, req.restauranteId]
+                );
+                if (provCheck.rows.length === 0) {
+                    return res.status(404).json({ error: 'Proveedor no encontrado' });
+                }
+            }
             const finalFamilia = sanitizeString(familia, 50) || 'alimento';
             const finalFormatoCompra = sanitizeString(formato_compra, 50) || null;
             const finalCantidadPorFormato = cantidad_por_formato ? validateCantidad(cantidad_por_formato) : null;

@@ -333,9 +333,17 @@ module.exports = function (pool) {
                 // ⚡ FIX BUG-02: Restaurar solo lo que se descontó REALMENTE
                 for (const deduction of venta.stock_deductions) {
                     if (deduction.ingredienteId && deduction.real > 0) {
-                        await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [deduction.ingredienteId, req.restauranteId]);
+                        // 🔒 AUDITORÍA 2026-06-12 (M-locks): lock con deleted_at IS NULL +
+                        // skip explícito. Antes, con un ingrediente soft-deleted el lock no
+                        // devolvía filas pero el flujo seguía y la restauración se perdía
+                        // en silencio (o resucitaba stock en una fila borrada).
+                        const lockRes = await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [deduction.ingredienteId, req.restauranteId]);
+                        if (lockRes.rows.length === 0) {
+                            log('warn', 'Restauración de stock saltada — ingrediente borrado', { ingredienteId: deduction.ingredienteId, ventaId: venta.id });
+                            continue;
+                        }
                         await client.query(
-                            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
                             [deduction.real, deduction.ingredienteId, req.restauranteId]
                         );
                         log('info', 'Stock restaurado (descuento real)', {
@@ -593,7 +601,10 @@ REGLAS:
 
             // Obtener recetas y precios de ingredientes
             // Incluir campo codigo para mapeo con códigos del TPV
-            const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
+            // 🔒 AUDITORÍA 2026-06-12 (C1): `porciones` es OBLIGATORIO aquí. Sin él,
+            // getRecipeCostBase y expandRecipeToBase ven porciones=1 y una receta de
+            // lote (porciones>1) vendida por bulk descontaba stock y COGS ×porciones.
+            const recetasResult = await client.query('SELECT id, nombre, precio_venta, porciones, ingredientes, codigo FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
 
             // Mapa por nombre (para compatibilidad)
             const recetasMapNombre = new Map();
@@ -617,6 +628,7 @@ REGLAS:
                 `SELECT rv.id as variante_id, rv.codigo, rv.factor, rv.nombre as variante_nombre,
                     r.id as receta_id, r.nombre as receta_nombre,
                     COALESCE(rv.precio_venta, r.precio_venta) as precio_venta,
+                    r.porciones,
                     r.ingredientes
              FROM recetas_variantes rv
              JOIN recetas r ON rv.receta_id = r.id
@@ -632,6 +644,7 @@ REGLAS:
                     id: v.receta_id,
                     nombre: v.receta_nombre,
                     precio_venta: v.precio_venta,
+                    porciones: v.porciones, // 🔒 C1: sin esto, coste/stock ×porciones
                     ingredientes: v.ingredientes,
                     variante_id: v.variante_id,
                     variante_nombre: v.variante_nombre,

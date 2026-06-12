@@ -753,7 +753,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                            ELSE i.precio
                        END) as valor_stock
                 FROM ingredientes i
-                LEFT JOIN proveedores p ON i.proveedor_id = p.id
+                LEFT JOIN proveedores p ON i.proveedor_id = p.id AND p.restaurante_id = $1
                 LEFT JOIN (
                     SELECT ingrediente_id,
                            ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) as precio_medio_compra
@@ -822,7 +822,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                                     (ing->>'precio_unitario')::numeric)
                        END as subtotal
                 FROM pedidos p
-                LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+                LEFT JOIN proveedores pr ON p.proveedor_id = pr.id AND pr.restaurante_id = $1
                 CROSS JOIN LATERAL jsonb_array_elements(p.ingredientes) AS ing
                 LEFT JOIN ingredientes i ON i.id = COALESCE((ing->>'ingredienteId')::int, (ing->>'ingrediente_id')::int)
                 WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL
@@ -1059,7 +1059,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                        COALESCE(SUM(p.total - ${personalCostExpr('p')}), 0)::numeric(12,2) AS gasto,
                        COUNT(*) AS num_pedidos
                 FROM pedidos p
-                LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+                LEFT JOIN proveedores pr ON p.proveedor_id = pr.id AND pr.restaurante_id = $1
                 WHERE p.restaurante_id = $1 AND p.fecha >= $2 AND p.fecha < $3 AND p.deleted_at IS NULL
                 GROUP BY pr.nombre
                 ORDER BY gasto DESC
@@ -1150,7 +1150,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                            ELSE 'OK'
                        END as nivel_alerta
                 FROM ingredientes i
-                LEFT JOIN proveedores p ON i.proveedor_id = p.id
+                LEFT JOIN proveedores p ON i.proveedor_id = p.id AND p.restaurante_id = $1
                 LEFT JOIN LATERAL (
                     SELECT SUM((ing->>'cantidad')::numeric * v.cantidad) /
                            NULLIF(COUNT(DISTINCT DATE(v.fecha)), 0) as consumo_diario
@@ -1485,7 +1485,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 }
                 // Ingrediente base normal
                 const ingInfo = ingMap.get(ingId);
-                const rendimiento = parseFloat(ing.rendimiento) || 100;
+                // 🔒 AUDITORÍA 2026-06-12 (M2): fallback al rendimiento del ingrediente
+                // base (misma prioridad que getRecipeCostBase: línea → base → 100).
+                // Sin esto, el desglose por línea no sumaba el coste_lote de la misma
+                // respuesta cuando la línea no traía rendimiento pero el ingrediente sí.
+                const rendimiento = parseFloat(ing.rendimiento) || rendimientoBaseMap.get(ingId) || 100;
                 const precioUnitario = preciosMap.get(ingId) ?? 0;
                 const costeAjustado = rendimiento > 0 ? precioUnitario / (rendimiento / 100) : precioUnitario;
                 const costeIngrediente = costeAjustado * cantidad;

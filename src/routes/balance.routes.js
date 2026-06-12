@@ -174,8 +174,11 @@ module.exports = function (pool) {
                 [startDate, endDate, req.restauranteId]
             );
 
+            // 🔒 AUDITORÍA 2026-06-12 (C4): traer factor_variante — sin él una copa
+            // de vino computaba el COGS de la botella entera (mismo patrón que
+            // monthly.routes.js cantidad_ponderada y sales.routes.js:265).
             const ventasDetalle = await pool.query(
-                `SELECT v.cantidad, r.ingredientes, r.porciones
+                `SELECT v.cantidad, COALESCE(v.factor_variante, 1) as factor_variante, r.ingredientes, r.porciones
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
        WHERE v.fecha >= $1 AND v.fecha < $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL`,
@@ -216,8 +219,9 @@ module.exports = function (pool) {
             let costos = 0;
             for (const venta of ventasDetalle.rows) {
                 const porciones = Math.max(1, parseInt(venta.porciones) || 1);
+                const factorVariante = parseFloat(venta.factor_variante) || 1;
                 const costeLote = getRecipeCostBase(venta, preciosMap, recetasMap, rendimientoBaseMap);
-                costos += (costeLote / porciones) * venta.cantidad;
+                costos += (costeLote / porciones) * venta.cantidad * factorVariante;
             }
 
             const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;
@@ -1753,9 +1757,18 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 }
 
                 // ⚡ FIX Bug #8: Lock row before update to prevent race condition
-                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
+                // 🔒 AUDITORÍA 2026-06-12 (M-locks): + deleted_at IS NULL y skip explícito
+                // (antes el lock no devolvía filas con ingrediente borrado pero el UPDATE
+                // se ejecutaba igual y la compra se daba por procesada sin sumar stock).
+                const lockBulk = await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [ingredienteId, req.restauranteId]);
+                if (lockBulk.rows.length === 0) {
+                    log('warn', 'Compra bulk saltada — ingrediente borrado', { ingredienteId, ingrediente: compra.ingrediente });
+                    resultados.fallidos++;
+                    resultados.errores.push(`${compra.ingrediente}: ingrediente borrado`);
+                    continue;
+                }
                 await client.query(
-                    'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                    'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
                     [stockASumar, ingredienteId, req.restauranteId]
                 );
 
