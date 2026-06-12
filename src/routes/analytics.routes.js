@@ -209,10 +209,15 @@ module.exports = function (pool) {
                 try {
                     await client.query('BEGIN');
                     for (const ch of changes) {
+                        // 🔒 AUDITORÍA 2026-06-12 (M5): SIN GREATEST(0). El flujo normal de
+                        // ventas (sales.routes.js:285/:838) y el INSERT de abajo permiten
+                        // beneficio negativo (vender con pérdida es un dato real). Clampar
+                        // a 0 solo aquí inflaba el bucket "margen" del pnl-breakdown tras
+                        // cada recálculo de COGS.
                         const r = await client.query(
                             `UPDATE ventas_diarias_resumen
                              SET coste_ingredientes = $1,
-                                 beneficio_bruto = GREATEST(0, total_ingresos - $1)
+                                 beneficio_bruto = total_ingresos - $1
                              WHERE id = $2 AND restaurante_id = $3`,
                             [ch.coste_despues, ch.vdr_id, req.restauranteId]
                         );

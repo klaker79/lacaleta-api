@@ -333,9 +333,17 @@ module.exports = function (pool) {
                 // ⚡ FIX BUG-02: Restaurar solo lo que se descontó REALMENTE
                 for (const deduction of venta.stock_deductions) {
                     if (deduction.ingredienteId && deduction.real > 0) {
-                        await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [deduction.ingredienteId, req.restauranteId]);
+                        // 🔒 AUDITORÍA 2026-06-12 (M-locks): lock con deleted_at IS NULL +
+                        // skip explícito. Antes, con un ingrediente soft-deleted el lock no
+                        // devolvía filas pero el flujo seguía y la restauración se perdía
+                        // en silencio (o resucitaba stock en una fila borrada).
+                        const lockRes = await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [deduction.ingredienteId, req.restauranteId]);
+                        if (lockRes.rows.length === 0) {
+                            log('warn', 'Restauración de stock saltada — ingrediente borrado', { ingredienteId: deduction.ingredienteId, ventaId: venta.id });
+                            continue;
+                        }
                         await client.query(
-                            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                            'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
                             [deduction.real, deduction.ingredienteId, req.restauranteId]
                         );
                         log('info', 'Stock restaurado (descuento real)', {

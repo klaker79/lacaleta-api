@@ -273,13 +273,20 @@ module.exports = function (pool) {
             const transfer = transferResult.rows[0];
 
             // Lock source ingredient before deducting (prevent race condition on concurrent transfers)
+            // 🔒 AUDITORÍA 2026-06-12 (M-locks): + deleted_at IS NULL y check de existencia
+            // explícito (antes un ingrediente origen borrado caía en stockDisponible=0 con
+            // un mensaje engañoso de "stock insuficiente").
             const stockCheck = await client.query(
-                'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+                'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                 [transfer.ingrediente_id_origen, transfer.origen_restaurante_id]
             );
+            if (stockCheck.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'El ingrediente de origen ya no existe (fue eliminado)' });
+            }
 
             // Reject if origin doesn't have enough stock
-            const stockDisponible = parseFloat(stockCheck.rows[0]?.stock_actual) || 0;
+            const stockDisponible = parseFloat(stockCheck.rows[0].stock_actual) || 0;
             if (stockDisponible < transfer.cantidad) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: `Stock insuficiente. Disponible: ${stockDisponible}, solicitado: ${transfer.cantidad}` });
@@ -317,17 +324,23 @@ module.exports = function (pool) {
             }
 
             // Lock destination ingredient before adding stock
-            await client.query(
-                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE',
+            // 🔒 AUDITORÍA 2026-06-12 (M-locks): + deleted_at IS NULL y abortar si el
+            // destino fue borrado (antes la transfer se marcaba aprobada sin sumar nada).
+            const lockDestino = await client.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                 [destinoIngId, req.restauranteId]
             );
+            if (lockDestino.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'El ingrediente de destino ya no existe (fue eliminado)' });
+            }
 
             // Add stock to destination
             await client.query(
                 `UPDATE ingredientes
                  SET stock_actual = stock_actual + $1,
                      ultima_actualizacion_stock = NOW()
-                 WHERE id = $2 AND restaurante_id = $3`,
+                 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
                 [transfer.cantidad, destinoIngId, req.restauranteId]
             );
 

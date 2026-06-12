@@ -1757,9 +1757,18 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 }
 
                 // ⚡ FIX Bug #8: Lock row before update to prevent race condition
-                await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 FOR UPDATE', [ingredienteId, req.restauranteId]);
+                // 🔒 AUDITORÍA 2026-06-12 (M-locks): + deleted_at IS NULL y skip explícito
+                // (antes el lock no devolvía filas con ingrediente borrado pero el UPDATE
+                // se ejecutaba igual y la compra se daba por procesada sin sumar stock).
+                const lockBulk = await client.query('SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE', [ingredienteId, req.restauranteId]);
+                if (lockBulk.rows.length === 0) {
+                    log('warn', 'Compra bulk saltada — ingrediente borrado', { ingredienteId, ingrediente: compra.ingrediente });
+                    resultados.fallidos++;
+                    resultados.errores.push(`${compra.ingrediente}: ingrediente borrado`);
+                    continue;
+                }
                 await client.query(
-                    'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3',
+                    'UPDATE ingredientes SET stock_actual = stock_actual + $1, ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
                     [stockASumar, ingredienteId, req.restauranteId]
                 );
 
