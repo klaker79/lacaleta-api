@@ -174,8 +174,11 @@ module.exports = function (pool) {
                 [startDate, endDate, req.restauranteId]
             );
 
+            // 🔒 AUDITORÍA 2026-06-12 (C4): traer factor_variante — sin él una copa
+            // de vino computaba el COGS de la botella entera (mismo patrón que
+            // monthly.routes.js cantidad_ponderada y sales.routes.js:265).
             const ventasDetalle = await pool.query(
-                `SELECT v.cantidad, r.ingredientes, r.porciones
+                `SELECT v.cantidad, COALESCE(v.factor_variante, 1) as factor_variante, r.ingredientes, r.porciones
        FROM ventas v
        JOIN recetas r ON v.receta_id = r.id
        WHERE v.fecha >= $1 AND v.fecha < $2 AND v.restaurante_id = $3 AND v.deleted_at IS NULL AND r.deleted_at IS NULL`,
@@ -216,8 +219,9 @@ module.exports = function (pool) {
             let costos = 0;
             for (const venta of ventasDetalle.rows) {
                 const porciones = Math.max(1, parseInt(venta.porciones) || 1);
+                const factorVariante = parseFloat(venta.factor_variante) || 1;
                 const costeLote = getRecipeCostBase(venta, preciosMap, recetasMap, rendimientoBaseMap);
-                costos += (costeLote / porciones) * venta.cantidad;
+                costos += (costeLote / porciones) * venta.cantidad * factorVariante;
             }
 
             const ingresos = parseFloat(ventasMes.rows[0].ingresos) || 0;

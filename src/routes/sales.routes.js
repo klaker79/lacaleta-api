@@ -593,7 +593,10 @@ REGLAS:
 
             // Obtener recetas y precios de ingredientes
             // Incluir campo codigo para mapeo con códigos del TPV
-            const recetasResult = await client.query('SELECT id, nombre, precio_venta, ingredientes, codigo FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
+            // 🔒 AUDITORÍA 2026-06-12 (C1): `porciones` es OBLIGATORIO aquí. Sin él,
+            // getRecipeCostBase y expandRecipeToBase ven porciones=1 y una receta de
+            // lote (porciones>1) vendida por bulk descontaba stock y COGS ×porciones.
+            const recetasResult = await client.query('SELECT id, nombre, precio_venta, porciones, ingredientes, codigo FROM recetas WHERE restaurante_id = $1 AND deleted_at IS NULL', [req.restauranteId]);
 
             // Mapa por nombre (para compatibilidad)
             const recetasMapNombre = new Map();
@@ -617,6 +620,7 @@ REGLAS:
                 `SELECT rv.id as variante_id, rv.codigo, rv.factor, rv.nombre as variante_nombre,
                     r.id as receta_id, r.nombre as receta_nombre,
                     COALESCE(rv.precio_venta, r.precio_venta) as precio_venta,
+                    r.porciones,
                     r.ingredientes
              FROM recetas_variantes rv
              JOIN recetas r ON rv.receta_id = r.id
@@ -632,6 +636,7 @@ REGLAS:
                     id: v.receta_id,
                     nombre: v.receta_nombre,
                     precio_venta: v.precio_venta,
+                    porciones: v.porciones, // 🔒 C1: sin esto, coste/stock ×porciones
                     ingredientes: v.ingredientes,
                     variante_id: v.variante_id,
                     variante_nombre: v.variante_nombre,
