@@ -186,4 +186,63 @@ describe('POST /api/sales/bulk — TPV bulk import (n8n path)', () => {
             }
         }
     });
+
+    // 🔒 AUDITORÍA 2026-06-12 (C1): la SELECT de recetas del bulk no traía `porciones`,
+    // así que getRecipeCostBase/expandRecipeToBase veían porciones=1 y una receta de
+    // lote (porciones>1) vendida por TPV descontaba stock y COGS ×porciones.
+    // Este test crea receta de 4 porciones con 4 ud de un ingrediente (1 ud/porción),
+    // vende 1 por bulk y exige que el stock baje EXACTAMENTE 1 (no 4).
+    it('5. Bulk sale divide por porciones reales (regresión C1)', async () => {
+        if (!authToken) return;
+        const hdrs = (r) => r
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+
+        const stamp = Date.now();
+        let ingId, recId, saleId;
+        try {
+            // 1. Ingrediente con stock 10
+            const ingRes = await hdrs(request(API_URL).post('/api/ingredients')).send({
+                nombre: `TEST_C1_ING_${stamp}`, precio: 10, unidad: 'kg',
+                stockActual: 10, stockMinimo: 0, familia: 'alimento'
+            });
+            expect([200, 201]).toContain(ingRes.status);
+            ingId = ingRes.body.id;
+
+            // 2. Receta de LOTE: porciones=4, lleva 4 kg del ingrediente (1 kg/porción)
+            const recRes = await hdrs(request(API_URL).post('/api/recipes')).send({
+                nombre: `TEST_C1_REC_${stamp}`, categoria: 'principal',
+                precio_venta: 20, porciones: 4, codigo: `C1${stamp}`,
+                ingredientes: [{ ingredienteId: ingId, cantidad: 4 }]
+            });
+            expect([200, 201]).toContain(recRes.status);
+            recId = recRes.body.id;
+
+            // 3. Vender 1 unidad por bulk (fecha futura única para esquivar dedup)
+            const fecha = '2099-07-0' + (1 + (stamp % 9));
+            const bulkRes = await hdrs(request(API_URL).post('/api/sales/bulk')).send({
+                ventas: [{ codigo_tpv: `C1${stamp}`, cantidad: 1, total: 20, fecha }]
+            });
+            expect([200, 201]).toContain(bulkRes.status);
+            expect(bulkRes.body.procesados).toBeGreaterThanOrEqual(1);
+
+            // 4. Stock debe ser 9 (10 − 4/4×1), NO 6 (bug ×porciones)
+            const ingAfter = await hdrs(request(API_URL).get(`/api/ingredients/${ingId}`));
+            const stockAfter = parseFloat(ingAfter.body.stock_actual);
+            expect(stockAfter).toBeCloseTo(9, 2);
+            console.log(`✅ Bulk con porciones=4: stock 10 → ${stockAfter} (esperado 9)`);
+
+            // localizar la venta para cleanup
+            const salesRes = await hdrs(request(API_URL).get(`/api/sales?fecha=${fecha}`));
+            if (Array.isArray(salesRes.body)) {
+                const s = salesRes.body.find(v => v.receta_id === recId);
+                if (s) saleId = s.id;
+            }
+        } finally {
+            // Cleanup en orden inverso (best-effort)
+            if (saleId) await hdrs(request(API_URL).delete(`/api/sales/${saleId}`));
+            if (recId) await hdrs(request(API_URL).delete(`/api/recipes/${recId}`));
+            if (ingId) await hdrs(request(API_URL).delete(`/api/ingredients/${ingId}`));
+        }
+    });
 });
