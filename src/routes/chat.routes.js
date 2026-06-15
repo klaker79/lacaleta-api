@@ -270,7 +270,7 @@ module.exports = function (pool) {
     }
 
     router.post('/chat', costlyApiLimiter, authMiddleware, validateChatBody, chatAddonGate(pool), async (req, res) => {
-        const { message, lang } = req.body || {};
+        const { message, lang, history } = req.body || {};
         const restauranteId = req.restauranteId;
 
         try {
@@ -288,7 +288,9 @@ module.exports = function (pool) {
                 restauranteId,
                 lang: lang === 'en' ? 'en' : 'es',
                 restauranteNombre,
-                moneda
+                moneda,
+                // Historial reciente para memoria conversacional (saneado en processChat)
+                history: Array.isArray(history) ? history : []
             });
 
             // Preserve n8n contract: plain text response

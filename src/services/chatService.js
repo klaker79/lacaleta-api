@@ -95,6 +95,63 @@ function detectarIntentoInjection(message) {
 }
 
 // ============================================================================
+// MEMORIA CONVERSACIONAL
+// ============================================================================
+// El frontend guarda el historial reciente (localStorage) y lo envía en cada
+// request. Aquí lo convertimos en una secuencia `messages` válida para la API
+// de Anthropic: empieza en `user`, alterna user/assistant y termina en el
+// mensaje actual. Saneamos los turnos de usuario contra inyección (los turnos
+// de assistant son salida nuestra) y acotamos nº de turnos y longitud para
+// limitar el coste en tokens. NUNCA confiamos en el cliente: todo se valida.
+function buildConversationMessages({
+    history,
+    message,
+    maxTurns = 6,
+    maxChars = 4000,
+    injectionFn = detectarIntentoInjection,
+}) {
+    const current = { role: 'user', content: String(message ?? '').slice(0, maxChars) };
+    if (!Array.isArray(history) || history.length === 0) {
+        return [current];
+    }
+
+    // 1. Normalizar: solo entradas con rol válido y contenido string no vacío.
+    //    Descartar turnos de usuario que disparen el filtro anti-inyección.
+    const cleaned = [];
+    for (const entry of history) {
+        if (!entry || typeof entry !== 'object') continue;
+        const { role } = entry;
+        if (role !== 'user' && role !== 'assistant') continue;
+        if (typeof entry.content !== 'string') continue;
+        const content = entry.content.trim();
+        if (!content) continue;
+        if (role === 'user' && injectionFn(content).detected) continue;
+        cleaned.push({ role, content: content.slice(0, maxChars) });
+    }
+
+    // 2. Conservar los últimos `maxTurns` mensajes (los más recientes).
+    const recent = cleaned.slice(-maxTurns);
+
+    // 3. Forzar alternancia escaneando hacia atrás desde el mensaje actual
+    //    (que es `user`): el turno previo debe ser `assistant`, luego `user`...
+    const seq = [];
+    let expected = 'assistant';
+    for (let i = recent.length - 1; i >= 0; i--) {
+        if (recent[i].role === expected) {
+            seq.unshift(recent[i]);
+            expected = expected === 'assistant' ? 'user' : 'assistant';
+        }
+    }
+    // La secuencia debe empezar en `user`; si queda un `assistant` colgando al
+    // principio, lo quitamos (Anthropic exige primer mensaje con rol user).
+    while (seq.length && seq[0].role !== 'user') {
+        seq.shift();
+    }
+
+    return [...seq, current];
+}
+
+// ============================================================================
 // SYSTEM PROMPT (static portion, cacheable)
 // ============================================================================
 // Copied verbatim from the n8n flow, with these surgical edits:
@@ -1586,7 +1643,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
 // Runs the agent loop: ask model → execute tools it requests → loop until
 // it produces a final text response. Returns plain text (preserves n8n contract).
 
-async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€' }) {
+async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€', history = [] }) {
     if (!client) {
         throw new Error('Claude API not configured: ANTHROPIC_API_KEY missing');
     }
@@ -1632,7 +1689,9 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         }
     ];
 
-    const messages = [{ role: 'user', content: message }];
+    // Incluye el historial reciente (saneado) para dar memoria conversacional
+    // al búho dentro de la sesión.
+    const messages = buildConversationMessages({ history, message });
 
     let usageAggregate = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
     let finalText = '';
@@ -1719,4 +1778,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages };
