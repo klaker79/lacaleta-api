@@ -95,6 +95,21 @@ function detectarIntentoInjection(message) {
 }
 
 // ============================================================================
+// EXTRAPOLACIÓN MENSUAL
+// ============================================================================
+// Las tools devuelven ventas de una ventana de N días (default 60). Para dar
+// cifras "al mes" hay que normalizar a 30 días. Lo calculamos en el backend y
+// se lo pasamos hecho al modelo para que NUNCA trate el total de la ventana
+// como si fuera mensual (bug clásico: 60 días contados como un mes → cifra x2).
+function estimarMensual(total, dias) {
+    if (total === null || total === undefined) return null; // sin dato ≠ 0 ventas
+    const n = Number(total);
+    const d = Number(dias);
+    if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return null;
+    return (n / d) * 30;
+}
+
+// ============================================================================
 // MEMORIA CONVERSACIONAL
 // ============================================================================
 // El frontend guarda el historial reciente (localStorage) y lo envía en cada
@@ -228,6 +243,14 @@ DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
   "qué tal va X plato", "food cost de X plato", "ventas de X".
   Devuelve escandallo desglosado, food cost, ventas del periodo, y kg
   consumidos estimados por ingrediente. Default dias=60.
+
+⚠️ VENTAS Y CIFRAS "AL MES": ventas_periodo.unidades_vendidas e ingresos son
+de la VENTANA de ventas_periodo.dias (típicamente 60), NO de un mes. Si hablas
+de unidades o impacto económico "al mes"/"mensual", USA SIEMPRE los campos ya
+calculados ventas_periodo.unidades_mes_estimado y ventas_periodo.ingresos_mes_estimado
+(normalizados a 30 días). NUNCA trates el total de la ventana (p.ej. 60 días)
+como si fuera mensual: eso duplica la cifra. Para el impacto de un cambio de
+precio al mes: unidades_mes_estimado × (precio_nuevo − precio_actual).
 
 INGENIERÍA DE MENÚ Y OMNES (USAR SIEMPRE que el usuario hable de
 "matriz BCG", "estrella/puzzle/caballo/perro", "ingeniería de menú",
@@ -1610,7 +1633,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     dias,
                     num_ventas: parseInt(ventas.num_ventas) || 0,
                     unidades_vendidas: unidadesVendidas,
-                    ingresos: parseFloat(ventas.ingresos) || 0
+                    ingresos: parseFloat(ventas.ingresos) || 0,
+                    // Estimaciones MENSUALES ya normalizadas a 30 días. USA ESTAS
+                    // para hablar "al mes"; nunca trates unidades_vendidas (de la
+                    // ventana de `dias`) como si fuera mensual.
+                    unidades_mes_estimado: Math.round(estimarMensual(unidadesVendidas, dias) ?? 0),
+                    ingresos_mes_estimado: Math.round((estimarMensual(parseFloat(ventas.ingresos) || 0, dias) ?? 0) * 100) / 100
                 },
                 ingredientes_consumidos_estimados: ingredientesConsumidos,
                 alternativas
@@ -1778,4 +1806,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual };
