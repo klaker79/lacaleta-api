@@ -95,6 +95,78 @@ function detectarIntentoInjection(message) {
 }
 
 // ============================================================================
+// EXTRAPOLACIÓN MENSUAL
+// ============================================================================
+// Las tools devuelven ventas de una ventana de N días (default 60). Para dar
+// cifras "al mes" hay que normalizar a 30 días. Lo calculamos en el backend y
+// se lo pasamos hecho al modelo para que NUNCA trate el total de la ventana
+// como si fuera mensual (bug clásico: 60 días contados como un mes → cifra x2).
+function estimarMensual(total, dias) {
+    if (total === null || total === undefined) return null; // sin dato ≠ 0 ventas
+    const n = Number(total);
+    const d = Number(dias);
+    if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return null;
+    return (n / d) * 30;
+}
+
+// ============================================================================
+// MEMORIA CONVERSACIONAL
+// ============================================================================
+// El frontend guarda el historial reciente (localStorage) y lo envía en cada
+// request. Aquí lo convertimos en una secuencia `messages` válida para la API
+// de Anthropic: empieza en `user`, alterna user/assistant y termina en el
+// mensaje actual. Saneamos los turnos de usuario contra inyección (los turnos
+// de assistant son salida nuestra) y acotamos nº de turnos y longitud para
+// limitar el coste en tokens. NUNCA confiamos en el cliente: todo se valida.
+function buildConversationMessages({
+    history,
+    message,
+    maxTurns = 6,
+    maxChars = 4000,
+    injectionFn = detectarIntentoInjection,
+}) {
+    const current = { role: 'user', content: String(message ?? '').slice(0, maxChars) };
+    if (!Array.isArray(history) || history.length === 0) {
+        return [current];
+    }
+
+    // 1. Normalizar: solo entradas con rol válido y contenido string no vacío.
+    //    Descartar turnos de usuario que disparen el filtro anti-inyección.
+    const cleaned = [];
+    for (const entry of history) {
+        if (!entry || typeof entry !== 'object') continue;
+        const { role } = entry;
+        if (role !== 'user' && role !== 'assistant') continue;
+        if (typeof entry.content !== 'string') continue;
+        const content = entry.content.trim();
+        if (!content) continue;
+        if (role === 'user' && injectionFn(content).detected) continue;
+        cleaned.push({ role, content: content.slice(0, maxChars) });
+    }
+
+    // 2. Conservar los últimos `maxTurns` mensajes (los más recientes).
+    const recent = cleaned.slice(-maxTurns);
+
+    // 3. Forzar alternancia escaneando hacia atrás desde el mensaje actual
+    //    (que es `user`): el turno previo debe ser `assistant`, luego `user`...
+    const seq = [];
+    let expected = 'assistant';
+    for (let i = recent.length - 1; i >= 0; i--) {
+        if (recent[i].role === expected) {
+            seq.unshift(recent[i]);
+            expected = expected === 'assistant' ? 'user' : 'assistant';
+        }
+    }
+    // La secuencia debe empezar en `user`; si queda un `assistant` colgando al
+    // principio, lo quitamos (Anthropic exige primer mensaje con rol user).
+    while (seq.length && seq[0].role !== 'user') {
+        seq.shift();
+    }
+
+    return [...seq, current];
+}
+
+// ============================================================================
 // SYSTEM PROMPT (static portion, cacheable)
 // ============================================================================
 // Copied verbatim from the n8n flow, with these surgical edits:
@@ -108,11 +180,14 @@ const SYSTEM_PROMPT_STATIC = `🦉 OMNES — Tu chef financiero
 Soy Omnes, el cerebro que lo ve todo de tu restaurante: costes, recetas, inventario, márgenes y proveedores. Heredo el nombre de la eminencia de la rentabilidad de carta.
 
 PERSONALIDAD Y TONO (aplícalo SIEMPRE):
-- Sabio y analítico, pero cercano: hablo el idioma del hostelero, sin tecnicismos ni paja.
-- Honesto y directo, de buen rollo pero SIN dorar la píldora. Ej.: "Te lo digo con cariño: esa paella va al 42% de food cost y así no se sostiene."
+- Soy un asesor de rentabilidad para hostelería: profesional, claro y amable. Trato de "tú", con educación y respeto. Cercano pero NUNCA coloquial en exceso ni brusco.
+- Hablo el idioma del hostelero, sin tecnicismos ni paja, pero con la seriedad de un consultor. EVITO coletillas demasiado familiares ("de buen rollo", "te lo digo con cariño", "tranqui", "crack") y los cierres tipo "Tú decides".
+- Honesto y directo SIN dorar la píldora, pero con tacto: si algo va mal lo digo con datos y propongo salida, no con sentencias secas. Ej.: "Esa paella va al 42% de food cost, por encima de lo recomendable. Te propongo dos vías para corregirlo…".
+- Formulo las recomendaciones como CONSEJO profesional, no como órdenes: "te recomiendo", "una opción sería", "valora…", en lugar de imperativos secos ("haz", "retíralo sin dudarlo").
 - SIEMPRE con números reales (uso las herramientas antes de responder). Si falta un dato o no lo sé, lo digo — NUNCA me lo invento.
-- Convierto datos en decisiones: cierro con una recomendación clara y accionable. Cuando proceda, remato con "Tú decides."
-- Trabajo PARA el dueño: que gane más y se preocupe menos.
+- Convierto datos en decisiones: cierro con una recomendación clara y accionable y, si encaja, me ofrezco a profundizar ("¿Quieres que lo veamos en detalle?").
+- Emojis solo funcionales (p.ej. el semáforo de food cost 🟢🟠🔴), nunca decorativos.
+- Trabajo PARA el dueño del negocio, tratándole siempre con respeto: que gane más y se preocupe menos.
 
 ═══════════════════════════════════════════════════════════
 🧠 REGLAS DE CONTEXTO CONVERSACIONAL
@@ -144,7 +219,14 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 - resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
 - resumen_mermas(fecha_desde, fecha_hasta) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost.
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
-- stock_critico → Ingredientes que hay que reponer.
+- stock_critico → Ingredientes que hay que reponer. Cada fila trae "bajo_minimo" (true si está por debajo del mínimo configurado, IGUAL que el KPI "Stock Bajo" del dashboard) y "dias_stock"/"consumo_diario" (previsión de agotarse por ventas).
+
+⚠️ AL RESPONDER "qué reponer" / stock: RECONCILIA con el dashboard. Presenta DOS grupos separados, no una lista única:
+  1) "Por debajo de tu mínimo" → SOLO los que tienen bajo_minimo=true. Este recuento DEBE coincidir con el KPI "Stock Bajo" del dashboard. Dilo explícito (p.ej. "2 por debajo de mínimo, igual que ves en el panel").
+  2) "Se agotarán pronto por tu ritmo de ventas" → los demás (bajo_minimo=false) con dias_stock bajo, ordenados por dias_stock. Aclara que esto es una PREVISIÓN por consumo, no el mínimo.
+  Así el cliente entiende por qué tu lista puede ser más larga que el "Stock Bajo" del dashboard (tú además anticipas).
+
+⚠️ SUPERLATIVOS / RANKINGS ("el más caro", "el más barato", "el mejor/peor", "el que más/menos X"): ordena SIEMPRE por la métrica numérica EXACTA que se pide sobre TODA la lista y responde el verdadero top (p.ej. "ingrediente más caro" → ordena por precio_unitario_real DESC y coge el primero). NUNCA "corones" ni priorices el ítem del que venías hablando en la conversación: el contexto da continuidad, pero el ranking lo deciden SOLO los números. Si el primero no es el que mencionaste antes, dilo claro. Cualquier tabla que muestres va ordenada por esa misma métrica.
 
 DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
 - diagnostico_ingrediente(nombre_o_id, dias) → USAR cuando el usuario pregunte
@@ -171,6 +253,30 @@ DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
   "qué tal va X plato", "food cost de X plato", "ventas de X".
   Devuelve escandallo desglosado, food cost, ventas del periodo, y kg
   consumidos estimados por ingrediente. Default dias=60.
+
+⚠️ VENTAS Y CIFRAS "AL MES": ventas_periodo.unidades_vendidas e ingresos son
+de la VENTANA de ventas_periodo.dias (típicamente 60), NO de un mes. Si hablas
+de unidades o impacto económico "al mes"/"mensual", USA SIEMPRE los campos ya
+calculados ventas_periodo.unidades_mes_estimado y ventas_periodo.ingresos_mes_estimado
+(normalizados a 30 días). NUNCA trates el total de la ventana (p.ej. 60 días)
+como si fuera mensual: eso duplica la cifra. Para el impacto de un cambio de
+precio al mes: unidades_mes_estimado × (precio_nuevo − precio_actual).
+
+⚠️ CÁLCULOS DE IMPACTO ECONÓMICO (cuánto ganas/ahorras al subir/bajar un precio,
+reducir merma, etc.): resuelve la cuenta PASO A PASO antes de escribir el total
+(p.ej. 77 uds/mes × 20 € = 1.540 €/mes), revisa la multiplicación, y da el
+resultado UNA sola vez ya correcto. NUNCA publiques una cifra y luego te corrijas
+en el mismo mensaje ("perdona, me equivoqué"): primero calcula y verifica, después
+responde. Una respuesta con autocorrección queda poco profesional.
+
+⚠️ NUNCA INVENTES LA VENTANA TEMPORAL. No digas "en 90 días", "en 3 meses",
+"esta semana", etc. a ojo. Reglas: (1) si la cifra viene de diagnostico_ingrediente
+/diagnostico_receta, la ventana es EXACTAMENTE ventas_periodo.dias (di "en los
+últimos N días" con ese N). (2) Si viene de analisis_menu_engineering / matriz BCG
+/ principios de Omnes SIN periodo, son del HISTÓRICO COMPLETO → di "en el histórico"
+o "en el periodo analizado", NUNCA un nº de días concreto. (3) Si el usuario te da
+los datos en el mensaje sin especificar días (p.ej. "0 ventas en el periodo"),
+repite "en el periodo analizado" — no te inventes cuántos días son.
 
 INGENIERÍA DE MENÚ Y OMNES (USAR SIEMPRE que el usuario hable de
 "matriz BCG", "estrella/puzzle/caballo/perro", "ingeniería de menú",
@@ -272,6 +378,14 @@ RACIONES: stock / cantidad_por_receta
 ═══════════════════════════════════════════════════════════
 COMIDA: ≤30% 🟢 | 31-35% 🟡 | 36-40% 🟠 | >40% 🔴
 VINOS:  ≤40% 🟢 | 41-50% 🟡 | >50% 🔴
+
+⚠️ Aplica el umbral por CATEGORÍA del plato (los vinos son recetas de categoría
+bebida → umbral de VINOS; el resto → COMIDA). Cuando muestres food cost de varios
+platos juntos MEZCLANDO comida y vino, marca cada uno con su categoría (p.ej.
+añade "(vino)" o una columna Categoría) y, si los colores parecen incoherentes a
+simple vista (un vino al 40% 🟢 junto a una comida al 34% 🟠), acláralo en una
+línea: los vinos toleran más food cost que la comida. Así el semáforo nunca
+parece contradictorio.
 
 ═══════════════════════════════════════════════════════════
 📈 INFORMES P&L (PÉRDIDAS Y GANANCIAS)
@@ -503,7 +617,7 @@ crea YA en estado recibido y el stock se actualiza al instante.
   lista está vacía.
 
 📐 EXPLICACIÓN DE FÓRMULAS (para cuando el usuario pregunte):
-- Food Cost = (coste producción / precio venta) × 100. Ideal: ≤35% comida, ≤50% vinos
+- Food Cost = (coste producción / precio venta) × 100. Comida: ≤30% excelente, 31-35% en objetivo, 36-40% a vigilar, >40% alerta. Vinos: objetivo ~45% (≤40% bien, 41-50% aceptable, >50% alerta). NO apliques los umbrales de comida a los vinos.
 - Precio ideal comida = coste / 0.30 (objetivo 30%)
 - Precio ideal vinos = coste / 0.45 (objetivo 45-50%)
 - Margen = precio venta - coste producción
@@ -1148,7 +1262,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
                                 AND FLOOR(i.stock_actual / consumo.consumo_diario) <= 5 THEN 'BAJO'
                            WHEN i.stock_actual <= COALESCE(i.stock_minimo, 0) THEN 'BAJO'
                            ELSE 'OK'
-                       END as nivel_alerta
+                       END as nivel_alerta,
+                       -- bajo_minimo = misma definición que el KPI "Stock Bajo" del
+                       -- dashboard (stock_actual <= mínimo configurado). Sirve para que
+                       -- el chat reconcilie su lista con la cifra del dashboard.
+                       (i.stock_actual <= COALESCE(i.stock_minimo, 0)) as bajo_minimo
                 FROM ingredientes i
                 LEFT JOIN proveedores p ON i.proveedor_id = p.id AND p.restaurante_id = $1
                 LEFT JOIN LATERAL (
@@ -1553,7 +1671,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     dias,
                     num_ventas: parseInt(ventas.num_ventas) || 0,
                     unidades_vendidas: unidadesVendidas,
-                    ingresos: parseFloat(ventas.ingresos) || 0
+                    ingresos: parseFloat(ventas.ingresos) || 0,
+                    // Estimaciones MENSUALES ya normalizadas a 30 días. USA ESTAS
+                    // para hablar "al mes"; nunca trates unidades_vendidas (de la
+                    // ventana de `dias`) como si fuera mensual.
+                    unidades_mes_estimado: Math.round(estimarMensual(unidadesVendidas, dias) ?? 0),
+                    ingresos_mes_estimado: Math.round((estimarMensual(parseFloat(ventas.ingresos) || 0, dias) ?? 0) * 100) / 100
                 },
                 ingredientes_consumidos_estimados: ingredientesConsumidos,
                 alternativas
@@ -1586,7 +1709,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
 // Runs the agent loop: ask model → execute tools it requests → loop until
 // it produces a final text response. Returns plain text (preserves n8n contract).
 
-async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€' }) {
+async function processChat({ message, pool, restauranteId, lang = 'es', restauranteNombre = '', moneda = '€', history = [] }) {
     if (!client) {
         throw new Error('Claude API not configured: ANTHROPIC_API_KEY missing');
     }
@@ -1632,7 +1755,9 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         }
     ];
 
-    const messages = [{ role: 'user', content: message }];
+    // Incluye el historial reciente (saneado) para dar memoria conversacional
+    // al búho dentro de la sesión.
+    const messages = buildConversationMessages({ history, message });
 
     let usageAggregate = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
     let finalText = '';
@@ -1719,4 +1844,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual };
