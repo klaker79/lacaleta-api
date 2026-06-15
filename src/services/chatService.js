@@ -379,6 +379,14 @@ RACIONES: stock / cantidad_por_receta
 COMIDA: ≤30% 🟢 | 31-35% 🟡 | 36-40% 🟠 | >40% 🔴
 VINOS:  ≤40% 🟢 | 41-50% 🟡 | >50% 🔴
 
+⚠️ Aplica el umbral por CATEGORÍA del plato (los vinos son recetas de categoría
+bebida → umbral de VINOS; el resto → COMIDA). Cuando muestres food cost de varios
+platos juntos MEZCLANDO comida y vino, marca cada uno con su categoría (p.ej.
+añade "(vino)" o una columna Categoría) y, si los colores parecen incoherentes a
+simple vista (un vino al 40% 🟢 junto a una comida al 34% 🟠), acláralo en una
+línea: los vinos toleran más food cost que la comida. Así el semáforo nunca
+parece contradictorio.
+
 ═══════════════════════════════════════════════════════════
 📈 INFORMES P&L (PÉRDIDAS Y GANANCIAS)
 ═══════════════════════════════════════════════════════════
