@@ -219,7 +219,12 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 - resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
 - resumen_mermas(fecha_desde, fecha_hasta) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost.
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
-- stock_critico → Ingredientes que hay que reponer.
+- stock_critico → Ingredientes que hay que reponer. Cada fila trae "bajo_minimo" (true si está por debajo del mínimo configurado, IGUAL que el KPI "Stock Bajo" del dashboard) y "dias_stock"/"consumo_diario" (previsión de agotarse por ventas).
+
+⚠️ AL RESPONDER "qué reponer" / stock: RECONCILIA con el dashboard. Presenta DOS grupos separados, no una lista única:
+  1) "Por debajo de tu mínimo" → SOLO los que tienen bajo_minimo=true. Este recuento DEBE coincidir con el KPI "Stock Bajo" del dashboard. Dilo explícito (p.ej. "2 por debajo de mínimo, igual que ves en el panel").
+  2) "Se agotarán pronto por tu ritmo de ventas" → los demás (bajo_minimo=false) con dias_stock bajo, ordenados por dias_stock. Aclara que esto es una PREVISIÓN por consumo, no el mínimo.
+  Así el cliente entiende por qué tu lista puede ser más larga que el "Stock Bajo" del dashboard (tú además anticipas).
 
 ⚠️ SUPERLATIVOS / RANKINGS ("el más caro", "el más barato", "el mejor/peor", "el que más/menos X"): ordena SIEMPRE por la métrica numérica EXACTA que se pide sobre TODA la lista y responde el verdadero top (p.ej. "ingrediente más caro" → ordena por precio_unitario_real DESC y coge el primero). NUNCA "corones" ni priorices el ítem del que venías hablando en la conversación: el contexto da continuidad, pero el ranking lo deciden SOLO los números. Si el primero no es el que mencionaste antes, dilo claro. Cualquier tabla que muestres va ordenada por esa misma métrica.
 
@@ -1242,7 +1247,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
                                 AND FLOOR(i.stock_actual / consumo.consumo_diario) <= 5 THEN 'BAJO'
                            WHEN i.stock_actual <= COALESCE(i.stock_minimo, 0) THEN 'BAJO'
                            ELSE 'OK'
-                       END as nivel_alerta
+                       END as nivel_alerta,
+                       -- bajo_minimo = misma definición que el KPI "Stock Bajo" del
+                       -- dashboard (stock_actual <= mínimo configurado). Sirve para que
+                       -- el chat reconcilie su lista con la cifra del dashboard.
+                       (i.stock_actual <= COALESCE(i.stock_minimo, 0)) as bajo_minimo
                 FROM ingredientes i
                 LEFT JOIN proveedores p ON i.proveedor_id = p.id AND p.restaurante_id = $1
                 LEFT JOIN LATERAL (
