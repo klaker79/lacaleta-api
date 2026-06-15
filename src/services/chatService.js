@@ -1844,4 +1844,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, SYSTEM_PROMPT_STATIC };
