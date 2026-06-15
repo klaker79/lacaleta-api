@@ -254,6 +254,15 @@ calculados ventas_periodo.unidades_mes_estimado y ventas_periodo.ingresos_mes_es
 como si fuera mensual: eso duplica la cifra. Para el impacto de un cambio de
 precio al mes: unidades_mes_estimado × (precio_nuevo − precio_actual).
 
+⚠️ NUNCA INVENTES LA VENTANA TEMPORAL. No digas "en 90 días", "en 3 meses",
+"esta semana", etc. a ojo. Reglas: (1) si la cifra viene de diagnostico_ingrediente
+/diagnostico_receta, la ventana es EXACTAMENTE ventas_periodo.dias (di "en los
+últimos N días" con ese N). (2) Si viene de analisis_menu_engineering / matriz BCG
+/ principios de Omnes SIN periodo, son del HISTÓRICO COMPLETO → di "en el histórico"
+o "en el periodo analizado", NUNCA un nº de días concreto. (3) Si el usuario te da
+los datos en el mensaje sin especificar días (p.ej. "0 ventas en el periodo"),
+repite "en el periodo analizado" — no te inventes cuántos días son.
+
 INGENIERÍA DE MENÚ Y OMNES (USAR SIEMPRE que el usuario hable de
 "matriz BCG", "estrella/puzzle/caballo/perro", "ingeniería de menú",
 "principios de omnes", "dispersión", "amplitud de gama", "calidad-precio",
