@@ -594,7 +594,7 @@ crea YA en estado recibido y el stock se actualiza al instante.
   lista está vacía.
 
 📐 EXPLICACIÓN DE FÓRMULAS (para cuando el usuario pregunte):
-- Food Cost = (coste producción / precio venta) × 100. Ideal: ≤35% comida, ≤50% vinos
+- Food Cost = (coste producción / precio venta) × 100. Comida: ≤30% excelente, 31-35% en objetivo, 36-40% a vigilar, >40% alerta. Vinos: objetivo ~45% (≤40% bien, 41-50% aceptable, >50% alerta). NO apliques los umbrales de comida a los vinos.
 - Precio ideal comida = coste / 0.30 (objetivo 30%)
 - Precio ideal vinos = coste / 0.45 (objetivo 45-50%)
 - Margen = precio venta - coste producción
