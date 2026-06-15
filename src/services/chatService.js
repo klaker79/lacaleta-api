@@ -218,6 +218,8 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
 - stock_critico → Ingredientes que hay que reponer.
 
+⚠️ SUPERLATIVOS / RANKINGS ("el más caro", "el más barato", "el mejor/peor", "el que más/menos X"): ordena SIEMPRE por la métrica numérica EXACTA que se pide sobre TODA la lista y responde el verdadero top (p.ej. "ingrediente más caro" → ordena por precio_unitario_real DESC y coge el primero). NUNCA "corones" ni priorices el ítem del que venías hablando en la conversación: el contexto da continuidad, pero el ranking lo deciden SOLO los números. Si el primero no es el que mencionaste antes, dilo claro. Cualquier tabla que muestres va ordenada por esa misma métrica.
+
 DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
 - diagnostico_ingrediente(nombre_o_id, dias) → USAR cuando el usuario pregunte
   "qué pasa con X", "por qué tengo tanto/poco X", "analiza el ingrediente X",
