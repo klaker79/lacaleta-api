@@ -262,6 +262,13 @@ calculados ventas_periodo.unidades_mes_estimado y ventas_periodo.ingresos_mes_es
 como si fuera mensual: eso duplica la cifra. Para el impacto de un cambio de
 precio al mes: unidades_mes_estimado × (precio_nuevo − precio_actual).
 
+⚠️ CÁLCULOS DE IMPACTO ECONÓMICO (cuánto ganas/ahorras al subir/bajar un precio,
+reducir merma, etc.): resuelve la cuenta PASO A PASO antes de escribir el total
+(p.ej. 77 uds/mes × 20 € = 1.540 €/mes), revisa la multiplicación, y da el
+resultado UNA sola vez ya correcto. NUNCA publiques una cifra y luego te corrijas
+en el mismo mensaje ("perdona, me equivoqué"): primero calcula y verifica, después
+responde. Una respuesta con autocorrección queda poco profesional.
+
 ⚠️ NUNCA INVENTES LA VENTANA TEMPORAL. No digas "en 90 días", "en 3 meses",
 "esta semana", etc. a ojo. Reglas: (1) si la cifra viene de diagnostico_ingrediente
 /diagnostico_receta, la ventana es EXACTAMENTE ventas_periodo.dias (di "en los
