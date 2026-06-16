@@ -856,11 +856,15 @@ async function runTool(name, pool, restauranteId, args = {}) {
                        i.stock_actual, i.stock_minimo, i.familia, i.rendimiento,
                        i.activo,
                        p.nombre as proveedor_nombre,
-                       COALESCE(pcd.precio_medio_compra,
-                         CASE WHEN i.cantidad_por_formato > 0
-                              THEN i.precio / i.cantidad_por_formato
-                              ELSE i.precio END
-                       ) as precio_unitario_real,
+                       CASE WHEN COALESCE(i.precio_fijado, FALSE)
+                            THEN CASE WHEN i.cantidad_por_formato > 0
+                                      THEN i.precio / i.cantidad_por_formato
+                                      ELSE i.precio END
+                            ELSE COALESCE(pcd.precio_medio_compra,
+                                 CASE WHEN i.cantidad_por_formato > 0
+                                      THEN i.precio / i.cantidad_por_formato
+                                      ELSE i.precio END)
+                       END as precio_unitario_real,
                        (i.stock_actual * CASE
                            WHEN i.cantidad_por_formato IS NOT NULL AND i.cantidad_por_formato > 0
                            THEN i.precio / i.cantidad_por_formato
@@ -1113,7 +1117,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 [restauranteId]
             );
             const { rows: ings } = await pool.query(
-                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento, i.precio_fijado,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (
@@ -1525,7 +1529,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
 
             // Cargar ingredientes (para precios y nombres)
             const { rows: ings } = await pool.query(
-                `SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.rendimiento, i.precio_fijado,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (

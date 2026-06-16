@@ -28,6 +28,8 @@ module.exports = function (pool) {
         i.ultima_actualizacion_stock,
         i.formato_compra,
         i.cantidad_por_formato,
+        i.precio,
+        i.precio_fijado,
         CASE
             WHEN i.stock_real IS NULL THEN NULL
             ELSE (i.stock_real - i.stock_actual)
