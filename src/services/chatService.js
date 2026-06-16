@@ -1306,11 +1306,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const candidates = (await pool.query(
                 isNumericId
                     ? `SELECT id, nombre, stock_actual, precio, cantidad_por_formato, unidad,
-                              formato_compra, rendimiento, stock_minimo
+                              formato_compra, rendimiento, stock_minimo, precio_fijado
                        FROM ingredientes
                        WHERE restaurante_id = $1 AND deleted_at IS NULL AND id = $2`
                     : `SELECT id, nombre, stock_actual, precio, cantidad_por_formato, unidad,
-                              formato_compra, rendimiento, stock_minimo
+                              formato_compra, rendimiento, stock_minimo, precio_fijado
                        FROM ingredientes
                        WHERE restaurante_id = $1 AND deleted_at IS NULL AND nombre ILIKE $2
                        ORDER BY stock_actual DESC NULLS LAST, nombre ASC
@@ -1334,7 +1334,10 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const precioMedioCompra = precioMedioRow?.precio_medio_compra ? parseFloat(precioMedioRow.precio_medio_compra) : null;
             const cpf = ingrediente.cantidad_por_formato;
             const precio = parseFloat(ingrediente.precio) || 0;
-            const precioUnitarioReal = precioMedioCompra ?? (cpf && cpf > 0 ? precio / cpf : precio);
+            // Precio unitario REAL por la cascada canónica (respeta precio_fijado 📌:
+            // si está fijado usa el precio manual e ignora la media). Mismo helper que
+            // el resto de la app → Omnes no contradice al escandallo en un ingrediente fijado.
+            const precioUnitarioReal = getBackendIngredientUnitPrice({ ...ingrediente, precio_medio_compra: precioMedioCompra });
             const valorStock = parseFloat(ingrediente.stock_actual || 0) * (cpf && cpf > 0 ? precio / cpf : precio);
 
             // Compras del periodo (kg + €)
