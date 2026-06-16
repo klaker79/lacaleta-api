@@ -235,7 +235,7 @@ module.exports = function (pool) {
             // replicamos la misma lógica del bulk dentro de la transacción para que el
             // resumen quede consistente con cada venta y los KPIs salgan en tiempo real.
             const ingredientesResult = await client.query(
-                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento, i.precio_fijado,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (
@@ -654,7 +654,7 @@ REGLAS:
 
             // Precios de ingredientes + media de compras reales
             const ingredientesResult = await client.query(
-                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento, i.precio_fijado,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (

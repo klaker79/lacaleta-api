@@ -44,6 +44,20 @@ function calcularPrecioUnitario(ingrediente) {
 function getBackendIngredientUnitPrice(row) {
     if (!row) return 0;
 
+    // OVERRIDE manual: si el usuario fijó el precio (precio_fijado=true), el coste
+    // usa SIEMPRE el precio manual (precio/cpf) e ignora la media de compras. Si el
+    // precio manual no es válido, cae a la prioridad normal (defensivo).
+    // Requiere que la query traiga `precio_fijado`; si no lo trae (undefined) el
+    // comportamiento es el de siempre (la media manda) → backward-compatible.
+    if (row.precio_fijado) {
+        const precioManual = parseFloat(row.precio);
+        if (precioManual > 0) {
+            const cpfM = parseFloat(row.cantidad_por_formato) || 1;
+            const unit = cpfM > 0 ? precioManual / cpfM : precioManual;
+            return Math.round(unit * 10000) / 10000;
+        }
+    }
+
     if (row.precio_medio_compra !== null && row.precio_medio_compra !== undefined) {
         const v = parseFloat(row.precio_medio_compra);
         if (v > 0) return Math.round(v * 10000) / 10000;
@@ -272,6 +286,7 @@ async function recalcularPrecioPonderado(client, ingredienteId, restauranteId) {
         WHERE pcd.ingrediente_id = $1
           AND pcd.restaurante_id = $2
           AND i.deleted_at IS NULL
+          AND COALESCE(i.precio_fijado, FALSE) = FALSE
         GROUP BY i.cantidad_por_formato
     `, [ingredienteId, restauranteId]);
 

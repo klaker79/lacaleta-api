@@ -251,7 +251,7 @@ module.exports = function (pool) {
             //    en las otras 6 rutas pero ésta quedó fuera del scope. Ahora aplica el
             //    mismo patrón canónico: getBackendIngredientUnitPrice + getRecipeCostBase.
             const ingredientes = await pool.query(
-                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento,
+                `SELECT i.id, i.precio, i.cantidad_por_formato, i.rendimiento, i.precio_fijado,
                         pcd.precio_medio_compra
                  FROM ingredientes i
                  LEFT JOIN (

@@ -324,6 +324,10 @@ async function initializeDatabase(pool) {
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS rendimiento NUMERIC(5,2) DEFAULT 100;
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS formato_compra VARCHAR(50);
             ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(10,3);
+            -- precio_fijado: si TRUE, el coste usa el precio manual de la ficha e ignora
+            -- la media de compras, y la recepción de pedidos NO sobreescribe el precio.
+            -- Default FALSE → comportamiento histórico (la media manda). 2026-06-16.
+            ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS precio_fijado BOOLEAN DEFAULT FALSE;
             
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS periodo_id INTEGER;
             ALTER TABLE mermas ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
