@@ -115,3 +115,42 @@ describe('Chat tools — runTool delega en menuEngineeringService', () => {
         ).rejects.toThrow(/YYYY-MM-DD/);
     });
 });
+
+describe('Chat tool diagnostico_ingrediente — respeta precio_fijado (📌)', () => {
+    // Blindaje: si un ingrediente está fijado, Omnes debe reportar el precio
+    // fijado como precio_unitario_real (igual que el escandallo), NO la media de
+    // compras. Sin esto el chat contradice a la app en un ingrediente con pin.
+    // Secuencia de queries del tool con recetas=[]: candidates, precioMedioRow,
+    // compras, recetas, historial.
+    function poolSecuencia(rowsEnOrden) {
+        const pool = { query: jest.fn() };
+        rowsEnOrden.forEach(rows => pool.query.mockResolvedValueOnce({ rows }));
+        return pool;
+    }
+
+    test('fijado=true → precio_unitario_real es el precio fijado, no la media', async () => {
+        const pool = poolSecuencia([
+            [{ id: 1, nombre: 'BONITO', stock_actual: 10, precio: 100, cantidad_por_formato: 1,
+               unidad: 'kg', formato_compra: null, rendimiento: 100, stock_minimo: 2, precio_fijado: true }],
+            [{ precio_medio_compra: '20.0000' }],
+            [{ kg_total: '0', eur_total: '0', num_movimientos: '0' }],
+            [],
+            []
+        ]);
+        const res = await runTool('diagnostico_ingrediente', pool, 3, { nombre_o_id: 'BONITO' });
+        expect(res.ingrediente.precio_unitario_real).toBe(100);
+    });
+
+    test('fijado=false con media → precio_unitario_real es la media de compras', async () => {
+        const pool = poolSecuencia([
+            [{ id: 1, nombre: 'BONITO', stock_actual: 10, precio: 100, cantidad_por_formato: 1,
+               unidad: 'kg', formato_compra: null, rendimiento: 100, stock_minimo: 2, precio_fijado: false }],
+            [{ precio_medio_compra: '20.0000' }],
+            [{ kg_total: '0', eur_total: '0', num_movimientos: '0' }],
+            [],
+            []
+        ]);
+        const res = await runTool('diagnostico_ingrediente', pool, 3, { nombre_o_id: 'BONITO' });
+        expect(res.ingrediente.precio_unitario_real).toBe(20);
+    });
+});
