@@ -284,6 +284,12 @@ module.exports = function (pool) {
                 ? (Array.isArray(body.alergenos) ? body.alergenos : [])
                 : (Array.isArray(existing.alergenos) ? existing.alergenos : []);
 
+            // precio_fijado: override manual. Si TRUE, el coste usa el precio manual y la
+            // recepción de pedidos NO lo sobreescribe. Preservar si no viene en el body.
+            const finalPrecioFijado = body.precio_fijado !== undefined
+                ? (body.precio_fijado === true || body.precio_fijado === 'true')
+                : (existing.precio_fijado === true);
+
             // Log para debug (remover en producción)
             log('info', 'Actualizando ingrediente con preservación de datos', {
                 id,
@@ -294,8 +300,8 @@ module.exports = function (pool) {
             // 🔒 deleted_at IS NULL: evita resucitar un ingrediente soft-eliminado vía PUT
             // fecha_actualizacion = NOW(): util para diagnostico (saber cuando se edito por ultima vez)
             const result = await pool.query(
-                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12, alergenos=$13, fecha_actualizacion=NOW() WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
-                [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento, JSON.stringify(finalAlergenos)]
+                'UPDATE ingredientes SET nombre=$1, proveedor_id=$2, precio=$3, unidad=$4, stock_actual=$5, stock_minimo=$6, familia=$7, formato_compra=$10, cantidad_por_formato=$11, rendimiento=$12, alergenos=$13, precio_fijado=$14, fecha_actualizacion=NOW() WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
+                [finalNombre, finalProveedorId, finalPrecio, finalUnidad, finalStockActual, finalStockMinimo, finalFamilia, id, req.restauranteId, finalFormatoCompra, finalCantidadPorFormato, finalRendimiento, JSON.stringify(finalAlergenos), finalPrecioFijado]
             );
 
             // ⚡ SYNC: si el precio del ingrediente cambio, propagarlo al precio del proveedor
