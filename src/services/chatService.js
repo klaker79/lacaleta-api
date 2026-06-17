@@ -109,6 +109,27 @@ function estimarMensual(total, dias) {
     return (n / d) * 30;
 }
 
+// Rangos EXACTOS del dashboard (mismos que rangoPeriodo en el FE,
+// dashboard/_shared.js): semana natural (lunes→+7), mes natural (día1→mes
+// siguiente), hoy (→+1). hasta es EXCLUSIVE. Los calculamos en JS y se los
+// inyectamos al modelo ya hechos: los LLM fallan en aritmética de fechas
+// ("qué lunes es esta semana"), así que NUNCA dejamos que los calcule él.
+// Devuelve fechas ISO YYYY-MM-DD en hora local (igual que el FE).
+function rangosDashboard(today = new Date()) {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const addDays = (d, n) => { const c = new Date(d); c.setDate(c.getDate() + n); return c; };
+    const dow = today.getDay(); // 0=Dom..6=Sáb
+    const lunes = addDays(today, -((dow + 6) % 7));
+    const primeroMes = new Date(today.getFullYear(), today.getMonth(), 1);
+    const primeroMesSig = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    return {
+        semana: { desde: iso(lunes), hasta: iso(addDays(lunes, 7)) },
+        mes: { desde: iso(primeroMes), hasta: iso(primeroMesSig) },
+        hoy: { desde: iso(today), hasta: iso(addDays(today, 1)) }
+    };
+}
+
 // ============================================================================
 // MEMORIA CONVERSACIONAL
 // ============================================================================
@@ -1762,6 +1783,8 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
     const fechaHoy = today.toLocaleDateString(lang === 'en' ? 'en-GB' : 'es-ES', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
+    // Rangos del dashboard ya calculados → el modelo los copia, no los recalcula.
+    const rangos = rangosDashboard(today);
 
     // Split system into two blocks so the big static portion is cached and
     // the small dynamic portion (date, language, restaurant) is not.
@@ -1773,7 +1796,7 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         },
         {
             type: 'text',
-            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
+            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 RANGOS EXACTOS DEL DASHBOARD — cópialos TAL CUAL en fecha_desde/fecha_hasta (resumen_pyg, resumen_ventas_periodo, etc.). NO recalcules fechas, NO inventes el lunes ni los días: usa EXACTAMENTE estos valores (hasta es EXCLUSIVE):\n  • Esta semana (toggle "Semana") → fecha_desde=${rangos.semana.desde}, fecha_hasta=${rangos.semana.hasta}\n  • Este mes (toggle "Mes") → fecha_desde=${rangos.mes.desde}, fecha_hasta=${rangos.mes.hasta}\n  • Hoy → fecha_desde=${rangos.hoy.desde}, fecha_hasta=${rangos.hoy.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
         }
     ];
 
@@ -1866,4 +1889,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, SYSTEM_PROMPT_STATIC };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, rangosDashboard, SYSTEM_PROMPT_STATIC };
