@@ -42,4 +42,15 @@ describe('System prompt — guardarraíles críticos presentes', () => {
     test('regla de umbral por categoría (comida vs vino)', () => {
         expect(SYSTEM_PROMPT_STATIC).toMatch(/umbral por CATEGORÍA/i);
     });
+
+    // Definición de periodos — "semana"/"mes" deben ser naturales (lun→hoy / día 1→hoy)
+    // igual que el toggle del dashboard. Nació del fallo 17-jun: Omnes usó "últimos 7
+    // días" para "semanal" y dio 33,6% cuando el dashboard mostraba 31% (semana natural).
+    test('regla de definición de periodos alineada con el dashboard', () => {
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/DEFINICIÓN DE PERIODOS/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/SEMANA NATURAL EN CURSO/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/MES NATURAL EN CURSO/i);
+        // No debe usar ventana móvil salvo petición literal.
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/LITERALMENTE/i);
+    });
 });
