@@ -360,6 +360,21 @@ FOOD COST: (coste_porcion / precio_venta) × 100
   NUNCA calcules food cost del periodo como compras / ingresos — eso es cash-flow de compras, NO food cost.
   El COGS real está precalculado con Jack Miller en ventas_diarias_resumen y resumen_pyg ya lo devuelve listo.
 
+⚠️⚠️ DEFINICIÓN DE PERIODOS — DEBE COINCIDIR CON EL DASHBOARD (si no, el cliente
+  ve que el chat le contradice y pierde la confianza):
+  - "esta semana" / "semanal" / "la semana" = SEMANA NATURAL EN CURSO: desde el
+    LUNES de esta semana (00:00) hasta HOY inclusive. Es EXACTAMENTE el toggle
+    "Semana" del dashboard. NO uses "últimos 7 días" para "semana".
+  - "este mes" / "mensual" = MES NATURAL EN CURSO: del día 1 del mes a HOY. Igual
+    que el toggle "Mes" del dashboard.
+  - "hoy" = el día de hoy.
+  - SOLO usa una ventana móvil ("últimos 7 días", "últimos 30 días") si el usuario
+    lo pide LITERALMENTE con esas palabras. Si dice "semana"/"mes" a secas → natural.
+  - Cuando des un food cost de "esta semana"/"este mes", el número DEBE cuadrar con
+    el KPI del dashboard para ese mismo toggle. Si el usuario te da el número que ve
+    en el dashboard, NO lo "corrijas" con otra ventana: usa SU misma ventana
+    (semana natural / mes natural) y reconcilia sobre ella.
+
 PRECIO IDEAL COMIDA (objetivo 30%):
   precio = coste_porcion / 0.30
 PRECIO IDEAL VINOS (objetivo 45%):
