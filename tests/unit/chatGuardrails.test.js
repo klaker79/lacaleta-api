@@ -61,4 +61,13 @@ describe('System prompt — guardarraíles críticos presentes', () => {
         expect(SYSTEM_PROMPT_STATIC).toMatch(/SIEMPRE INCLUYE HOY/i);
         expect(SYSTEM_PROMPT_STATIC).toMatch(/misma ventana/i);
     });
+
+    // ARREGLO DE RAÍZ (19-jun): el modelo pasa `periodo` (lista cerrada) y el backend
+    // resuelve las fechas. El prompt DEBE instruir a usar periodo y NO calcular fechas.
+    test('regla de pasar `periodo` y no calcular fechas (resolver determinista)', () => {
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/PERÍODOS Y FECHAS/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/parámetro \*\*periodo\*\*/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/NO calcules fechas/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/ultimos_3_dias/);
+    });
 });
