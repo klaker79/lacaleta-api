@@ -39,4 +39,29 @@ describe('rangosDashboard — mismos rangos que el toggle del dashboard', () => 
         expect(r.semana).toEqual({ desde: '2026-06-29', hasta: '2026-07-06' });
         expect(r.mes).toEqual({ desde: '2026-07-01', hasta: '2026-08-01' });
     });
+
+    // Ventanas móviles "últimos N días" — INCLUYEN hoy y son DETERMINISTAS.
+    // Nació del fallo 19-jun: misma pregunta ("últimos 3 días") el mismo día en
+    // dos ordenadores daba 16-18 en uno y 17-19 en otro (el modelo elegía la
+    // ventana a ojo). Ahora se calcula aquí: hoy=19 → SIEMPRE 17 a 20 (exclusive).
+    test('últimos 3 días incluye hoy: hoy 19-jun → 17 a 20 (exclusive)', () => {
+        const r = rangosDashboard(new Date(2026, 5, 19));
+        expect(r.ultimos3).toEqual({ desde: '2026-06-17', hasta: '2026-06-20' });
+    });
+
+    test('últimos 7 días incluye hoy: hoy 19-jun → 13 a 20', () => {
+        const r = rangosDashboard(new Date(2026, 5, 19));
+        expect(r.ultimos7).toEqual({ desde: '2026-06-13', hasta: '2026-06-20' });
+    });
+
+    test('últimos 30 días incluye hoy: hoy 19-jun → 21-may a 20-jun', () => {
+        const r = rangosDashboard(new Date(2026, 5, 19));
+        expect(r.ultimos30).toEqual({ desde: '2026-05-21', hasta: '2026-06-20' });
+    });
+
+    test('mismo día → misma ventana SIEMPRE (determinista)', () => {
+        const a = rangosDashboard(new Date(2026, 5, 19));
+        const b = rangosDashboard(new Date(2026, 5, 19));
+        expect(a.ultimos3).toEqual(b.ultimos3);
+    });
 });

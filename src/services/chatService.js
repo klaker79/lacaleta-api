@@ -109,12 +109,14 @@ function estimarMensual(total, dias) {
     return (n / d) * 30;
 }
 
-// Rangos EXACTOS del dashboard (mismos que rangoPeriodo en el FE,
-// dashboard/_shared.js): semana natural (lunes→+7), mes natural (día1→mes
-// siguiente), hoy (→+1). hasta es EXCLUSIVE. Los calculamos en JS y se los
-// inyectamos al modelo ya hechos: los LLM fallan en aritmética de fechas
-// ("qué lunes es esta semana"), así que NUNCA dejamos que los calcule él.
-// Devuelve fechas ISO YYYY-MM-DD en hora local (igual que el FE).
+// Rangos EXACTOS de fecha que se inyectan al modelo YA HECHOS. Los LLM fallan en
+// aritmética de fechas (qué lunes es esta semana; si "últimos 3 días" incluye hoy
+// o no → dos ejecuciones el mismo día daban ventanas distintas), así que NUNCA
+// dejamos que las calcule él. Dos familias:
+//   - Periodos NATURALES (= rangoPeriodo del FE, dashboard/_shared.js): semana
+//     (lunes→+7), mes (día1→mes siguiente), hoy (→+1).
+//   - Ventanas MÓVILES "últimos N días": INCLUYEN hoy → [hoy-(N-1), hoy+1).
+// hasta SIEMPRE es EXCLUSIVE. Fechas ISO YYYY-MM-DD en hora local (igual que el FE).
 function rangosDashboard(today = new Date()) {
     const pad2 = (n) => String(n).padStart(2, '0');
     const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -123,11 +125,77 @@ function rangosDashboard(today = new Date()) {
     const lunes = addDays(today, -((dow + 6) % 7));
     const primeroMes = new Date(today.getFullYear(), today.getMonth(), 1);
     const primeroMesSig = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    // "Últimos N días" INCLUYE hoy: desde = hoy-(N-1), hasta = mañana (exclusive).
+    const movil = (n) => ({ desde: iso(addDays(today, -(n - 1))), hasta: iso(addDays(today, 1)) });
     return {
         semana: { desde: iso(lunes), hasta: iso(addDays(lunes, 7)) },
         mes: { desde: iso(primeroMes), hasta: iso(primeroMesSig) },
-        hoy: { desde: iso(today), hasta: iso(addDays(today, 1)) }
+        hoy: { desde: iso(today), hasta: iso(addDays(today, 1)) },
+        ultimos3: movil(3),
+        ultimos7: movil(7),
+        ultimos30: movil(30)
     };
+}
+
+// ============================================================================
+// RESOLVER DE PERÍODOS — ÚNICO PUNTO QUE CONVIERTE PERÍODO → FECHAS
+// ============================================================================
+// La RAÍZ de los fallos de fechas del chat era dejar que el MODELO calculara
+// fechas (qué lunes es, si "últimos 3 días" incluye hoy…): aritmética → poco
+// fiable y NO determinista (misma pregunta, dos ventanas distintas).
+// SOLUCIÓN DE RAÍZ: el modelo solo ELIGE un `periodo` de esta lista cerrada
+// (clasificar = fiable); el backend calcula las fechas aquí (determinista,
+// misma lógica que el dashboard). El modelo NUNCA vuelve a escribir una fecha,
+// salvo un rango explícito que teclee el propio usuario ("del 1 al 15 de marzo").
+const PERIODOS_VALIDOS = [
+    'hoy', 'ayer', 'semana', 'semana_pasada', 'mes', 'mes_pasado',
+    'ultimos_3_dias', 'ultimos_7_dias', 'ultimos_30_dias', 'año', 'año_pasado'
+];
+
+// Convierte un período de la lista cerrada en { desde, hasta } ISO ([desde, hasta)).
+// Devuelve null si el período no se reconoce. today inyectable para tests.
+function resolverRango(periodo, today = new Date()) {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const addDays = (d, n) => { const c = new Date(d); c.setDate(c.getDate() + n); return c; };
+    const r = rangosDashboard(today);
+    switch (periodo) {
+        case 'hoy': return r.hoy;
+        case 'semana': return r.semana;
+        case 'mes': return r.mes;
+        case 'ultimos_3_dias': return r.ultimos3;
+        case 'ultimos_7_dias': return r.ultimos7;
+        case 'ultimos_30_dias': return r.ultimos30;
+        case 'ayer': return { desde: iso(addDays(today, -1)), hasta: iso(today) };
+        case 'semana_pasada': {
+            const dow = today.getDay();
+            const lunesEsta = addDays(today, -((dow + 6) % 7));
+            return { desde: iso(addDays(lunesEsta, -7)), hasta: iso(lunesEsta) };
+        }
+        case 'mes_pasado': {
+            const primeroEste = new Date(today.getFullYear(), today.getMonth(), 1);
+            const primeroPasado = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            return { desde: iso(primeroPasado), hasta: iso(primeroEste) };
+        }
+        case 'año': return { desde: iso(new Date(today.getFullYear(), 0, 1)), hasta: iso(new Date(today.getFullYear() + 1, 0, 1)) };
+        case 'año_pasado': return { desde: iso(new Date(today.getFullYear() - 1, 0, 1)), hasta: iso(new Date(today.getFullYear(), 0, 1)) };
+        default: return null;
+    }
+}
+
+// Resuelve el rango para las tools de período: prioriza `periodo` (lista cerrada);
+// solo acepta fecha_desde/fecha_hasta para un rango EXPLÍCITO que dé el usuario.
+// Si no hay ninguno, error claro (que el modelo reintente con un periodo válido).
+function resolverRangoArgs(args = {}, today = new Date()) {
+    if (args.periodo) {
+        const r = resolverRango(args.periodo, today);
+        if (!r) throw new Error(`periodo no reconocido: "${args.periodo}". Usa uno de: ${PERIODOS_VALIDOS.join(', ')} — o un rango explícito fecha_desde+fecha_hasta.`);
+        return r;
+    }
+    if (args.fecha_desde && args.fecha_hasta) {
+        return { desde: parseIsoDate(args.fecha_desde, 'fecha_desde'), hasta: parseIsoDate(args.fecha_hasta, 'fecha_hasta') };
+    }
+    throw new Error("Indica 'periodo' (p.ej. 'mes', 'ultimos_7_dias') o un rango explícito fecha_desde+fecha_hasta.");
 }
 
 // ============================================================================
@@ -234,11 +302,11 @@ LISTAS / DETALLE (para análisis por ítem concreto):
 
 AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "mejor"):
 - resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
-- resumen_ventas_periodo(fecha_desde, fecha_hasta) → Total ingresos, nº tickets, ticket medio, top recetas.
+- resumen_ventas_periodo(periodo) → Total ingresos, nº tickets, ticket medio, top recetas. Pasa periodo (mes/semana/ultimos_7_dias…), no fechas.
 - resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos (mes completo + PRORRATEADO al periodo), comida_personal (gasto operativo aparte, NO food cost, ya restado en el beneficio) y margen bruto/neto. Para el beneficio del periodo usa SIEMPRE gastos_fijos_periodo y margen_neto_aprox (ya prorrateados), NUNCA gastos_fijos_mes. Si periodo.parcial=true (mes en curso, periodo.dias_periodo días), DILO al usuario y no extrapoles a importes mensuales sin avisar. Indica siempre el rango de fechas usado. Si mencionas un "coste fijo por día", calcúlalo SIEMPRE como gastos_fijos_mes / días naturales del mes (≈30), NUNCA como gastos_fijos_mes / días transcurridos: la tarifa diaria de junio es 6700/30 = 223 €/día, no 6700/9.
 - resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
-- resumen_compras_periodo(fecha_desde, fecha_hasta) → Total compras + por proveedor.
-- resumen_mermas(fecha_desde, fecha_hasta) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost.
+- resumen_compras_periodo(periodo) → Total compras + por proveedor. Pasa periodo (mes/semana/ultimos_7_dias…), no fechas.
+- resumen_mermas(periodo) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost. Pasa periodo, no fechas.
 - obtener_resumen_ventas → KPIs últimos 7 días agrupados por día (para análisis semanal corto).
 - stock_critico → Ingredientes que hay que reponer. Cada fila trae "bajo_minimo" (true si está por debajo del mínimo configurado, IGUAL que el KPI "Stock Bajo" del dashboard) y "dias_stock"/"consumo_diario" (previsión de agotarse por ventas).
 
@@ -335,12 +403,16 @@ menciónalas al usuario por si quería otro ítem.
 - El cuadre compras-vs-consumo (kg comprados vs kg consumidos vs exceso) va en kg de RECETA: el stock se descuenta por (cantidad_por_porción / porciones) × ventas, SIN aplicar rendimiento. Por eso "kg_consumidos" YA es el consumo real de stock.
 - NUNCA digas que "el rendimiento reduce/aumenta el consumo de kg" ni lo uses para explicar un exceso de compras. Rendimiento = food cost; cuadre de stock = kg de receta. Son cosas distintas, no las mezcles.
 
-⚠️ RANGO DE FECHAS para tools que lo piden:
-- Formato: YYYY-MM-DD
-- hasta es EXCLUSIVE (primer día del MES SIGUIENTE).
-- Abril 2026 completo → fecha_desde='2026-04-01', fecha_hasta='2026-05-01'
-- Marzo 2026 → '2026-03-01' a '2026-04-01'
-- NUNCA uses '2026-04-30' como hasta. Siempre usa el 1º del mes siguiente con '<'.
+⚠️⚠️ PERÍODOS Y FECHAS (resumen_pyg, resumen_ventas_periodo, resumen_compras_periodo, resumen_mermas):
+- Para CUALQUIER período relativo pasa el parámetro **periodo** y NO calcules fechas tú:
+  "hoy"→hoy · "ayer"→ayer · "esta semana"/"semanal"→semana · "la semana pasada"→semana_pasada ·
+  "este mes"/"mensual"→mes · "el mes pasado"→mes_pasado · "últimos 3 días"→ultimos_3_dias ·
+  "últimos 7 días"→ultimos_7_dias · "últimos 30 días"→ultimos_30_dias · "este año"→año · "el año pasado"→año_pasado.
+- El backend convierte "periodo" a las fechas EXACTAS del dashboard. Es la ÚNICA forma de que la MISMA
+  pregunta dé SIEMPRE la misma ventana y el mismo número. Cuando uses "periodo", NO pongas fecha_desde/fecha_hasta.
+- USA fecha_desde/fecha_hasta SOLO si el usuario da un rango EXPLÍCITO con fechas concretas
+  (p.ej. "del 1 al 15 de marzo" → fecha_desde='2026-03-01', fecha_hasta='2026-03-16'). Formato YYYY-MM-DD, hasta EXCLUSIVE (1º del mes siguiente).
+- Si un período no encaja en la lista (p.ej. "este trimestre"), usa un rango explícito; NUNCA inventes fechas a ojo para los relativos de la lista.
 
 🚨 PROHIBIDO sumar totales manualmente sobre obtener_ventas u obtener_pedidos.
   Siempre usa la tool de resumen_*_periodo correspondiente.
@@ -391,6 +463,12 @@ FOOD COST: (coste_porcion / precio_venta) × 100
   - "hoy" = el día de hoy.
   - SOLO usa una ventana móvil ("últimos 7 días", "últimos 30 días") si el usuario
     lo pide LITERALMENTE con esas palabras. Si dice "semana"/"mes" a secas → natural.
+  - "ÚLTIMOS N DÍAS" / "los últimos 3 días" / "esta semana de ventas": ventana
+    MÓVIL que SIEMPRE INCLUYE HOY (hoy y los N-1 días anteriores). NUNCA decidas a
+    ojo si incluye hoy o no — SIEMPRE lo incluye. Para 3/7/30 días usa los rangos
+    EXACTOS del bloque de fecha (no los recalcules). Esto es CRÍTICO: la misma
+    pregunta el mismo día DEBE dar la misma ventana siempre, sea quien sea o desde
+    donde sea — si dudas, copia el rango ya dado, jamás improvises fechas.
   - Cuando des un food cost de "esta semana"/"este mes", el número DEBE cuadrar con
     el KPI del dashboard para ese mismo toggle. Si el usuario te da el número que ve
     en el dashboard, NO lo "corrijas" con otra ventana: usa SU misma ventana
@@ -771,10 +849,11 @@ const TOOLS = [
         input_schema: {
             type: 'object',
             properties: {
-                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
-                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive, usa el 1º del mes siguiente)' }
+                periodo: { type: 'string', enum: PERIODOS_VALIDOS, description: 'Período relativo (ÚSALO casi siempre: "este mes"→mes, "los últimos 3 días"→ultimos_3_dias, "esta semana"→semana, "ayer"→ayer…). El backend lo convierte a las fechas exactas del dashboard — NO calcules fechas tú.' },
+                fecha_desde: { type: 'string', description: 'SOLO para un rango explícito que dé el usuario con fechas concretas (YYYY-MM-DD, inclusive). Si usas periodo, OMÍTELO.' },
+                fecha_hasta: { type: 'string', description: 'SOLO para rango explícito (YYYY-MM-DD, exclusive, 1º del mes siguiente). Si usas periodo, OMÍTELO.' }
             },
-            required: ['fecha_desde', 'fecha_hasta']
+            required: []
         }
     },
     {
@@ -783,10 +862,11 @@ const TOOLS = [
         input_schema: {
             type: 'object',
             properties: {
-                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
-                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
+                periodo: { type: 'string', enum: PERIODOS_VALIDOS, description: 'Período relativo (ÚSALO casi siempre: "este mes"→mes, "los últimos 3 días"→ultimos_3_dias, "esta semana"→semana, "ayer"→ayer…). El backend lo convierte a las fechas exactas del dashboard — NO calcules fechas tú.' },
+                fecha_desde: { type: 'string', description: 'SOLO para un rango explícito que dé el usuario con fechas concretas (YYYY-MM-DD, inclusive). Si usas periodo, OMÍTELO.' },
+                fecha_hasta: { type: 'string', description: 'SOLO para rango explícito (YYYY-MM-DD, exclusive). Si usas periodo, OMÍTELO.' }
             },
-            required: ['fecha_desde', 'fecha_hasta']
+            required: []
         }
     },
     {
@@ -800,10 +880,11 @@ const TOOLS = [
         input_schema: {
             type: 'object',
             properties: {
-                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
-                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
+                periodo: { type: 'string', enum: PERIODOS_VALIDOS, description: 'Período relativo (ÚSALO casi siempre: "este mes"→mes, "los últimos 3 días"→ultimos_3_dias, "esta semana"→semana, "ayer"→ayer…). El backend lo convierte a las fechas exactas del dashboard — NO calcules fechas tú.' },
+                fecha_desde: { type: 'string', description: 'SOLO para un rango explícito que dé el usuario con fechas concretas (YYYY-MM-DD, inclusive). Si usas periodo, OMÍTELO.' },
+                fecha_hasta: { type: 'string', description: 'SOLO para rango explícito (YYYY-MM-DD, exclusive). Si usas periodo, OMÍTELO.' }
             },
-            required: ['fecha_desde', 'fecha_hasta']
+            required: []
         }
     },
     {
@@ -812,10 +893,11 @@ const TOOLS = [
         input_schema: {
             type: 'object',
             properties: {
-                fecha_desde: { type: 'string', description: 'Inicio del rango YYYY-MM-DD (inclusive)' },
-                fecha_hasta: { type: 'string', description: 'Fin del rango YYYY-MM-DD (exclusive)' }
+                periodo: { type: 'string', enum: PERIODOS_VALIDOS, description: 'Período relativo (ÚSALO casi siempre: "este mes"→mes, "los últimos 3 días"→ultimos_3_dias, "esta semana"→semana, "ayer"→ayer…). El backend lo convierte a las fechas exactas del dashboard — NO calcules fechas tú.' },
+                fecha_desde: { type: 'string', description: 'SOLO para un rango explícito que dé el usuario con fechas concretas (YYYY-MM-DD, inclusive). Si usas periodo, OMÍTELO.' },
+                fecha_hasta: { type: 'string', description: 'SOLO para rango explícito (YYYY-MM-DD, exclusive). Si usas periodo, OMÍTELO.' }
             },
-            required: ['fecha_desde', 'fecha_hasta']
+            required: []
         }
     },
     {
@@ -1010,8 +1092,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
             `, [restauranteId])).rows;
 
         case 'resumen_ventas_periodo': {
-            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
-            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const { desde, hasta } = resolverRangoArgs(args);
             const totals = (await pool.query(`
                 SELECT
                     COALESCE(SUM(total), 0)::numeric(12,2) AS total_ingresos,
@@ -1035,8 +1116,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
         }
 
         case 'resumen_pyg': {
-            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
-            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const { desde, hasta } = resolverRangoArgs(args);
             const ventas = (await pool.query(`
                 SELECT COALESCE(SUM(total), 0)::numeric(12,2) AS ingresos,
                        COUNT(*) AS num_tickets
@@ -1197,8 +1277,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
         }
 
         case 'resumen_compras_periodo': {
-            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
-            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const { desde, hasta } = resolverRangoArgs(args);
             // 🍽️ Resta el coste de las líneas de comida personal de p.total: no son
             // gasto del restaurante (van a su pestaña). Así el P&L del chat no infla
             // compras ni food cost.
@@ -1223,8 +1302,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
         }
 
         case 'resumen_mermas': {
-            const desde = parseIsoDate(args.fecha_desde, 'fecha_desde');
-            const hasta = parseIsoDate(args.fecha_hasta, 'fecha_hasta');
+            const { desde, hasta } = resolverRangoArgs(args);
             const total = (await pool.query(`
                 SELECT COALESCE(SUM(valor_perdida), 0)::numeric(12,2) AS total_perdida,
                        COUNT(*)::int AS num_registros
@@ -1796,7 +1874,7 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         },
         {
             type: 'text',
-            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 RANGOS EXACTOS DEL DASHBOARD — cópialos TAL CUAL en fecha_desde/fecha_hasta (resumen_pyg, resumen_ventas_periodo, etc.). NO recalcules fechas, NO inventes el lunes ni los días: usa EXACTAMENTE estos valores (hasta es EXCLUSIVE):\n  • Esta semana (toggle "Semana") → fecha_desde=${rangos.semana.desde}, fecha_hasta=${rangos.semana.hasta}\n  • Este mes (toggle "Mes") → fecha_desde=${rangos.mes.desde}, fecha_hasta=${rangos.mes.hasta}\n  • Hoy → fecha_desde=${rangos.hoy.desde}, fecha_hasta=${rangos.hoy.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
+            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 PERÍODOS — En resumen_pyg / resumen_ventas_periodo / resumen_compras_periodo / resumen_mermas pasa el parámetro **periodo** (mes, semana, ultimos_3_dias, ayer…) y NO calcules fechas: el backend las resuelve solo. Estas fechas exactas son SOLO para que NARRES bien el rango y para analisis_menu_engineering/analisis_omnes (que usan fecha_desde/fecha_hasta):\n  • Hoy: ${rangos.hoy.desde} · Esta semana: ${rangos.semana.desde}→${rangos.semana.hasta} · Este mes: ${rangos.mes.desde}→${rangos.mes.hasta} · Últimos 3 días: ${rangos.ultimos3.desde}→${rangos.ultimos3.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
         }
     ];
 
@@ -1889,4 +1967,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, rangosDashboard, SYSTEM_PROMPT_STATIC };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, rangosDashboard, resolverRango, resolverRangoArgs, PERIODOS_VALIDOS, SYSTEM_PROMPT_STATIC };
