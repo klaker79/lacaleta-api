@@ -5,9 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "start:modular": "node server.modular.js",
     "dev": "node server.js",
-    "dev:modular": "node server.modular.js",
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",

@@ -58,10 +58,12 @@ const helmet = require('helmet');
 
 // ========== ARQUITECTURA LIMPIA V2 ==========
 const { setupEventHandlers } = require('./src/application/bootstrap');
-const recipeRoutesV2 = require('./src/interfaces/http/routes/recipe.routes.v2');
 const alertRoutes = require('./src/interfaces/http/routes/alert.routes');
-const kpiRoutes = require('./src/interfaces/http/routes/kpi.routes');
 const SupplierController = require('./src/interfaces/http/controllers/SupplierController');
+// NOTA 2026-06-19: rutas v2/recipes y v2/kpis ELIMINADAS — el frontend nunca las
+// llamaba (la lógica viva de recetas/KPIs está en src/routes/ y src/services/).
+// Quitarlas evita una 2ª implementación de coste que podía divergir (drift).
+// Se mantienen alerts (en uso vía /api/v2/alerts) y SupplierController (vía /api/suppliers).
 // NOTA: PurchaseController, RecipeController, SaleController, StockMovementController,
 // IngredientController fueron eliminados — sus rutas están inline en este archivo.
 
@@ -252,10 +254,8 @@ const { initializeDatabase } = require('./src/db/init');
 
 // [CLEANUP] Rate limiter custom eliminado - express-rate-limit ya cubre esto (globalLimiter, línea ~159)
 
-// Montar rutas de recetas v2 con autenticación
-app.use('/api/v2/recipes', authMiddleware, recipeRoutesV2);
+// Sistema de alertas v2 (en uso por el frontend: AlertPanel + /v2/alerts/*)
 app.use('/api/v2/alerts', authMiddleware, alertRoutes);
-app.use('/api/v2/kpis', authMiddleware, kpiRoutes);
 
 // ========== ENDPOINTS PÚBLICOS ==========
 app.get('/', (req, res) => {
@@ -448,7 +448,7 @@ server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 API corriendo en puerto ${PORT}`);
     console.log(`📍 La Caleta 102 Dashboard API v3.0-INTEL (con arquitectura limpia v2)`);
     console.log(`✅ CORS habilitado para: ${ALLOWED_ORIGINS.join(', ')}`);
-    console.log(`📦 Rutas v2 montadas: /api/v2/recipes`);
+    console.log(`📦 Rutas v2 montadas: /api/v2/alerts`);
 
     // ========== UPTIME KUMA HEARTBEAT ==========
     // Heartbeat verifica BD antes de reportar healthy
