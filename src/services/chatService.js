@@ -109,12 +109,14 @@ function estimarMensual(total, dias) {
     return (n / d) * 30;
 }
 
-// Rangos EXACTOS del dashboard (mismos que rangoPeriodo en el FE,
-// dashboard/_shared.js): semana natural (lunes→+7), mes natural (día1→mes
-// siguiente), hoy (→+1). hasta es EXCLUSIVE. Los calculamos en JS y se los
-// inyectamos al modelo ya hechos: los LLM fallan en aritmética de fechas
-// ("qué lunes es esta semana"), así que NUNCA dejamos que los calcule él.
-// Devuelve fechas ISO YYYY-MM-DD en hora local (igual que el FE).
+// Rangos EXACTOS de fecha que se inyectan al modelo YA HECHOS. Los LLM fallan en
+// aritmética de fechas (qué lunes es esta semana; si "últimos 3 días" incluye hoy
+// o no → dos ejecuciones el mismo día daban ventanas distintas), así que NUNCA
+// dejamos que las calcule él. Dos familias:
+//   - Periodos NATURALES (= rangoPeriodo del FE, dashboard/_shared.js): semana
+//     (lunes→+7), mes (día1→mes siguiente), hoy (→+1).
+//   - Ventanas MÓVILES "últimos N días": INCLUYEN hoy → [hoy-(N-1), hoy+1).
+// hasta SIEMPRE es EXCLUSIVE. Fechas ISO YYYY-MM-DD en hora local (igual que el FE).
 function rangosDashboard(today = new Date()) {
     const pad2 = (n) => String(n).padStart(2, '0');
     const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -123,10 +125,15 @@ function rangosDashboard(today = new Date()) {
     const lunes = addDays(today, -((dow + 6) % 7));
     const primeroMes = new Date(today.getFullYear(), today.getMonth(), 1);
     const primeroMesSig = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    // "Últimos N días" INCLUYE hoy: desde = hoy-(N-1), hasta = mañana (exclusive).
+    const movil = (n) => ({ desde: iso(addDays(today, -(n - 1))), hasta: iso(addDays(today, 1)) });
     return {
         semana: { desde: iso(lunes), hasta: iso(addDays(lunes, 7)) },
         mes: { desde: iso(primeroMes), hasta: iso(primeroMesSig) },
-        hoy: { desde: iso(today), hasta: iso(addDays(today, 1)) }
+        hoy: { desde: iso(today), hasta: iso(addDays(today, 1)) },
+        ultimos3: movil(3),
+        ultimos7: movil(7),
+        ultimos30: movil(30)
     };
 }
 
@@ -391,6 +398,12 @@ FOOD COST: (coste_porcion / precio_venta) × 100
   - "hoy" = el día de hoy.
   - SOLO usa una ventana móvil ("últimos 7 días", "últimos 30 días") si el usuario
     lo pide LITERALMENTE con esas palabras. Si dice "semana"/"mes" a secas → natural.
+  - "ÚLTIMOS N DÍAS" / "los últimos 3 días" / "esta semana de ventas": ventana
+    MÓVIL que SIEMPRE INCLUYE HOY (hoy y los N-1 días anteriores). NUNCA decidas a
+    ojo si incluye hoy o no — SIEMPRE lo incluye. Para 3/7/30 días usa los rangos
+    EXACTOS del bloque de fecha (no los recalcules). Esto es CRÍTICO: la misma
+    pregunta el mismo día DEBE dar la misma ventana siempre, sea quien sea o desde
+    donde sea — si dudas, copia el rango ya dado, jamás improvises fechas.
   - Cuando des un food cost de "esta semana"/"este mes", el número DEBE cuadrar con
     el KPI del dashboard para ese mismo toggle. Si el usuario te da el número que ve
     en el dashboard, NO lo "corrijas" con otra ventana: usa SU misma ventana
@@ -1796,7 +1809,7 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         },
         {
             type: 'text',
-            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 RANGOS EXACTOS DEL DASHBOARD — cópialos TAL CUAL en fecha_desde/fecha_hasta (resumen_pyg, resumen_ventas_periodo, etc.). NO recalcules fechas, NO inventes el lunes ni los días: usa EXACTAMENTE estos valores (hasta es EXCLUSIVE):\n  • Esta semana (toggle "Semana") → fecha_desde=${rangos.semana.desde}, fecha_hasta=${rangos.semana.hasta}\n  • Este mes (toggle "Mes") → fecha_desde=${rangos.mes.desde}, fecha_hasta=${rangos.mes.hasta}\n  • Hoy → fecha_desde=${rangos.hoy.desde}, fecha_hasta=${rangos.hoy.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
+            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 RANGOS EXACTOS DE FECHA — cópialos TAL CUAL en fecha_desde/fecha_hasta (resumen_pyg, resumen_ventas_periodo, etc.). NO recalcules fechas, NO inventes el lunes ni los días, NO decidas a ojo si una ventana incluye hoy: usa EXACTAMENTE estos valores (hasta es EXCLUSIVE):\n  • Esta semana (toggle "Semana") → fecha_desde=${rangos.semana.desde}, fecha_hasta=${rangos.semana.hasta}\n  • Este mes (toggle "Mes") → fecha_desde=${rangos.mes.desde}, fecha_hasta=${rangos.mes.hasta}\n  • Hoy → fecha_desde=${rangos.hoy.desde}, fecha_hasta=${rangos.hoy.hasta}\n  • Últimos 3 días (incluye hoy) → fecha_desde=${rangos.ultimos3.desde}, fecha_hasta=${rangos.ultimos3.hasta}\n  • Últimos 7 días (incluye hoy) → fecha_desde=${rangos.ultimos7.desde}, fecha_hasta=${rangos.ultimos7.hasta}\n  • Últimos 30 días (incluye hoy) → fecha_desde=${rangos.ultimos30.desde}, fecha_hasta=${rangos.ultimos30.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
         }
     ];
 

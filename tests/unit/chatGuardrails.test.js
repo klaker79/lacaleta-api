@@ -53,4 +53,12 @@ describe('System prompt — guardarraíles críticos presentes', () => {
         // No debe usar ventana móvil salvo petición literal.
         expect(SYSTEM_PROMPT_STATIC).toMatch(/LITERALMENTE/i);
     });
+
+    // "Últimos N días" determinista — misma pregunta mismo día = misma ventana.
+    // Nació del fallo 19-jun: dos ordenadores daban 16-18 vs 17-19 para "últimos 3 días".
+    test('regla de ventana móvil determinista (últimos N días incluye hoy)', () => {
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/ÚLTIMOS N DÍAS/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/SIEMPRE INCLUYE HOY/i);
+        expect(SYSTEM_PROMPT_STATIC).toMatch(/misma ventana/i);
+    });
 });
