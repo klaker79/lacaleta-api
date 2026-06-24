@@ -9,17 +9,28 @@ const { validatePrecio, sanitizeString, validateId } = require('../utils/validat
 const { logChange } = require('../utils/auditLog');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-const fechaOk = (s) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s : null;
+// Valida fecha YYYY-MM-DD REAL (no solo el formato): rechaza imposibles como
+// 2026-06-31 o 2026-02-30, que reventarían la query de Postgres. Devuelve la
+// fecha si es válida, o null.
+const fechaOk = (s) => {
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const d = new Date(`${s}T00:00:00Z`);
+    return (!isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s) ? s : null;
+};
+const isoUTC = (d) => d.toISOString().slice(0, 10);
 
 module.exports = function (pool) {
     const router = Router();
 
     router.get('/personal-extra', globalLimiter, authMiddleware, async (req, res) => {
         try {
+            // Rango por defecto: mes en curso [primer día, último día REAL del mes].
+            // Nunca usar `${ym}-31` (revienta en meses de 30 días o febrero).
             const hoy = new Date();
-            const ym = `${hoy.getUTCFullYear()}-${String(hoy.getUTCMonth() + 1).padStart(2, '0')}`;
-            const desde = fechaOk(req.query.desde) || `${ym}-01`;
-            const hasta = fechaOk(req.query.hasta) || `${ym}-31`;
+            const primerDia = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), 1));
+            const ultimoDia = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() + 1, 0));
+            const desde = fechaOk(req.query.desde) || isoUTC(primerDia);
+            const hasta = fechaOk(req.query.hasta) || isoUTC(ultimoDia);
             const result = await pool.query(
                 'SELECT * FROM personal_extra WHERE restaurante_id = $1 AND fecha >= $2 AND fecha <= $3 ORDER BY fecha DESC, id DESC',
                 [req.restauranteId, desde, hasta]

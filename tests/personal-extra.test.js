@@ -73,6 +73,19 @@ describe('CRUD /api/personal-extra', () => {
         expect(ids).toContain(createdId);
     });
 
+    it('b3. GET SIN parámetros (mes en curso) NO revienta → 200', async () => {
+        if (!authToken) return;
+        // Regresión: el default usaba "${ym}-31" (fecha inexistente en meses de
+        // 30 días/febrero) y la query daba 500. Debe responder 200 con un array.
+        const res = await request(API_URL)
+            .get('/api/personal-extra')
+            .set('Origin', 'http://localhost:3001')
+            .set('Authorization', `Bearer ${authToken}`);
+
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+    });
+
     it('b2. GET con rango que NO incluye la fecha → no aparece', async () => {
         if (!authToken || !createdId) return;
 
