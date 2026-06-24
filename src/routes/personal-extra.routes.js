@@ -3,6 +3,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { globalLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validatePrecio, sanitizeString, validateId } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
@@ -13,7 +14,7 @@ const fechaOk = (s) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)) 
 module.exports = function (pool) {
     const router = Router();
 
-    router.get('/personal-extra', authMiddleware, async (req, res) => {
+    router.get('/personal-extra', globalLimiter, authMiddleware, async (req, res) => {
         try {
             const hoy = new Date();
             const ym = `${hoy.getUTCFullYear()}-${String(hoy.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -30,7 +31,7 @@ module.exports = function (pool) {
         }
     });
 
-    router.post('/personal-extra', authMiddleware, async (req, res) => {
+    router.post('/personal-extra', globalLimiter, authMiddleware, async (req, res) => {
         try {
             const fecha = fechaOk(req.body.fecha);
             if (!fecha) return res.status(400).json({ error: 'Fecha inválida (YYYY-MM-DD)' });
@@ -53,7 +54,7 @@ module.exports = function (pool) {
         }
     });
 
-    router.put('/personal-extra/:id', authMiddleware, async (req, res) => {
+    router.put('/personal-extra/:id', globalLimiter, authMiddleware, async (req, res) => {
         try {
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
@@ -79,7 +80,7 @@ module.exports = function (pool) {
         }
     });
 
-    router.delete('/personal-extra/:id', authMiddleware, async (req, res) => {
+    router.delete('/personal-extra/:id', globalLimiter, authMiddleware, async (req, res) => {
         try {
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
