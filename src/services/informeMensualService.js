@@ -238,6 +238,18 @@ async function getComidaPersonalMes(pool, restauranteId, rango) {
     return parseFloat(r.rows[0].total) || 0;
 }
 
+async function getPersonalExtraMes(pool, restauranteId, rango) {
+    // 👷 Pagos a extras por horas del mes. Gasto operativo REAL con fecha que
+    // resta al beneficio neto (como comida_personal), NO es food cost ni COGS.
+    const sql = `
+        SELECT COALESCE(SUM(total), 0)::numeric AS total
+        FROM personal_extra
+        WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3
+    `;
+    const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin]);
+    return parseFloat(r.rows[0].total) || 0;
+}
+
 async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
     // Cuánto se compró a cada proveedor en el mes + mes anterior para variación.
     // Se basa en pedidos.total (cash-flow real de albaranes), RESTANDO el coste de
@@ -346,7 +358,8 @@ async function generarInformeMensual(pool, restauranteId, mes) {
     try {
         const [
             restaurante, ingresos, topRentables, topProblematicos, cambiosPrecio,
-            stock, cogsActual, gastosFijos, topProveedores, mermas, evolucion, comidaPersonal
+            stock, cogsActual, gastosFijos, topProveedores, mermas, evolucion, comidaPersonal,
+            personalExtra
         ] = await Promise.all([
             getRestaurante(pool, restauranteId),
             getIngresos(pool, restauranteId, rango),
@@ -359,7 +372,8 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             getTopProveedores(pool, restauranteId, rango, 8),
             getMermasMes(pool, restauranteId, rango),
             getEvolucionDiaria(pool, restauranteId, rango),
-            getComidaPersonalMes(pool, restauranteId, rango)
+            getComidaPersonalMes(pool, restauranteId, rango),
+            getPersonalExtraMes(pool, restauranteId, rango)
         ]);
 
         const foodCostPct = ingresos.mes_actual > 0
@@ -386,7 +400,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
         // cost (no toca cogs/food_cost_pct). Las mermas NO se restan aquí (variante
         // conservadora; ver food cost real arriba y la sección Mermas).
         const margenBruto = ingresos.mes_actual - cogsActual;
-        const beneficioNeto = margenBruto - gastosFijos.total - comidaPersonal;
+        const beneficioNeto = margenBruto - gastosFijos.total - comidaPersonal - personalExtra;
         const margenNetoPct = ingresos.mes_actual > 0
             ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
             : 0;
@@ -417,6 +431,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
                 gastos_fijos: Math.round(gastosFijos.total * 100) / 100,
                 gastos_fijos_conceptos: gastosFijos.num_conceptos,
                 comida_personal: Math.round(comidaPersonal * 100) / 100,
+                personal_extra: Math.round(personalExtra * 100) / 100,
                 beneficio_neto: Math.round(beneficioNeto * 100) / 100,
                 margen_neto_pct: margenNetoPct
             },
