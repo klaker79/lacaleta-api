@@ -36,7 +36,8 @@ function makePoolMock({
     mermas_count = 0,
     mermas_motivos = [],
     evolucion = [],
-    comida_personal_total = 0
+    comida_personal_total = 0,
+    personal_extra_total = 0
 } = {}) {
     return {
         async query(sql) {
@@ -92,6 +93,11 @@ function makePoolMock({
             // 🍽️ Comida de personal del mes (pedidos, líneas personal)
             if (/from pedidos/.test(s) && /personal/.test(s) && !/with actual as/.test(s)) {
                 return { rows: [{ total: comida_personal_total }] };
+            }
+
+            // 👷 Personal extra del mes (tabla personal_extra)
+            if (/from personal_extra/.test(s)) {
+                return { rows: [{ total: personal_extra_total }] };
             }
 
             // Mermas total
@@ -159,6 +165,22 @@ describe('informeMensualService — cálculos del P&L', () => {
         // food cost INTACTO: COGS 3500/10000 = 35% (la comida personal NO entra)
         expect(r.pyg.cogs).toBe(3500);
         expect(r.food_cost.mes_actual_pct).toBe(35);
+    });
+
+    test('personal extra RESTA al beneficio neto pero NO al food cost', async () => {
+        const pool = makePoolMock({
+            ingresos_actual: 10000,
+            cogs_actual: 3000,
+            gastos_fijos_total: 4000,
+            personal_extra_total: 500
+        });
+        const r = await generarInformeMensual(pool, 3, '2026-04');
+        // beneficio = 10000 − 3000 − 4000 − 0 − 500 = 2500
+        expect(r.pyg.personal_extra).toBe(500);
+        expect(r.pyg.beneficio_neto).toBe(2500);
+        // food cost INTACTO: COGS 3000/10000 = 30%
+        expect(r.pyg.cogs).toBe(3000);
+        expect(r.food_cost.mes_actual_pct).toBe(30);
     });
 
     test('beneficio NEGATIVO: ingresos 5.000€, COGS 2.500€, gastos 3.500€ → beneficio -1.000€', async () => {

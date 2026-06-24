@@ -40,6 +40,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('sales', require('./sales.routes'), pool);
     mount('staff', require('./staff.routes'), pool);
     mount('gastos', require('./gastos.routes'), pool);
+    mount('personal-extra', require('./personal-extra.routes'), pool);
     mount('balance', require('./balance.routes'), pool);
     mount('analytics', require('./analytics.routes'), pool);
     mount('daily', require('./daily.routes'), pool);

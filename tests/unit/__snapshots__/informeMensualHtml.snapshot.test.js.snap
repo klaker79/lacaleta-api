@@ -321,6 +321,7 @@ exports[`informeMensualHtml — snapshots HTML "estado vacío" — sin actividad
             <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">0,00 €</td></tr>
             <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(0)</span></td><td class="num">0,00 €</td></tr>
             
+            
             <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">0,00 €</strong></td></tr>
             <tr class="pyg-pct"><td>Margen neto</td><td class="num"><span class="kpi-warn">0.0%</span></td></tr>
         </table>
@@ -677,6 +678,7 @@ exports[`informeMensualHtml — snapshots HTML completo en EN con moneda RM (ten
             <tr class="pyg-minus"><td>− COGS (cost of goods sold)</td><td class="num">RM 15953,60</td></tr>
             <tr class="pyg-subtotal"><td>Gross margin</td><td class="num">RM 31246,40</td></tr>
             <tr class="pyg-minus"><td>− Fixed costs <span class="pyg-sub-info">(8)</span></td><td class="num">RM 18500,00</td></tr>
+            
             
             <tr class="pyg-total"><td><strong>Net profit</strong></td><td class="num"><strong class="kpi-good">RM 12746,40</strong></td></tr>
             <tr class="pyg-pct"><td>Net margin</td><td class="num"><span class="kpi-good">27.0%</span></td></tr>
@@ -1206,6 +1208,7 @@ exports[`informeMensualHtml — snapshots HTML completo en ES con datos reales 1
             <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">31246,40 €</td></tr>
             <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(8)</span></td><td class="num">18500,00 €</td></tr>
             
+            
             <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">12746,40 €</strong></td></tr>
             <tr class="pyg-pct"><td>Margen neto</td><td class="num"><span class="kpi-good">27.0%</span></td></tr>
         </table>
@@ -1733,6 +1736,7 @@ exports[`informeMensualHtml — snapshots HTML con análisis IA vacío — secci
             <tr class="pyg-minus"><td>− COGS (coste materia prima)</td><td class="num">15953,60 €</td></tr>
             <tr class="pyg-subtotal"><td>Margen bruto</td><td class="num">31246,40 €</td></tr>
             <tr class="pyg-minus"><td>− Gastos fijos <span class="pyg-sub-info">(8)</span></td><td class="num">18500,00 €</td></tr>
+            
             
             <tr class="pyg-total"><td><strong>Beneficio neto</strong></td><td class="num"><strong class="kpi-good">12746,40 €</strong></td></tr>
             <tr class="pyg-pct"><td>Margen neto</td><td class="num"><span class="kpi-good">27.0%</span></td></tr>
