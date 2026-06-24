@@ -538,6 +538,27 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla gastos_fijos verificada');
   } catch (e) { log('warn', 'Migración gastos_fijos', { error: e.message }); }
 
+  // Tabla personal_extra (pagos a extras por horas → cuentan en el PyG)
+  try {
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS personal_extra (
+                id SERIAL PRIMARY KEY,
+                restaurante_id INTEGER NOT NULL,
+                fecha DATE NOT NULL,
+                nombre VARCHAR(255),
+                horas NUMERIC(6, 2) NOT NULL DEFAULT 0,
+                precio_hora NUMERIC(8, 2) NOT NULL DEFAULT 0,
+                total NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                observaciones TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_personal_extra_rest_fecha
+                ON personal_extra (restaurante_id, fecha);
+        `);
+    log('info', 'Tabla personal_extra verificada');
+  } catch (e) { log('warn', 'Migración personal_extra', { error: e.message }); }
+
   // Columnas faltantes en ingredientes
   try {
     await pool.query(`
