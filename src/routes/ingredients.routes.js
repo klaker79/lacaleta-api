@@ -162,6 +162,26 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: nombreCheck.error });
             }
 
+            // 🔒 ANTI-DUPLICADO (auditoría 2026-06-27 HIGH-1): no crear un ingrediente
+            // con el mismo nombre (insensible a mayúsculas/espacios) que otro VIVO del
+            // MISMO tenant. Duplicar fragmenta stock y precios (causa raíz). Devolvemos
+            // 409 con el id existente para que el frontend redirija/avise en vez de
+            // crear un duplicado. NO añade índice único en BD todavía: prod puede tener
+            // duplicados históricos y rompería; se fuerza tras la limpieza de datos.
+            const dupCheck = await pool.query(
+                `SELECT id, nombre FROM ingredientes
+                 WHERE restaurante_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND deleted_at IS NULL
+                 LIMIT 1`,
+                [req.restauranteId, nombreCheck.value]
+            );
+            if (dupCheck.rows.length > 0) {
+                return res.status(409).json({
+                    error: `Ya existe el ingrediente "${dupCheck.rows[0].nombre}". No se ha creado un duplicado.`,
+                    code: 'INGREDIENTE_DUPLICADO',
+                    existingId: dupCheck.rows[0].id
+                });
+            }
+
             // Validación numérica segura (previene NaN, valores negativos)
             const finalPrecio = validatePrecio(precio);
             const finalStockActual = validateCantidad(stockActual ?? stock_actual);
