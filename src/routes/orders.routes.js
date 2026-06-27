@@ -18,6 +18,18 @@ const { validateDate, validateNumber, validateId } = require('../utils/validator
 const onboardingService = require('../services/onboardingService');
 
 /**
+ * Normaliza el iva_pct recibido del cliente a número 0-100 o null.
+ * Evita strings sucios y valores fuera de rango. Mismo criterio que
+ * Supplier.normalizeIvaPct para mantener coherencia (Migración 015).
+ */
+function normalizeIvaPct(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = parseFloat(value);
+    if (isNaN(n) || n < 0) return null;
+    return Math.min(100, n);
+}
+
+/**
  * @param {Pool} pool - PostgreSQL connection pool
  */
 module.exports = function (pool) {
@@ -59,7 +71,7 @@ module.exports = function (pool) {
     router.post('/orders', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { proveedorId, fecha, ingredientes, total, estado } = req.body;
+            const { proveedorId, fecha, ingredientes, total, estado, iva_pct } = req.body;
 
             // 🔒 Validar fecha
             const fechaCheck = validateDate(fecha);
@@ -133,10 +145,13 @@ module.exports = function (pool) {
             await client.query('BEGIN');
 
             const totalValidado = total !== undefined ? validateNumber(total, 0, 0, 9999999) : 0;
+            // 🧾 IVA del albarán (Migración 015): solo display/tesorería. NO entra
+            // en `total` (que es la BASE sin IVA → gasto/P&L). null si no se indica.
+            const ivaPctValidado = normalizeIvaPct(iva_pct);
 
             const result = await client.query(
-                'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-                [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId]
+                'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id, iva_pct) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+                [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId, ivaPctValidado]
             );
 
             // 📊 Registrar en Diario y sumar stock si pedido se crea como 'recibido' (compra mercado)
@@ -198,8 +213,12 @@ module.exports = function (pool) {
         const client = await pool.connect();
         try {
             const { id } = req.params;
-            const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido, total } = req.body;
+            const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido, total, iva_pct } = req.body;
             const fechaRecepcionFinal = fecha_recepcion || fechaRecepcion;
+            // 🧾 IVA del albarán (Migración 015): si no llega en el body pasamos null
+            // y COALESCE conserva el valor guardado (la recepción NO debe perder el
+            // IVA que se puso al crear/editar el pedido). NO entra en `total`.
+            const ivaPctValidado = normalizeIvaPct(iva_pct);
 
             // Si `total` llega en el body, lo validamos y persistimos. Si no llega
             // pasamos null al UPDATE y COALESCE conserva el valor actual de la columna.
@@ -267,8 +286,8 @@ module.exports = function (pool) {
             const fechaRecepcionFinalReal = fechaRecepcionFinal || fechaRecepcionPersisted || new Date();
 
             const result = await client.query(
-                'UPDATE pedidos SET estado=$1, ingredientes=$2, total=COALESCE($3, total), total_recibido=$4, fecha_recepcion=$5 WHERE id=$6 AND restaurante_id=$7 RETURNING *',
-                [estado, JSON.stringify(ingredientes), totalValidado, total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId]
+                'UPDATE pedidos SET estado=$1, ingredientes=$2, total=COALESCE($3, total), total_recibido=$4, fecha_recepcion=$5, iva_pct=COALESCE($8, iva_pct) WHERE id=$6 AND restaurante_id=$7 RETURNING *',
+                [estado, JSON.stringify(ingredientes), totalValidado, total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId, ivaPctValidado]
             );
 
             // Reescribir Diario en 2 escenarios:

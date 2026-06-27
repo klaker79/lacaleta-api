@@ -409,6 +409,22 @@ async function initializeDatabase(pool) {
     log('info', 'Migración 014 restaurantes.comida_personal_activa completada');
   } catch (e) { log('warn', 'Migración 014 restaurantes.comida_personal_activa', { error: e.message }); }
 
+  // Migración 015 (2026-06-27): IVA del albarán POR PEDIDO (persistente).
+  // Antes el IVA era solo display y no se guardaba; ahora viaja con el pedido
+  // (crear → editar → recibir) para cuadrar con la factura del proveedor.
+  // ⚠️ NO entra en `total` (que sigue siendo la BASE sin IVA, lo que alimenta
+  // el gasto/P&L) ni en precio_medio_compra/food cost/stock. Es un dato aparte:
+  // Total con IVA = total (base) + total × iva_pct/100. El IVA soportado se
+  // recupera en la declaración, así que NO es un coste — solo tesorería/factura.
+  try {
+    await pool.query(`
+            ALTER TABLE pedidos
+                ADD COLUMN IF NOT EXISTS iva_pct NUMERIC(5,2)
+                    CHECK (iva_pct IS NULL OR (iva_pct >= 0 AND iva_pct <= 100));
+        `);
+    log('info', 'Migración 015 pedidos.iva_pct completada');
+  } catch (e) { log('warn', 'Migración 015 pedidos.iva_pct', { error: e.message }); }
+
   // Añadir columnas para verificación de email
   try {
     await pool.query(`
