@@ -32,24 +32,29 @@ module.exports = function (pool) {
             const comprasDiarias = await pool.query(`
                 SELECT
                     p.fecha,
-                    i.id as ingrediente_id,
-                    i.nombre as ingrediente,
+                    p.ingrediente_id as ingrediente_id,
+                    COALESCE(i.nombre, 'Ingrediente eliminado #' || p.ingrediente_id) as ingrediente,
                     p.precio_unitario,
                     p.cantidad_comprada,
                     p.total_compra,
                     COALESCE(pr.nombre, pr_fallback.nombre) as proveedor_nombre,
                     COALESCE(p.proveedor_id, ip.proveedor_id) as proveedor_id
                 FROM precios_compra_diarios p
-                JOIN ingredientes i ON p.ingrediente_id = i.id
+                -- 🔧 HIGH-3/MEDIUM-1 (auditoría 2026-06-27): LEFT JOIN (no INNER) y SIN
+                -- el filtro i.deleted_at, para que las compras de un ingrediente
+                -- soft-eliminado SIGAN contando en el gasto histórico (el dinero se
+                -- gastó de verdad). Antes el INNER JOIN + deleted_at las borraba del
+                -- resumen → el gasto de meses pasados encogía retroactivamente. NO se
+                -- borra ningún dato histórico (mismo patrón que el fallback de ventas).
+                LEFT JOIN ingredientes i ON p.ingrediente_id = i.id
                 LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
                 LEFT JOIN ingredientes_proveedores ip ON ip.ingrediente_id = p.ingrediente_id AND ip.es_proveedor_principal = true
                 LEFT JOIN proveedores pr_fallback ON ip.proveedor_id = pr_fallback.id AND p.proveedor_id IS NULL
                 LEFT JOIN pedidos ped ON p.pedido_id = ped.id
                 WHERE p.restaurante_id = $1
                   AND p.fecha >= $2 AND p.fecha < $3
-                  AND i.deleted_at IS NULL
                   AND (p.pedido_id IS NULL OR ped.deleted_at IS NULL)
-                ORDER BY p.fecha, i.nombre
+                ORDER BY p.fecha, COALESCE(i.nombre, '')
             `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
 
             // Ventas diarias agrupadas por día y receta.
