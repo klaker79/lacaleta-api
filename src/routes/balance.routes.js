@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
+const { personalCostExpr } = require('../utils/personalCost');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -295,15 +296,17 @@ module.exports = function (pool) {
             const nextYear = mesActual === 12 ? anoActual + 1 : anoActual;
             const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
 
-            // Base imponible = total − envases/ajustes. El IVA del albarán se aplica
-            // sobre el género (tras bonificación, que ya está prorrateada en pedido.total),
-            // NO sobre los envases (items tipo 'ajuste' dentro del JSONB ingredientes).
-            // Esto reproduce EXACTAMENTE el IVA que el camarero confirma en el modal de
-            // recepción (baseNeta × iva%), así el informe nunca infla el número. Los
-            // envases de vuelta tienen importe negativo → restar suma a la base (correcto).
+            // Base imponible = total − comida personal − envases/ajustes.
+            //  · comida personal (personalCostExpr): pedido.total la incluye, pero el
+            //    IVA de la comida del staff no es deducible y TODO agregado de gasto la
+            //    resta (guard personal-cost-guard). Coherencia + correcto fiscalmente.
+            //  · envases (items tipo 'ajuste' del JSONB): el IVA del albarán va sobre el
+            //    género (tras bonificación, ya prorrateada en pedido.total), no sobre el
+            //    envase. Envase de vuelta = importe negativo → restar suma a la base.
+            // Así el número reproduce el IVA real soportado del restaurante, sin inflar.
             const r = await pool.query(
                 `SELECT COALESCE(SUM(
-                            (p.total - COALESCE((
+                            (p.total - ${personalCostExpr('p')} - COALESCE((
                                 SELECT SUM((elem->>'importe')::numeric)
                                 FROM jsonb_array_elements(
                                     CASE WHEN jsonb_typeof(p.ingredientes) = 'array'

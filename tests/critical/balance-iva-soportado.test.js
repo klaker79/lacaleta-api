@@ -175,4 +175,29 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         // Un pedido pendiente no debe sumar nada al IVA soportado del periodo.
         expect(despues.iva - antes.iva).toBeCloseTo(0, 2);
     });
+
+    it('5. FIABILIDAD: comida personal NO entra en la base — total=120 con línea personal=20 → aporta 21,00 (no 25,20)', async () => {
+        if (!authToken || !ingId) return;
+
+        const antes = await getIvaSoportado(authToken);
+
+        const id = await crearPedidoRecibido(authToken, {
+            total: 120, iva_pct: 21,
+            ingredientes: [
+                { ingredienteId: ingId, cantidad: 1, precioUnitario: 100 },
+                // Línea de comida personal: cuenta en pedido.total pero NO es gasto
+                // del restaurante → su IVA no es deducible, fuera de la base.
+                { ingredienteId: ingId, cantidad: 1, precioUnitario: 20, personal: true }
+            ]
+        });
+        expect(id).not.toBeNull();
+        creados.push(id);
+
+        const despues = await getIvaSoportado(authToken);
+        const delta = despues.iva - antes.iva;
+        // Base imponible = 120 − 20 (personal) = 100 → IVA = 21,00.
+        // Sin restar lo personal saldría 120 × 21% = 25,20 (número falso).
+        expect(delta).toBeCloseTo(21, 2);
+        expect(delta).not.toBeCloseTo(25.2, 1);
+    });
 });
