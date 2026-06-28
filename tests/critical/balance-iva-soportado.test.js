@@ -13,10 +13,13 @@
  *      envase en la base imponible. total=110 con ajuste importe=10 → base 100 →
  *      aporta 21,00 (NO 23,10). Reproduce el IVA que el camarero confirma en el
  *      modal de recepción (baseNeta × iva%, sin envases).
- *   3. Solo cuenta estado='recibido'.
+ *   3. Envase de vuelta (ajuste negativo) suma a la base.
+ *   4. Solo cuenta estado='recibido'.
  *
- * Se usa una estrategia de DELTA (baseline → crear → re-leer) porque el tenant
- * de test puede tener otros pedidos del mes; los incrementos sí son deterministas.
+ * AISLAMIENTO: crear pedidos 'recibido' recalcula precio_medio del ingrediente y
+ * escribe compras_diarias del mes (efectos globales). Para no contaminar a otros
+ * tests en CI, este test usa un INGREDIENTE DESECHABLE propio y un MES FUTURO
+ * (2099-01) que ningún otro test consulta. Estrategia de DELTA por robustez.
  *
  * @date 2026-06-28
  */
@@ -24,10 +27,10 @@
 const request = require('supertest');
 const API_URL = process.env.API_URL || 'http://localhost:3001';
 
-const hoy = new Date();
-const MES = hoy.getMonth() + 1;
-const ANO = hoy.getFullYear();
-const FECHA = hoy.toISOString().split('T')[0];
+// Mes futuro aislado: ningún otro test/seed asserta sobre 2099-01.
+const MES = 1;
+const ANO = 2099;
+const FECHA = '2099-01-15';
 
 async function getIvaSoportado(authToken) {
     const res = await request(API_URL)
@@ -58,14 +61,18 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
     beforeAll(async () => {
         authToken = await global.getAuthToken();
         if (!authToken) { console.warn('⚠️ No auth. Tests skipped.'); return; }
+
+        // Ingrediente desechable: aísla el recálculo de precio_medio y compras.
+        const nombre = `__test_iva_soportado_${Date.now()}`;
         const ingRes = await request(API_URL)
-            .get('/api/ingredients')
+            .post('/api/ingredients')
             .set('Origin', 'http://localhost:3001')
-            .set('Authorization', `Bearer ${authToken}`);
-        if (ingRes.status !== 200 || ingRes.body.length === 0) {
-            console.warn('⚠️ No ingredients found. Tests skipped.'); return;
+            .set('Authorization', `Bearer ${authToken}`)
+            .send({ nombre, unidad: 'kg', precio: 1, cantidad_por_formato: 1 });
+        if (![200, 201].includes(ingRes.status) || !ingRes.body?.id) {
+            console.warn('⚠️ No se pudo crear ingrediente de test. Tests skipped.'); return;
         }
-        ingId = ingRes.body[ingRes.body.length - 1].id;
+        ingId = ingRes.body.id;
     });
 
     afterAll(async () => {
@@ -76,6 +83,12 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
                     .set('Origin', 'http://localhost:3001')
                     .set('Authorization', `Bearer ${authToken}`);
             }
+        }
+        if (ingId && authToken) {
+            await request(API_URL)
+                .delete(`/api/ingredients/${ingId}`)
+                .set('Origin', 'http://localhost:3001')
+                .set('Authorization', `Bearer ${authToken}`);
         }
     });
 
