@@ -99,6 +99,9 @@ module.exports = function (pool) {
             }
             if (estado === 'recibido' && ingredientes) {
                 for (const item of ingredientes) {
+                    // Los items 'ajuste' (envases/bonificaciones) NO llevan ingredienteId
+                    // a propósito — se excluyen aquí igual que en el resto del flujo recibido.
+                    if (item.tipo === 'ajuste') continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     if (!ingId) {
                         return res.status(400).json({ error: 'Cada ingrediente debe tener ingredienteId' });

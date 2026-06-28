@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
+const { personalCostExpr } = require('../utils/personalCost');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -295,12 +296,29 @@ module.exports = function (pool) {
             const nextYear = mesActual === 12 ? anoActual + 1 : anoActual;
             const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
 
+            // Base imponible = total − comida personal − envases/ajustes.
+            //  · comida personal (personalCostExpr): pedido.total la incluye, pero el
+            //    IVA de la comida del staff no es deducible y TODO agregado de gasto la
+            //    resta (guard personal-cost-guard). Coherencia + correcto fiscalmente.
+            //  · envases (items tipo 'ajuste' del JSONB): el IVA del albarán va sobre el
+            //    género (tras bonificación, ya prorrateada en pedido.total), no sobre el
+            //    envase. Envase de vuelta = importe negativo → restar suma a la base.
+            // Así el número reproduce el IVA real soportado del restaurante, sin inflar.
             const r = await pool.query(
-                `SELECT COALESCE(SUM(total * COALESCE(iva_pct, 0) / 100), 0) as iva_soportado,
-                        COUNT(*) FILTER (WHERE iva_pct IS NOT NULL AND iva_pct > 0) as num_con_iva
-                 FROM pedidos
-                 WHERE restaurante_id = $1 AND deleted_at IS NULL AND estado = 'recibido'
-                   AND fecha >= $2 AND fecha < $3`,
+                `SELECT COALESCE(SUM(
+                            (p.total - ${personalCostExpr('p')} - COALESCE((
+                                SELECT SUM((elem->>'importe')::numeric)
+                                FROM jsonb_array_elements(
+                                    CASE WHEN jsonb_typeof(p.ingredientes) = 'array'
+                                         THEN p.ingredientes ELSE '[]'::jsonb END
+                                ) elem
+                                WHERE elem->>'tipo' = 'ajuste'
+                            ), 0)) * COALESCE(p.iva_pct, 0) / 100
+                        ), 0) as iva_soportado,
+                        COUNT(*) FILTER (WHERE p.iva_pct IS NOT NULL AND p.iva_pct > 0) as num_con_iva
+                 FROM pedidos p
+                 WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL AND p.estado = 'recibido'
+                   AND p.fecha >= $2 AND p.fecha < $3`,
                 [req.restauranteId, startDate, endDate]
             );
             res.json({
