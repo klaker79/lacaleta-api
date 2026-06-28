@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
+const { personalCostExpr } = require('../utils/personalCost');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -274,6 +275,68 @@ module.exports = function (pool) {
             });
         } catch (error) {
             log('error', 'Error obteniendo balance', { error: error.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    // 🧾 IVA soportado del periodo — INFORMATIVO para la declaración / el gestor.
+    // SUM del IVA de las COMPRAS recibidas (pedidos.total base × iva_pct/100, Migr. 015).
+    // ⚠️ SEPARADO de la P&L a propósito: el IVA soportado se RECUPERA, NO es coste ni
+    // gasto. La cuenta de resultados (módulo Balance) va SIN IVA. Read-only.
+    // costlyApiLimiter ANTES de authMiddleware (CodeQL js/missing-rate-limiting exige
+    // el rate-limit antes de la autorización, como en analysis/intelligence/chat). La
+    // query SQL es minúscula; el frontend lo llama con try/catch, si se limita solo
+    // oculta la tarjeta informativa.
+    router.get('/balance/iva-soportado', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const mesActual = parseInt(req.query.mes) || new Date().getMonth() + 1;
+            const anoActual = parseInt(req.query.ano) || new Date().getFullYear();
+            const startDate = `${anoActual}-${String(mesActual).padStart(2, '0')}-01`;
+            const nextMonth = mesActual === 12 ? 1 : mesActual + 1;
+            const nextYear = mesActual === 12 ? anoActual + 1 : anoActual;
+            const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+            // Base imponible = total − comida personal − envases/ajustes.
+            //  · comida personal (personalCostExpr): pedido.total la incluye, pero el
+            //    IVA de la comida del staff no es deducible y TODO agregado de gasto la
+            //    resta (guard personal-cost-guard). Coherencia + correcto fiscalmente.
+            //  · envases (items tipo 'ajuste' del JSONB): el IVA del albarán va sobre el
+            //    género (tras bonificación, ya prorrateada en pedido.total), no sobre el
+            //    envase. Envase de vuelta = importe negativo → restar suma a la base.
+            // Así el número reproduce el IVA real soportado del restaurante, sin inflar.
+            // Calculamos la base por pedido en un subselect y agregamos fuera, así
+            // devolvemos también la base imponible (suma de bases de las compras con
+            // IVA) para mostrar al usuario sobre qué importe se aplica el IVA.
+            const r = await pool.query(
+                `SELECT COALESCE(SUM(base * iva_pct / 100), 0) as iva_soportado,
+                        COALESCE(SUM(base) FILTER (WHERE iva_pct > 0), 0) as base_imponible,
+                        COUNT(*) FILTER (WHERE iva_pct > 0) as num_con_iva
+                 FROM (
+                    SELECT
+                        (p.total - ${personalCostExpr('p')} - COALESCE((
+                            SELECT SUM((elem->>'importe')::numeric)
+                            FROM jsonb_array_elements(
+                                CASE WHEN jsonb_typeof(p.ingredientes) = 'array'
+                                     THEN p.ingredientes ELSE '[]'::jsonb END
+                            ) elem
+                            WHERE elem->>'tipo' = 'ajuste'
+                        ), 0)) as base,
+                        COALESCE(p.iva_pct, 0) as iva_pct
+                    FROM pedidos p
+                    WHERE p.restaurante_id = $1 AND p.deleted_at IS NULL AND p.estado = 'recibido'
+                      AND p.fecha >= $2 AND p.fecha < $3
+                 ) sub`,
+                [req.restauranteId, startDate, endDate]
+            );
+            res.json({
+                iva_soportado: parseFloat(r.rows[0].iva_soportado) || 0,
+                base_imponible: parseFloat(r.rows[0].base_imponible) || 0,
+                num_pedidos_con_iva: parseInt(r.rows[0].num_con_iva) || 0,
+                mes: mesActual,
+                ano: anoActual
+            });
+        } catch (error) {
+            log('error', 'Error obteniendo IVA soportado', { error: error.message });
             res.status(500).json({ error: 'Error interno' });
         }
     });
