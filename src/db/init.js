@@ -425,6 +425,22 @@ async function initializeDatabase(pool) {
     log('info', 'Migración 015 pedidos.iva_pct completada');
   } catch (e) { log('warn', 'Migración 015 pedidos.iva_pct', { error: e.message }); }
 
+  // Migración 016 (2026-06-28): BONIFICACIÓN del albarán POR PEDIDO (descuento).
+  // A diferencia del IVA y de los items 'ajuste' (envases), la bonificación SÍ baja
+  // el coste: el FRONTEND, al recibir, la reparte entre las líneas de género bajando
+  // su precioReal → precios_compra_diarios (food cost) y el total. Esta columna solo
+  // PERSISTE el importe para mostrarlo/cuadrarlo (igual que iva_pct); el efecto en el
+  // coste ya viaja dentro de precioReal y de `total`. Permite al camarero teclear el
+  // bruto de cada línea + la bonificación total del albarán SIN restar a mano.
+  try {
+    await pool.query(`
+            ALTER TABLE pedidos
+                ADD COLUMN IF NOT EXISTS bonificacion NUMERIC(10,2)
+                    CHECK (bonificacion IS NULL OR bonificacion >= 0);
+        `);
+    log('info', 'Migración 016 pedidos.bonificacion completada');
+  } catch (e) { log('warn', 'Migración 016 pedidos.bonificacion', { error: e.message }); }
+
   // Añadir columnas para verificación de email
   try {
     await pool.query(`
