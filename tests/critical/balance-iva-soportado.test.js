@@ -40,6 +40,7 @@ async function getIvaSoportado(authToken) {
     if (res.status !== 200) return null;
     return {
         iva: parseFloat(res.body.iva_soportado) || 0,
+        base: parseFloat(res.body.base_imponible) || 0,
         num: parseInt(res.body.num_pedidos_con_iva) || 0
     };
 }
@@ -111,8 +112,9 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         creados.push(id);
 
         const despues = await getIvaSoportado(authToken);
-        // Delta del IVA = 100 × 21% = 21,00
+        // Delta del IVA = 100 × 21% = 21,00; base imponible +100,00
         expect(despues.iva - antes.iva).toBeCloseTo(21, 2);
+        expect(despues.base - antes.base).toBeCloseTo(100, 2);
         expect(despues.num - antes.num).toBe(1);
     });
 
