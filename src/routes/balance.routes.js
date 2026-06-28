@@ -278,6 +278,43 @@ module.exports = function (pool) {
         }
     });
 
+    // 🧾 IVA soportado del periodo — INFORMATIVO para la declaración / el gestor.
+    // SUM del IVA de las COMPRAS recibidas (pedidos.total base × iva_pct/100, Migr. 015).
+    // ⚠️ SEPARADO de la P&L a propósito: el IVA soportado se RECUPERA, NO es coste ni
+    // gasto. La cuenta de resultados (módulo Balance) va SIN IVA. Read-only.
+    // costlyApiLimiter ANTES de authMiddleware (CodeQL js/missing-rate-limiting exige
+    // el rate-limit antes de la autorización, como en analysis/intelligence/chat). La
+    // query SQL es minúscula; el frontend lo llama con try/catch, si se limita solo
+    // oculta la tarjeta informativa.
+    router.get('/balance/iva-soportado', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const mesActual = parseInt(req.query.mes) || new Date().getMonth() + 1;
+            const anoActual = parseInt(req.query.ano) || new Date().getFullYear();
+            const startDate = `${anoActual}-${String(mesActual).padStart(2, '0')}-01`;
+            const nextMonth = mesActual === 12 ? 1 : mesActual + 1;
+            const nextYear = mesActual === 12 ? anoActual + 1 : anoActual;
+            const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+            const r = await pool.query(
+                `SELECT COALESCE(SUM(total * COALESCE(iva_pct, 0) / 100), 0) as iva_soportado,
+                        COUNT(*) FILTER (WHERE iva_pct IS NOT NULL AND iva_pct > 0) as num_con_iva
+                 FROM pedidos
+                 WHERE restaurante_id = $1 AND deleted_at IS NULL AND estado = 'recibido'
+                   AND fecha >= $2 AND fecha < $3`,
+                [req.restauranteId, startDate, endDate]
+            );
+            res.json({
+                iva_soportado: parseFloat(r.rows[0].iva_soportado) || 0,
+                num_pedidos_con_iva: parseInt(r.rows[0].num_con_iva) || 0,
+                mes: mesActual,
+                ano: anoActual
+            });
+        } catch (error) {
+            log('error', 'Error obteniendo IVA soportado', { error: error.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
     router.get('/balance/comparativa', authMiddleware, async (req, res) => {
         try {
             const meses = await pool.query(
