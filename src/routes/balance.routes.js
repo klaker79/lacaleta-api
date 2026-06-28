@@ -282,7 +282,10 @@ module.exports = function (pool) {
     // SUM del IVA de las COMPRAS recibidas (pedidos.total base × iva_pct/100, Migr. 015).
     // ⚠️ SEPARADO de la P&L a propósito: el IVA soportado se RECUPERA, NO es coste ni
     // gasto. La cuenta de resultados (módulo Balance) va SIN IVA. Read-only.
-    router.get('/balance/iva-soportado', authMiddleware, async (req, res) => {
+    // costlyApiLimiter por consistencia con CodeQL (js/missing-rate-limiting): todo
+    // handler con auth debe llevar rate-limit aunque la query SQL sea minúscula. El
+    // frontend lo llama con try/catch, así que si se limita solo oculta la tarjeta.
+    router.get('/balance/iva-soportado', authMiddleware, costlyApiLimiter, async (req, res) => {
         try {
             const mesActual = parseInt(req.query.mes) || new Date().getMonth() + 1;
             const anoActual = parseInt(req.query.ano) || new Date().getFullYear();
