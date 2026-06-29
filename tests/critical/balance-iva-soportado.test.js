@@ -7,30 +7,30 @@
  * (GET /api/balance/iva-soportado) debe ser la suma FIABLE del IVA de las
  * compras recibidas del mes, NO un número inflado.
  *
- * Contrato blindado:
- *   1. Un pedido recibido con iva_pct=21 y total=100 (sin envases) aporta 21,00.
- *   2. CLAVE FIABILIDAD: un pedido con un item 'ajuste' (envase) NO incluye el
- *      envase en la base imponible. total=110 con ajuste importe=10 → base 100 →
- *      aporta 21,00 (NO 23,10). Reproduce el IVA que el camarero confirma en el
- *      modal de recepción (baseNeta × iva%, sin envases).
+ * Contrato blindado (estrategia de DELTA: baseline → crear → re-leer):
+ *   1. Pedido recibido iva_pct=21, total=100 (sin envases) → +21,00 IVA, +100 base.
+ *   2. FIABILIDAD: envase (item 'ajuste') NO infla la base. total=110, ajuste=10 →
+ *      base 100 → +21,00 (no 23,10).
  *   3. Envase de vuelta (ajuste negativo) suma a la base.
- *   4. Solo cuenta estado='recibido'.
+ *   4. Solo cuenta estado='recibido' (un pendiente NO suma).
+ *   5. FIABILIDAD: comida personal (línea personal:true) NO entra en la base.
  *
- * AISLAMIENTO: crear pedidos 'recibido' recalcula precio_medio del ingrediente y
- * escribe compras_diarias del mes (efectos globales). Para no contaminar a otros
- * tests en CI, este test usa un INGREDIENTE DESECHABLE propio y un MES FUTURO
- * (2099-01) que ningún otro test consulta. Estrategia de DELTA por robustez.
+ * Patrón de creación calcado de delete-order-preserves-purchases (que CI da por
+ * bueno): pedido 'recibido' con fecha de HOY y payload completo
+ * (cantidadRecibida + precioReal). Ingrediente desechable propio para aislar el
+ * recálculo de precio. Si el entorno no deja crear el recibido, el test degrada con
+ * elegancia (skip) y deja el status+body en el log para diagnóstico.
  *
- * @date 2026-06-28
+ * @date 2026-06-28 (reescrito 2026-06-29)
  */
 
 const request = require('supertest');
 const API_URL = process.env.API_URL || 'http://localhost:3001';
 
-// Mes futuro aislado: ningún otro test/seed asserta sobre 2099-01.
-const MES = 1;
-const ANO = 2099;
-const FECHA = '2099-01-15';
+const hoy = new Date();
+const MES = hoy.getMonth() + 1;
+const ANO = hoy.getFullYear();
+const FECHA = hoy.toISOString().split('T')[0];
 
 async function getIvaSoportado(authToken) {
     const res = await request(API_URL)
@@ -52,14 +52,18 @@ async function crearPedidoRecibido(authToken, { total, iva_pct, ingredientes }) 
         .set('Authorization', `Bearer ${authToken}`)
         .send({ proveedorId: null, fecha: FECHA, estado: 'recibido', total, iva_pct, ingredientes });
     if (![200, 201].includes(res.status)) {
-        // Diagnóstico: deja el motivo real en el log (CI o local) sin romper la suite.
         console.warn(`⚠️ crearPedidoRecibido → ${res.status}: ${JSON.stringify(res.body)}`);
         return null;
     }
     return res.body.id;
 }
 
-describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', () => {
+// Línea de género con payload completo (como delete-order-preserves-purchases).
+function linea(ingId, cantidad, precio, extra = {}) {
+    return { ingredienteId: ingId, cantidad, cantidadRecibida: cantidad, precioReal: precio, precioUnitario: precio, ...extra };
+}
+
+describe('IVA soportado del periodo — suma fiable (sin inflar por envases ni personal)', () => {
     let authToken;
     let ingId;
     const creados = [];
@@ -68,7 +72,7 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         authToken = await global.getAuthToken();
         if (!authToken) { console.warn('⚠️ No auth. Tests skipped.'); return; }
 
-        // Ingrediente desechable: aísla el recálculo de precio_medio y compras.
+        // Ingrediente desechable propio → aísla el recálculo de precio_medio.
         const nombre = `__test_iva_soportado_${Date.now()}`;
         const ingRes = await request(API_URL)
             .post('/api/ingredients')
@@ -76,7 +80,7 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
             .set('Authorization', `Bearer ${authToken}`)
             .send({ nombre, unidad: 'kg', precio: 1, cantidad_por_formato: 1 });
         if (![200, 201].includes(ingRes.status) || !ingRes.body?.id) {
-            console.warn('⚠️ No se pudo crear ingrediente de test. Tests skipped.'); return;
+            console.warn(`⚠️ No se pudo crear ingrediente de test (${ingRes.status}). Tests skipped.`); return;
         }
         ingId = ingRes.body.id;
     });
@@ -98,7 +102,7 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         }
     });
 
-    it('1. Pedido recibido iva_pct=21, total=100 (sin envases) → aporta 21,00', async () => {
+    it('1. Pedido recibido iva_pct=21, total=100 (sin envases) → +21,00 IVA, +100 base', async () => {
         if (!authToken || !ingId) return;
 
         const antes = await getIvaSoportado(authToken);
@@ -106,19 +110,18 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
 
         const id = await crearPedidoRecibido(authToken, {
             total: 100, iva_pct: 21,
-            ingredientes: [{ ingredienteId: ingId, cantidad: 1, precioUnitario: 100 }]
+            ingredientes: [linea(ingId, 1, 100)]
         });
-        if (!id) return; // entorno sin poder crear recibido (p.ej. CI con seed vacío) → skip
+        if (!id) return; // entorno sin poder crear recibido → skip (el log dice por qué)
         creados.push(id);
 
         const despues = await getIvaSoportado(authToken);
-        // Delta del IVA = 100 × 21% = 21,00; base imponible +100,00
         expect(despues.iva - antes.iva).toBeCloseTo(21, 2);
         expect(despues.base - antes.base).toBeCloseTo(100, 2);
         expect(despues.num - antes.num).toBe(1);
     });
 
-    it('2. FIABILIDAD: pedido con envase (ajuste) NO infla la base — total=110, ajuste=10 → aporta 21,00 (no 23,10)', async () => {
+    it('2. FIABILIDAD: envase (ajuste) NO infla la base — total=110, ajuste=10 → +21,00 (no 23,10)', async () => {
         if (!authToken || !ingId) return;
 
         const antes = await getIvaSoportado(authToken);
@@ -126,23 +129,21 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         const id = await crearPedidoRecibido(authToken, {
             total: 110, iva_pct: 21,
             ingredientes: [
-                { ingredienteId: ingId, cantidad: 1, precioUnitario: 100 },
-                // Envase/depósito como item 'ajuste' (mismo formato que recepción).
+                linea(ingId, 1, 100),
                 { tipo: 'ajuste', concepto: 'Envase barril', importe: 10 }
             ]
         });
-        if (!id) return; // entorno sin poder crear recibido (p.ej. CI con seed vacío) → skip
+        if (!id) return;
         creados.push(id);
 
         const despues = await getIvaSoportado(authToken);
         const delta = despues.iva - antes.iva;
-        // Base imponible = 110 − 10 (envase) = 100 → IVA = 21,00.
-        // Si el envase NO se excluyera, saldría 110 × 21% = 23,10 (número falso).
+        // Base = 110 − 10 (envase) = 100 → IVA 21,00. Sin excluir el envase: 23,10.
         expect(delta).toBeCloseTo(21, 2);
         expect(delta).not.toBeCloseTo(23.1, 1);
     });
 
-    it('3. Envase de vuelta (ajuste negativo) suma a la base — total=90, ajuste=-10 → aporta 21,00', async () => {
+    it('3. Envase de vuelta (ajuste negativo) suma a la base — total=90, ajuste=-10 → +21,00', async () => {
         if (!authToken || !ingId) return;
 
         const antes = await getIvaSoportado(authToken);
@@ -150,15 +151,15 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         const id = await crearPedidoRecibido(authToken, {
             total: 90, iva_pct: 21,
             ingredientes: [
-                { ingredienteId: ingId, cantidad: 1, precioUnitario: 100 },
+                linea(ingId, 1, 100),
                 { tipo: 'ajuste', concepto: 'Devolución envase', importe: -10 }
             ]
         });
-        if (!id) return; // entorno sin poder crear recibido (p.ej. CI con seed vacío) → skip
+        if (!id) return;
         creados.push(id);
 
         const despues = await getIvaSoportado(authToken);
-        // Base imponible = 90 − (−10) = 100 → IVA = 21,00.
+        // Base = 90 − (−10) = 100 → IVA 21,00.
         expect(despues.iva - antes.iva).toBeCloseTo(21, 2);
     });
 
@@ -174,16 +175,15 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
             .send({
                 proveedorId: null, fecha: FECHA, estado: 'pendiente',
                 total: 200, iva_pct: 21,
-                ingredientes: [{ ingredienteId: ingId, cantidad: 1, precioUnitario: 200 }]
+                ingredientes: [linea(ingId, 1, 200)]
             });
         if ([200, 201].includes(res.status)) creados.push(res.body.id);
 
         const despues = await getIvaSoportado(authToken);
-        // Un pedido pendiente no debe sumar nada al IVA soportado del periodo.
         expect(despues.iva - antes.iva).toBeCloseTo(0, 2);
     });
 
-    it('5. FIABILIDAD: comida personal NO entra en la base — total=120 con línea personal=20 → aporta 21,00 (no 25,20)', async () => {
+    it('5. FIABILIDAD: comida personal NO entra en la base — total=120 con línea personal=20 → +21,00 (no 25,20)', async () => {
         if (!authToken || !ingId) return;
 
         const antes = await getIvaSoportado(authToken);
@@ -191,19 +191,18 @@ describe('IVA soportado del periodo — suma fiable (sin inflar por envases)', (
         const id = await crearPedidoRecibido(authToken, {
             total: 120, iva_pct: 21,
             ingredientes: [
-                { ingredienteId: ingId, cantidad: 1, precioUnitario: 100 },
-                // Línea de comida personal: cuenta en pedido.total pero NO es gasto
-                // del restaurante → su IVA no es deducible, fuera de la base.
-                { ingredienteId: ingId, cantidad: 1, precioUnitario: 20, personal: true }
+                linea(ingId, 1, 100),
+                // Línea de comida personal: cuenta en pedido.total pero NO es gasto del
+                // restaurante → su IVA no es deducible, fuera de la base.
+                linea(ingId, 1, 20, { personal: true })
             ]
         });
-        if (!id) return; // entorno sin poder crear recibido (p.ej. CI con seed vacío) → skip
+        if (!id) return;
         creados.push(id);
 
         const despues = await getIvaSoportado(authToken);
         const delta = despues.iva - antes.iva;
-        // Base imponible = 120 − 20 (personal) = 100 → IVA = 21,00.
-        // Sin restar lo personal saldría 120 × 21% = 25,20 (número falso).
+        // Base = 120 − 20 (personal) = 100 → IVA 21,00. Sin restar personal: 25,20.
         expect(delta).toBeCloseTo(21, 2);
         expect(delta).not.toBeCloseTo(25.2, 1);
     });
