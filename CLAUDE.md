@@ -104,3 +104,13 @@ DO NOT change price normalization in approve endpoints without verifying:
 - Dedup: fuzzy matching (7 days for n8n, 60 days for scanner)
 - Guardrail: stock additions > 10,000 units are auto-rejected
 - Guardrail: precio < 0.05 + cantidad > 100 flagged as suspicious
+
+### Trial / Billing (Polar) — ⛔ NO romper (es dinero)
+- Alta nueva (`/auth/register`): `plan='trial'`, `plan_status='trialing'`, `trial_ends_at = alta + TRIAL_DAYS` (**TRIAL_DAYS=10**), `max_users=5`.
+- Gating (`middleware/planGate.js`, `middleware/requireActiveSubscription.js`): acceso OK si `plan_status='active'` (pago vigente) **o** `plan='trial' && trial_ends_at > now()` (trial vigente). La **caducidad del trial SOLO se comprueba cuando `plan='trial'`**.
+- ⛔ La migración de grandfathering en `init.js` (`UPDATE restaurantes SET plan='premium', plan_status='active'... WHERE plan='trial'`) **DEBE** llevar `AND created_at < '2026-05-20'`. Sin cutoff corre en CADA arranque y re-promociona a premium a TODO trial nuevo → el trial nunca caduca. Protegido por `tests/guards/trial-grandfather-guard.test.js` (incidente 2026-06-29).
+
+### IVA (Migr. 015 iva_pct, Migr. 016 bonificacion)
+- `pedidos.iva_pct` y `pedidos.bonificacion` se persisten por pedido. **`pedido.total` = BASE sin IVA** (lo que va a gasto/P&L). `iva_pct` NUNCA entra en `total` ni en food cost. `bonificacion` se prorratea en `precioReal` al recibir (baja el coste real). ⚠️ `calcularTotalPedido()` (frontend) lleva IVA → NUNCA usar para el total persistido.
+- Items `tipo:'ajuste'` (envases/bonificaciones) NO llevan `ingredienteId`: excluirlos en validaciones y agregados (POST /orders recibido líneas 100-106, y resto del flujo).
+- **Informe "IVA soportado del periodo"**: `GET /balance/iva-soportado` (read-only; `costlyApiLimiter` ANTES de `authMiddleware`). Base imponible = `pedido.total − personalCostExpr('p') − Σ(items 'ajuste'.importe)`, ×`iva_pct/100`, solo pedidos `recibido` del mes. Devuelve `iva_soportado`, `base_imponible`, `num_pedidos_con_iva`. **Informativo, FUERA de la P&L** (el IVA soportado se recupera). Verificado vs albarán EG (base 67,78 → IVA 14,23). Cubierto por `personal-cost-guard` (todo `SUM(pedidos.total)` resta lo personal vía `personalCostExpr`).
