@@ -656,12 +656,17 @@ async function initializeDatabase(pool) {
             ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
             ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 2;
         `);
-    // Promote existing restaurants (pre-Stripe) to premium
+    // Grandfather SOLO los tenants legacy pre-paywall (creados antes del go-live de
+    // Polar, 2026-05-20) a premium. ⚠️ El cutoff por fecha es IMPRESCINDIBLE: sin él,
+    // esta migración corre en CADA arranque y re-promociona a premium/active a CADA
+    // registro nuevo en 'trial' tras el primer redeploy → el trial no caduca nunca
+    // (el gating solo mira trial_ends_at cuando plan='trial'). Los legacy ya están en
+    // 'premium' desde la primera ejecución, así que el cutoff no les afecta.
     await pool.query(`
             UPDATE restaurantes SET plan = 'premium', plan_status = 'active', max_users = 999
-            WHERE plan = 'trial';
+            WHERE plan = 'trial' AND created_at < '2026-05-20';
         `);
-    log('info', 'Migración Stripe fields completada');
+    log('info', 'Migración Stripe fields completada (grandfather solo legacy < 2026-05-20)');
   } catch (e) { log('warn', 'Migración Stripe fields', { error: e.message }); }
 
   // ========== MIGRACION: Super Admin flag ==========
