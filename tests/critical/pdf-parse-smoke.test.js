@@ -46,8 +46,9 @@ describe('PDF Parse — Input validation smoke test', () => {
 
         // Without ANTHROPIC_API_KEY configured, server should return 500
         // With it configured, it would try to call the API (not what we want in test)
+        // 429: la cubeta compartida de costlyApiLimiter puede agotarse bajo --runInBand.
         // Either way, the endpoint is reachable and handles the request
-        expect([200, 500]).toContain(res.status);
+        expect([200, 429, 500]).toContain(res.status);
 
         if (res.status === 500 && res.body.error) {
             const isApiKeyError = res.body.error.includes('ANTHROPIC_API_KEY') ||

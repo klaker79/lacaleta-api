@@ -24,7 +24,7 @@ const authLimiter = rateLimit({
 // Limiter para endpoints costosos (APIs de pago como Anthropic)
 const costlyApiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 30, // 30 requests por ventana (API de pago)
+    max: parseInt(process.env.COSTLY_RATE_LIMIT, 10) || 30, // 30 en prod, configurable para CI (la suite --runInBand desde 1 IP agotaba la cubeta compartida → 429 flaky)
     message: { error: 'Demasiadas solicitudes de procesamiento IA, intenta más tarde' },
     standardHeaders: true,
     legacyHeaders: false
