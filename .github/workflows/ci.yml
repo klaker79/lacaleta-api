@@ -49,6 +49,9 @@ jobs:
       API_URL: http://localhost:3001
       ALLOWED_ORIGINS: http://localhost:3001
       AUTH_RATE_LIMIT: 500
+      # La suite corre --runInBand desde una IP → no debe agotar el costlyApiLimiter
+      # compartido (default prod 30) y provocar 429 flaky en rutas IA/parse-*.
+      COSTLY_RATE_LIMIT: 1000000
 
       # Test user (used by tests/setup.js)
       TEST_USER_EMAIL: ci-test@mindloop.dev
