@@ -409,6 +409,38 @@ async function initializeDatabase(pool) {
     log('info', 'Migración 014 restaurantes.comida_personal_activa completada');
   } catch (e) { log('warn', 'Migración 014 restaurantes.comida_personal_activa', { error: e.message }); }
 
+  // Migración 015 (2026-06-27): IVA del albarán POR PEDIDO (persistente).
+  // Antes el IVA era solo display y no se guardaba; ahora viaja con el pedido
+  // (crear → editar → recibir) para cuadrar con la factura del proveedor.
+  // ⚠️ NO entra en `total` (que sigue siendo la BASE sin IVA, lo que alimenta
+  // el gasto/P&L) ni en precio_medio_compra/food cost/stock. Es un dato aparte:
+  // Total con IVA = total (base) + total × iva_pct/100. El IVA soportado se
+  // recupera en la declaración, así que NO es un coste — solo tesorería/factura.
+  try {
+    await pool.query(`
+            ALTER TABLE pedidos
+                ADD COLUMN IF NOT EXISTS iva_pct NUMERIC(5,2)
+                    CHECK (iva_pct IS NULL OR (iva_pct >= 0 AND iva_pct <= 100));
+        `);
+    log('info', 'Migración 015 pedidos.iva_pct completada');
+  } catch (e) { log('warn', 'Migración 015 pedidos.iva_pct', { error: e.message }); }
+
+  // Migración 016 (2026-06-28): BONIFICACIÓN del albarán POR PEDIDO (descuento).
+  // A diferencia del IVA y de los items 'ajuste' (envases), la bonificación SÍ baja
+  // el coste: el FRONTEND, al recibir, la reparte entre las líneas de género bajando
+  // su precioReal → precios_compra_diarios (food cost) y el total. Esta columna solo
+  // PERSISTE el importe para mostrarlo/cuadrarlo (igual que iva_pct); el efecto en el
+  // coste ya viaja dentro de precioReal y de `total`. Permite al camarero teclear el
+  // bruto de cada línea + la bonificación total del albarán SIN restar a mano.
+  try {
+    await pool.query(`
+            ALTER TABLE pedidos
+                ADD COLUMN IF NOT EXISTS bonificacion NUMERIC(10,2)
+                    CHECK (bonificacion IS NULL OR bonificacion >= 0);
+        `);
+    log('info', 'Migración 016 pedidos.bonificacion completada');
+  } catch (e) { log('warn', 'Migración 016 pedidos.bonificacion', { error: e.message }); }
+
   // Añadir columnas para verificación de email
   try {
     await pool.query(`
@@ -538,6 +570,27 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla gastos_fijos verificada');
   } catch (e) { log('warn', 'Migración gastos_fijos', { error: e.message }); }
 
+  // Tabla personal_extra (pagos a extras por horas → cuentan en el PyG)
+  try {
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS personal_extra (
+                id SERIAL PRIMARY KEY,
+                restaurante_id INTEGER NOT NULL,
+                fecha DATE NOT NULL,
+                nombre VARCHAR(255),
+                horas NUMERIC(6, 2) NOT NULL DEFAULT 0,
+                precio_hora NUMERIC(8, 2) NOT NULL DEFAULT 0,
+                total NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                observaciones TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_personal_extra_rest_fecha
+                ON personal_extra (restaurante_id, fecha);
+        `);
+    log('info', 'Tabla personal_extra verificada');
+  } catch (e) { log('warn', 'Migración personal_extra', { error: e.message }); }
+
   // Columnas faltantes en ingredientes
   try {
     await pool.query(`
@@ -603,12 +656,17 @@ async function initializeDatabase(pool) {
             ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
             ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 2;
         `);
-    // Promote existing restaurants (pre-Stripe) to premium
+    // Grandfather SOLO los tenants legacy pre-paywall (creados antes del go-live de
+    // Polar, 2026-05-20) a premium. ⚠️ El cutoff por fecha es IMPRESCINDIBLE: sin él,
+    // esta migración corre en CADA arranque y re-promociona a premium/active a CADA
+    // registro nuevo en 'trial' tras el primer redeploy → el trial no caduca nunca
+    // (el gating solo mira trial_ends_at cuando plan='trial'). Los legacy ya están en
+    // 'premium' desde la primera ejecución, así que el cutoff no les afecta.
     await pool.query(`
             UPDATE restaurantes SET plan = 'premium', plan_status = 'active', max_users = 999
-            WHERE plan = 'trial';
+            WHERE plan = 'trial' AND created_at < '2026-05-20';
         `);
-    log('info', 'Migración Stripe fields completada');
+    log('info', 'Migración Stripe fields completada (grandfather solo legacy < 2026-05-20)');
   } catch (e) { log('warn', 'Migración Stripe fields', { error: e.message }); }
 
   // ========== MIGRACION: Super Admin flag ==========

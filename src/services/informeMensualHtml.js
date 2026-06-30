@@ -276,6 +276,7 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         pygMargenBruto: 'Gross margin',
         pygGastosFijos: 'Fixed costs',
         pygComidaPersonal: 'Staff meals',
+        pygPersonalExtra: 'Extra staff',
         pygBeneficio: 'Net profit',
         pygMargenNeto: 'Net margin',
         topProveedores: 'Top Suppliers',
@@ -329,6 +330,7 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
         pygMargenBruto: 'Margen bruto',
         pygGastosFijos: 'Gastos fijos',
         pygComidaPersonal: 'Comida de personal',
+        pygPersonalExtra: 'Personal extra',
         pygBeneficio: 'Beneficio neto',
         pygMargenNeto: 'Margen neto',
         topProveedores: 'Top Proveedores',
@@ -400,6 +402,7 @@ function renderHtml({ datos, analisis, restauranteNombre, moneda, lang }) {
             <tr class="pyg-subtotal"><td>${escapeHtml(T.pygMargenBruto)}</td><td class="num">${fmtMoneda(pyg.margen_bruto, moneda)}</td></tr>
             <tr class="pyg-minus"><td>− ${escapeHtml(T.pygGastosFijos)} <span class="pyg-sub-info">(${pyg.gastos_fijos_conceptos || 0})</span></td><td class="num">${fmtMoneda(pyg.gastos_fijos, moneda)}</td></tr>
             ${parseFloat(pyg.comida_personal) > 0 ? `<tr class="pyg-minus"><td>− ${escapeHtml(T.pygComidaPersonal)}</td><td class="num">${fmtMoneda(pyg.comida_personal, moneda)}</td></tr>` : ''}
+            ${parseFloat(pyg.personal_extra) > 0 ? `<tr class="pyg-minus"><td>− ${escapeHtml(T.pygPersonalExtra)}</td><td class="num">${fmtMoneda(pyg.personal_extra, moneda)}</td></tr>` : ''}
             <tr class="pyg-total"><td><strong>${escapeHtml(T.pygBeneficio)}</strong></td><td class="num"><strong class="${benefClass}">${fmtMoneda(pyg.beneficio_neto, moneda)}</strong></td></tr>
             <tr class="pyg-pct"><td>${escapeHtml(T.pygMargenNeto)}</td><td class="num"><span class="${margenNetoClass}">${fmtPct(pyg.margen_neto_pct)}</span></td></tr>
         </table>

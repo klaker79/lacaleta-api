@@ -18,6 +18,31 @@ const { validateDate, validateNumber, validateId } = require('../utils/validator
 const onboardingService = require('../services/onboardingService');
 
 /**
+ * Normaliza el iva_pct recibido del cliente a número 0-100 o null.
+ * Evita strings sucios y valores fuera de rango. Mismo criterio que
+ * Supplier.normalizeIvaPct para mantener coherencia (Migración 015).
+ */
+function normalizeIvaPct(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = parseFloat(value);
+    if (isNaN(n) || n < 0) return null;
+    return Math.min(100, n);
+}
+
+/**
+ * Normaliza la bonificación (descuento del albarán) a número >= 0 o null.
+ * A diferencia del IVA no tiene tope superior. El efecto en el COSTE ya viaja
+ * dentro de precioReal/total (lo reparte el frontend al recibir); esta columna
+ * solo PERSISTE el importe para mostrarlo y cuadrar con el papel (Migración 016).
+ */
+function normalizeBonificacion(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = parseFloat(value);
+    if (isNaN(n) || n < 0) return null;
+    return n;
+}
+
+/**
  * @param {Pool} pool - PostgreSQL connection pool
  */
 module.exports = function (pool) {
@@ -59,7 +84,7 @@ module.exports = function (pool) {
     router.post('/orders', authMiddleware, async (req, res) => {
         const client = await pool.connect();
         try {
-            const { proveedorId, fecha, ingredientes, total, estado } = req.body;
+            const { proveedorId, fecha, ingredientes, total, estado, iva_pct, bonificacion } = req.body;
 
             // 🔒 Validar fecha
             const fechaCheck = validateDate(fecha);
@@ -74,6 +99,9 @@ module.exports = function (pool) {
             }
             if (estado === 'recibido' && ingredientes) {
                 for (const item of ingredientes) {
+                    // Los items 'ajuste' (envases/bonificaciones) NO llevan ingredienteId
+                    // a propósito — se excluyen aquí igual que en el resto del flujo recibido.
+                    if (item.tipo === 'ajuste') continue;
                     const ingId = item.ingredienteId || item.ingrediente_id;
                     if (!ingId) {
                         return res.status(400).json({ error: 'Cada ingrediente debe tener ingredienteId' });
@@ -133,10 +161,14 @@ module.exports = function (pool) {
             await client.query('BEGIN');
 
             const totalValidado = total !== undefined ? validateNumber(total, 0, 0, 9999999) : 0;
+            // 🧾 IVA del albarán (Migración 015): solo display/tesorería. NO entra
+            // en `total` (que es la BASE sin IVA → gasto/P&L). null si no se indica.
+            const ivaPctValidado = normalizeIvaPct(iva_pct);
+            const bonificacionValidada = normalizeBonificacion(bonificacion);
 
             const result = await client.query(
-                'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-                [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId]
+                'INSERT INTO pedidos (proveedor_id, fecha, ingredientes, total, estado, restaurante_id, iva_pct, bonificacion) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+                [proveedorId, fechaCheck.value, JSON.stringify(ingredientes), totalValidado, estado || 'pendiente', req.restauranteId, ivaPctValidado, bonificacionValidada]
             );
 
             // 📊 Registrar en Diario y sumar stock si pedido se crea como 'recibido' (compra mercado)
@@ -198,8 +230,15 @@ module.exports = function (pool) {
         const client = await pool.connect();
         try {
             const { id } = req.params;
-            const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido, total } = req.body;
+            const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido, total, iva_pct, bonificacion } = req.body;
             const fechaRecepcionFinal = fecha_recepcion || fechaRecepcion;
+            // 🧾 IVA del albarán (Migración 015): si no llega en el body pasamos null
+            // y COALESCE conserva el valor guardado (la recepción NO debe perder el
+            // IVA que se puso al crear/editar el pedido). NO entra en `total`.
+            const ivaPctValidado = normalizeIvaPct(iva_pct);
+            // 💸 Bonificación del albarán (Migración 016): mismo criterio COALESCE. El
+            // efecto en el coste ya viene aplicado en precioReal/total desde el front.
+            const bonificacionValidada = normalizeBonificacion(bonificacion);
 
             // Si `total` llega en el body, lo validamos y persistimos. Si no llega
             // pasamos null al UPDATE y COALESCE conserva el valor actual de la columna.
@@ -267,8 +306,8 @@ module.exports = function (pool) {
             const fechaRecepcionFinalReal = fechaRecepcionFinal || fechaRecepcionPersisted || new Date();
 
             const result = await client.query(
-                'UPDATE pedidos SET estado=$1, ingredientes=$2, total=COALESCE($3, total), total_recibido=$4, fecha_recepcion=$5 WHERE id=$6 AND restaurante_id=$7 RETURNING *',
-                [estado, JSON.stringify(ingredientes), totalValidado, total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId]
+                'UPDATE pedidos SET estado=$1, ingredientes=$2, total=COALESCE($3, total), total_recibido=$4, fecha_recepcion=$5, iva_pct=COALESCE($8, iva_pct), bonificacion=COALESCE($9, bonificacion) WHERE id=$6 AND restaurante_id=$7 RETURNING *',
+                [estado, JSON.stringify(ingredientes), totalValidado, total_recibido || totalRecibido, fechaRecepcionFinalReal, id, req.restauranteId, ivaPctValidado, bonificacionValidada]
             );
 
             // Reescribir Diario en 2 escenarios:
