@@ -8,7 +8,7 @@ La Caleta 102 API is a Node.js/Express monolith backend for restaurant cost mana
 - Use `pool.connect()` + `try { ... } finally { client.release(); }` ONLY for transactions (BEGIN/COMMIT/ROLLBACK).
 - All route handlers must have `try/catch` with error logging via `log('error', ...)` from `src/utils/logger.js`.
 - All route params (`:id`) must be validated with `validateId()` from `src/utils/validators.js` before use.
-- All SELECT queries on soft-deletable tables must include `AND deleted_at IS NULL`. Tables: ingredientes, recetas, ventas, pedidos, mermas, recetas_variantes.
+- All SELECT queries on soft-deletable tables must include `AND deleted_at IS NULL`. Tables: ingredientes, recetas, ventas, pedidos, mermas. (NOTA: `recetas_variantes` NO tiene `deleted_at` — usa `activo` + `ON DELETE CASCADE`, ver init.js; corregido en auditoría 2026-07-02.)
 - `JSON.parse()` on data from the database must be wrapped in `try/catch` with a safe fallback.
 
 ## What NOT to touch

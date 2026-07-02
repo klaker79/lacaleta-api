@@ -1623,7 +1623,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             if (ingrediente_id !== undefined) {
                 // Validar que el ingrediente existe y pertenece al restaurante
                 const ingCheck = await pool.query(
-                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2',
+                    'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                     [ingrediente_id, req.restauranteId]
                 );
                 if (ingCheck.rows.length === 0) {
