@@ -134,8 +134,9 @@ describe('Chat tool diagnostico_ingrediente — respeta precio_fijado (📌)', (
                unidad: 'kg', formato_compra: null, rendimiento: 100, stock_minimo: 2, precio_fijado: true }],
             [{ precio_medio_compra: '20.0000' }],
             [{ kg_total: '0', eur_total: '0', num_movimientos: '0' }],
-            [],
-            []
+            [],                                   // recetas (ninguna)
+            [{ apply_yield_to_stock: false }],    // flag apply_yield_to_stock del tenant
+            []                                    // historial de compras
         ]);
         const res = await runTool('diagnostico_ingrediente', pool, 3, { nombre_o_id: 'BONITO' });
         expect(res.ingrediente.precio_unitario_real).toBe(100);
@@ -147,8 +148,9 @@ describe('Chat tool diagnostico_ingrediente — respeta precio_fijado (📌)', (
                unidad: 'kg', formato_compra: null, rendimiento: 100, stock_minimo: 2, precio_fijado: false }],
             [{ precio_medio_compra: '20.0000' }],
             [{ kg_total: '0', eur_total: '0', num_movimientos: '0' }],
-            [],
-            []
+            [],                                   // recetas (ninguna)
+            [{ apply_yield_to_stock: false }],    // flag apply_yield_to_stock del tenant
+            []                                    // historial de compras
         ]);
         const res = await runTool('diagnostico_ingrediente', pool, 3, { nombre_o_id: 'BONITO' });
         expect(res.ingrediente.precio_unitario_real).toBe(20);
