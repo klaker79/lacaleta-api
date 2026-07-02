@@ -398,10 +398,13 @@ PRIORIZA diagnostico_* sobre obtener_*. Más concreto, menos tokens, y
 hace el cuadre matemático por ti. Si la tool devuelve "alternativas",
 menciónalas al usuario por si quería otro ítem.
 
-⚠️ RENDIMIENTO/MERMA — NO lo metas en el cuadre de kg de stock:
-- El rendimiento (yield %) afecta SOLO al COSTE: coste_ajustado = precio / (rendimiento/100). Un rendimiento bajo ENCARECE la ración, NO cambia los kg que salen del stock.
-- El cuadre compras-vs-consumo (kg comprados vs kg consumidos vs exceso) va en kg de RECETA: el stock se descuenta por (cantidad_por_porción / porciones) × ventas, SIN aplicar rendimiento. Por eso "kg_consumidos" YA es el consumo real de stock.
-- NUNCA digas que "el rendimiento reduce/aumenta el consumo de kg" ni lo uses para explicar un exceso de compras. Rendimiento = food cost; cuadre de stock = kg de receta. Son cosas distintas, no las mezcles.
+⚠️ RENDIMIENTO/MERMA — cómo tratarlo en coste y en stock:
+- El rendimiento (yield %) SIEMPRE afecta al COSTE: coste_ajustado = precio / (rendimiento/100). Un rendimiento bajo ENCARECE la ración.
+- En STOCK depende del flag del restaurante (te lo digo en el bloque dinámico como "Descuento de stock con merma"):
+  · ACTIVADO → cada venta descuenta la cantidad CRUDA: (cantidad_por_porción / porciones) / (rendimiento/100) × ventas. El stock refleja la merma real (ej. pulpo 0,25 servido @60% → descuenta 0,417 kg).
+  · DESACTIVADO → cada venta descuenta la cantidad SERVIDA: (cantidad_por_porción / porciones) × ventas, sin rendimiento.
+- ⚠️ La estimación "kg_consumidos" de diagnostico_receta usa kg de RECETA (servidos, sin rendimiento). Si el flag está ACTIVADO, el consumo real de stock es MAYOR (÷ rendimiento) — acláralo si haces un cuadre compras-vs-consumo con ingredientes que tienen merma.
+- No mezcles conceptos: food cost SIEMPRE lleva rendimiento; el descuento de stock solo si el flag está activado.
 
 ⚠️⚠️ PERÍODOS Y FECHAS (resumen_pyg, resumen_ventas_periodo, resumen_compras_periodo, resumen_mermas):
 - Para CUALQUIER período relativo pasa el parámetro **periodo** y NO calcules fechas tú:
@@ -1873,6 +1876,21 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
     // Rangos del dashboard ya calculados → el modelo los copia, no los recalcula.
     const rangos = rangosDashboard(today);
 
+    // Flag por tenant: si está ON, las ventas descuentan stock con la cantidad
+    // CRUDA (÷ rendimiento). Se inyecta en el bloque dinámico para que Omnes
+    // explique bien los cuadres de kg (auditoría 2026-07-02: el prompt estático
+    // afirmaba "sin rendimiento" incondicionalmente, desactualizado desde 2026-05-28).
+    let yieldToStock = false;
+    try {
+        const flagRes = await pool.query(
+            'SELECT apply_yield_to_stock FROM restaurantes WHERE id = $1',
+            [restauranteId]
+        );
+        yieldToStock = flagRes.rows[0]?.apply_yield_to_stock === true;
+    } catch (e) {
+        log('warn', 'chat: no se pudo leer apply_yield_to_stock, asumo false', { restauranteId, error: e.message });
+    }
+
     // Split system into two blocks so the big static portion is cached and
     // the small dynamic portion (date, language, restaurant) is not.
     const systemBlocks = [
@@ -1883,7 +1901,7 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
         },
         {
             type: 'text',
-            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 PERÍODOS — En resumen_pyg / resumen_ventas_periodo / resumen_compras_periodo / resumen_mermas pasa el parámetro **periodo** (mes, semana, ultimos_3_dias, ayer…) y NO calcules fechas: el backend las resuelve solo. Estas fechas exactas son SOLO para que NARRES bien el rango y para analisis_menu_engineering/analisis_omnes (que usan fecha_desde/fecha_hasta):\n  • Hoy: ${rangos.hoy.desde} · Esta semana: ${rangos.semana.desde}→${rangos.semana.hasta} · Este mes: ${rangos.mes.desde}→${rangos.mes.hasta} · Últimos 3 días: ${rangos.ultimos3.desde}→${rangos.ultimos3.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
+            text: `🌐 Idioma: ${lang === 'en' ? 'English (respond in English)' : 'Español (responder en español)'}\n📅 Fecha: ${fechaHoy}\n\n📆 PERÍODOS — En resumen_pyg / resumen_ventas_periodo / resumen_compras_periodo / resumen_mermas pasa el parámetro **periodo** (mes, semana, ultimos_3_dias, ayer…) y NO calcules fechas: el backend las resuelve solo. Estas fechas exactas son SOLO para que NARRES bien el rango y para analisis_menu_engineering/analisis_omnes (que usan fecha_desde/fecha_hasta):\n  • Hoy: ${rangos.hoy.desde} · Esta semana: ${rangos.semana.desde}→${rangos.semana.hasta} · Este mes: ${rangos.mes.desde}→${rangos.mes.hasta} · Últimos 3 días: ${rangos.ultimos3.desde}→${rangos.ultimos3.hasta}\n🏪 Restaurante: ${restauranteNombre || '(sin nombre)'}\n💱 Moneda: ${moneda}\n📦 Descuento de stock con merma: ${yieldToStock ? 'ACTIVADO — cada venta descuenta la cantidad CRUDA (÷ rendimiento); el consumo real de stock es MAYOR que los kg de receta en ingredientes con merma' : 'DESACTIVADO — cada venta descuenta la cantidad servida (kg de receta, sin rendimiento)'}\n\n⚠️ USA SIEMPRE el símbolo "${moneda}" en TODAS las cifras monetarias de tu respuesta, tanto en texto como en tablas. Los ejemplos en el prompt con € son solo ilustrativos — tú debes usar "${moneda}". No añadas € si la moneda configurada es distinta.`
         }
     ];
 
