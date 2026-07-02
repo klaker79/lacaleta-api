@@ -403,7 +403,7 @@ menciónalas al usuario por si quería otro ítem.
 - En STOCK depende del flag del restaurante (te lo digo en el bloque dinámico como "Descuento de stock con merma"):
   · ACTIVADO → cada venta descuenta la cantidad CRUDA: (cantidad_por_porción / porciones) / (rendimiento/100) × ventas. El stock refleja la merma real (ej. pulpo 0,25 servido @60% → descuenta 0,417 kg).
   · DESACTIVADO → cada venta descuenta la cantidad SERVIDA: (cantidad_por_porción / porciones) × ventas, sin rendimiento.
-- ⚠️ La estimación "kg_consumidos" de diagnostico_receta usa kg de RECETA (servidos, sin rendimiento). Si el flag está ACTIVADO, el consumo real de stock es MAYOR (÷ rendimiento) — acláralo si haces un cuadre compras-vs-consumo con ingredientes que tienen merma.
+- Las tools diagnostico_ingrediente y diagnostico_receta YA devuelven los kg en CRUDO (÷ rendimiento) cuando el flag está ACTIVADO — no vuelvas a dividir tú. El campo cuadre.consumo_en_crudo / cuadre.nota_merma te dice en qué modo están. Si está DESACTIVADO, son kg servidos.
 - No mezcles conceptos: food cost SIEMPRE lleva rendimiento; el descuento de stock solo si el flag está activado.
 
 ⚠️⚠️ PERÍODOS Y FECHAS (resumen_pyg, resumen_ventas_periodo, resumen_compras_periodo, resumen_mermas):
@@ -1497,6 +1497,13 @@ async function runTool(name, pool, restauranteId, args = {}) {
                   AND r.ingredientes @> ('[{"ingredienteId": ' || $2 || '}]')::jsonb
             `, [restauranteId, ingrediente.id])).rows;
 
+            // Flag de descuento con merma del tenant: si está ON, el consumo real
+            // de stock es la cantidad CRUDA (÷ rendimiento), no la servida.
+            const yieldFlagRow = (await pool.query(
+                'SELECT apply_yield_to_stock FROM restaurantes WHERE id = $1', [restauranteId]
+            )).rows[0];
+            const aplicarRendimiento = yieldFlagRow?.apply_yield_to_stock === true;
+
             // Para cada receta, contar ventas en el periodo y consumo teórico
             let kgConsumidosTeoricosTotal = 0;
             const recetasConVentas = [];
@@ -1513,8 +1520,16 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 const cantidadPorPorcion = parseFloat(r.cantidad_por_porcion) || 0;
                 const porciones = parseInt(r.porciones) || 1;
                 const unidadesVendidas = parseInt(ventasRow.unidades_vendidas) || 0;
-                // El descuento real de stock por venta es (cantidad / porciones) × unidades vendidas
-                const kgConsumidos = (cantidadPorPorcion / porciones) * unidadesVendidas;
+                // Consumo de stock por venta = (cantidad / porciones) × unidades (kg servidos).
+                // Si apply_yield_to_stock está ON, el stock descuenta la cantidad CRUDA
+                // (÷ rendimiento). Prioridad: rendimiento de la línea > del ingrediente > 100
+                // (mismo criterio que expandRecipeToBase en sales.routes).
+                let kgConsumidos = (cantidadPorPorcion / porciones) * unidadesVendidas;
+                if (aplicarRendimiento) {
+                    let rend = parseFloat(r.rendimiento_en_receta);
+                    if (!rend || rend <= 0) rend = parseFloat(ingrediente.rendimiento) || 100;
+                    if (rend > 0) kgConsumidos = kgConsumidos / (rend / 100);
+                }
                 kgConsumidosTeoricosTotal += kgConsumidos;
                 recetasConVentas.push({
                     id: r.id,
@@ -1619,6 +1634,10 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 cuadre: {
                     kg_comprados: kgComprados,
                     kg_consumidos_teoricos: Math.round(kgConsumidosTeoricosTotal * 100) / 100,
+                    consumo_en_crudo: aplicarRendimiento,
+                    nota_merma: aplicarRendimiento
+                        ? 'Descuento de stock con merma ACTIVADO: kg_consumidos_teoricos ya son CRUDOS (÷ rendimiento). Es lo que realmente sale del stock.'
+                        : 'Descuento de stock con merma DESACTIVADO: kg_consumidos_teoricos son los kg SERVIDOS (sin rendimiento).',
                     exceso_kg: excesoKg,
                     interpretacion: excesoKg > kgComprados * 0.5
                         ? 'compras_muy_por_encima_de_consumo'
@@ -1776,14 +1795,24 @@ async function runTool(name, pool, restauranteId, args = {}) {
                   AND fecha >= CURRENT_DATE - ($3 || ' days')::interval
             `, [restauranteId, receta.id, dias])).rows[0];
 
-            // Consumo teórico estimado por ingrediente
+            // Consumo teórico estimado por ingrediente. Si apply_yield_to_stock está ON,
+            // el stock descuenta la cantidad CRUDA (÷ rendimiento de la línea/ingrediente,
+            // ya resuelto en e.rendimiento_pct). Mismo criterio que expandRecipeToBase.
             const unidadesVendidas = parseInt(ventas.unidades_vendidas) || 0;
-            const ingredientesConsumidos = escandallo.map(e => ({
-                ingrediente_id: e.ingrediente_id,
-                nombre: e.nombre,
-                unidad: e.unidad,
-                kg_o_ud_estimados: Math.round((e.cantidad / porciones) * unidadesVendidas * 100) / 100
-            }));
+            const yieldFlagRec = (await pool.query(
+                'SELECT apply_yield_to_stock FROM restaurantes WHERE id = $1', [restauranteId]
+            )).rows[0];
+            const aplicarRendRec = yieldFlagRec?.apply_yield_to_stock === true;
+            const ingredientesConsumidos = escandallo.map(e => {
+                let kg = (e.cantidad / porciones) * unidadesVendidas;
+                if (aplicarRendRec && e.rendimiento_pct > 0) kg = kg / (e.rendimiento_pct / 100);
+                return {
+                    ingrediente_id: e.ingrediente_id,
+                    nombre: e.nombre,
+                    unidad: e.unidad,
+                    kg_o_ud_estimados: Math.round(kg * 100) / 100
+                };
+            });
 
             return {
                 receta: {
