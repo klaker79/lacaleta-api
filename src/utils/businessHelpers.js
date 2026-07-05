@@ -387,6 +387,75 @@ async function updateProveedorPrecio(client, { ingredienteId, proveedorId, preci
     );
 }
 
+/**
+ * Deriva de precio sostenida (alerta "caso tomate", pedida por Anais 2026-07-05).
+ *
+ * Problema: precio_medio_compra es la media ponderada de TODO el histórico. Si un
+ * proveedor sube un precio y se MANTIENE caro, la media (y por tanto el food cost
+ * del escandallo) tarda meses en reflejarlo → el margen real es peor de lo que
+ * enseña la app y nadie se entera.
+ *
+ * Esta función es 100% PURA y ADITIVA: no cambia ningún cálculo existente, solo
+ * COMPARA el precio que usa la app hoy (getBackendIngredientUnitPrice: respeta
+ * precio_fijado 📌 y la prioridad de precios canónica) contra la media ponderada
+ * de los últimos 90 días, y devuelve SOLO las subidas sostenidas relevantes.
+ *
+ * Anti-ruido (por diseño):
+ *  - minCompras: mínimo de días de compra en 90d (una entrega suelta NO es
+ *    "sostenido" — mata los outliers tipo XOUBIÑA/última entrega rara).
+ *  - minGasto: solo ingredientes que mueven dinero (el desvío de un ítem de 20€
+ *    no cambia tu P&L).
+ *  - Solo SUBIDAS (desviacion >= umbral): la bajada no te hace perder dinero.
+ *
+ * @param {Array} rows - filas con: id, nombre, unidad, precio, cantidad_por_formato,
+ *   precio_fijado, precio_medio_compra (histórico), media_90d, n_compras_90d,
+ *   gasto_90d, cantidad_90d, ultima_compra.
+ * @param {object} opts - { umbralPct=15, minCompras=3, minGasto=100 }
+ * @returns {Array} alertas ordenadas por impacto_mes desc.
+ */
+function computePriceDrift(rows, opts = {}) {
+    const umbralPct = Number.isFinite(parseFloat(opts.umbralPct)) ? parseFloat(opts.umbralPct) : 15;
+    const minCompras = Number.isFinite(parseInt(opts.minCompras)) ? parseInt(opts.minCompras) : 3;
+    const minGasto = Number.isFinite(parseFloat(opts.minGasto)) ? parseFloat(opts.minGasto) : 100;
+
+    const alertas = [];
+    (rows || []).forEach(row => {
+        // Precio que usa el food cost HOY (misma función canónica que recetas/chat).
+        const precioApp = getBackendIngredientUnitPrice(row);
+        const media90 = parseFloat(row.media_90d);
+        const nCompras = parseInt(row.n_compras_90d) || 0;
+        const gasto90 = parseFloat(row.gasto_90d) || 0;
+        const cantidad90 = parseFloat(row.cantidad_90d) || 0;
+
+        if (!(precioApp > 0) || !(media90 > 0)) return;
+        if (nCompras < minCompras) return;   // no sostenido → fuera
+        if (gasto90 < minGasto) return;      // no mueve dinero → fuera
+
+        const desviacionPct = ((media90 - precioApp) / precioApp) * 100;
+        if (desviacionPct < umbralPct) return; // solo subidas sostenidas
+
+        // Sobrecoste que el escandallo NO está enseñando, prorrateado a un mes
+        // (90 días ≈ 3 meses de compras).
+        const impactoMes = (media90 - precioApp) * cantidad90 / 3;
+
+        alertas.push({
+            id: row.id,
+            nombre: row.nombre,
+            unidad: row.unidad || '',
+            precio_app: precioApp,
+            media_90d: Math.round(media90 * 10000) / 10000,
+            desviacion_pct: Math.round(desviacionPct * 10) / 10,
+            n_compras_90d: nCompras,
+            gasto_90d: Math.round(gasto90 * 100) / 100,
+            impacto_mes: Math.round(impactoMes * 100) / 100,
+            precio_fijado: row.precio_fijado === true,
+            ultima_compra: row.ultima_compra || null
+        });
+    });
+
+    return alertas.sort((a, b) => b.impacto_mes - a.impacto_mes);
+}
+
 module.exports = {
     calcularPrecioUnitario,
     getBackendIngredientUnitPrice,
@@ -397,5 +466,6 @@ module.exports = {
     recalcularPrecioPonderado,
     buildIngredientPriceMap,
     resolveProveedorId,
-    updateProveedorPrecio
+    updateProveedorPrecio,
+    computePriceDrift
 };

@@ -7,7 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 // 2026-06-08: requirePlan retirado. El gating ahora es global en server.js.
 const { log } = require('../utils/logger');
-const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -318,6 +318,94 @@ module.exports = function (pool) {
         }
     });
 
+
+    // ========== 🧠 INTELIGENCIA - DERIVA DE PRECIO SOSTENIDA ==========
+    // Alerta "caso tomate" (Anais, 2026-07-05): el food cost usa la media ponderada
+    // de TODO el histórico; si un proveedor sube un precio y SE MANTIENE caro, la
+    // media tarda meses en reflejarlo y el escandallo enseña un margen mejor que el
+    // real. Este endpoint es READ-ONLY y ADITIVO: no cambia ningún cálculo, solo
+    // compara "precio que usa la app" vs "media ponderada de los últimos 90 días"
+    // y devuelve las subidas sostenidas en ingredientes de alto gasto.
+    // Query params opcionales (clamped): umbral (%), min_compras, min_gasto (€).
+    router.get('/intelligence/price-drift', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const VENTANA_DIAS = 90;
+            const clamp = (v, lo, hi, def) => {
+                const n = parseFloat(v);
+                return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
+            };
+            const umbralPct = clamp(req.query.umbral, 1, 500, 15);
+            const minCompras = clamp(req.query.min_compras, 1, 30, 3);
+            const minGasto = clamp(req.query.min_gasto, 0, 100000, 100);
+
+            // Una fila por ingrediente comprado en la ventana: precio configurado
+            // (para getBackendIngredientUnitPrice), media histórica (la que usa el
+            // food cost) y media ponderada de los últimos 90 días.
+            const result = await pool.query(`
+            SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.precio_fijado,
+                   hist.precio_medio_compra,
+                   d90.media_90d, d90.n_compras_90d, d90.gasto_90d, d90.cantidad_90d, d90.ultima_compra
+            FROM ingredientes i
+            JOIN (
+                SELECT ingrediente_id,
+                       ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS media_90d,
+                       COUNT(*) AS n_compras_90d,
+                       ROUND(SUM(total_compra)::numeric, 2) AS gasto_90d,
+                       ROUND(SUM(cantidad_comprada)::numeric, 3) AS cantidad_90d,
+                       MAX(fecha) AS ultima_compra
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1
+                  AND fecha >= CURRENT_DATE - INTERVAL '${VENTANA_DIAS} days'
+                GROUP BY ingrediente_id
+            ) d90 ON d90.ingrediente_id = i.id
+            LEFT JOIN (
+                SELECT ingrediente_id,
+                       ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1
+                GROUP BY ingrediente_id
+            ) hist ON hist.ingrediente_id = i.id
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
+        `, [req.restauranteId]);
+
+            const alertas = computePriceDrift(result.rows, { umbralPct, minCompras, minGasto });
+
+            // Nº de recetas afectadas por cada ingrediente alertado (defensivo: si
+            // esta query fallara, las alertas salen igualmente sin el contador).
+            if (alertas.length > 0) {
+                try {
+                    const ids = alertas.map(a => a.id);
+                    const recetasResult = await pool.query(`
+                    SELECT (e->>'ingredienteId')::int AS ingrediente_id,
+                           COUNT(DISTINCT r.id)::int AS n_recetas
+                    FROM recetas r
+                    CROSS JOIN LATERAL jsonb_array_elements(r.ingredientes) e
+                    WHERE r.restaurante_id = $1
+                      AND r.deleted_at IS NULL
+                      AND (e->>'ingredienteId') ~ '^[0-9]+$'
+                      AND (e->>'ingredienteId')::int = ANY($2::int[])
+                    GROUP BY 1
+                `, [req.restauranteId, ids]);
+                    const porIng = new Map(recetasResult.rows.map(r => [r.ingrediente_id, r.n_recetas]));
+                    alertas.forEach(a => { a.recetas_afectadas = porIng.get(a.id) || 0; });
+                } catch (recErr) {
+                    log('error', 'price-drift: conteo de recetas falló (no bloqueante)', { error: recErr.message });
+                    alertas.forEach(a => { a.recetas_afectadas = null; });
+                }
+            }
+
+            res.json({
+                ventana_dias: VENTANA_DIAS,
+                umbral_pct: umbralPct,
+                min_compras: minCompras,
+                min_gasto: minGasto,
+                alertas
+            });
+        } catch (err) {
+            log('error', 'Error en intelligence/price-drift', { error: err.message });
+            res.status(500).json({ error: 'Error interno', alertas: [] });
+        }
+    });
 
     return router;
 };
