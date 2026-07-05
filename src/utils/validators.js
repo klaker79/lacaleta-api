@@ -73,21 +73,42 @@ const validateId = (value) => {
 
 /**
  * Valida formato de fecha (acepta ISO 8601: YYYY-MM-DD o datetime).
+ *
  * @param {*} value - Valor a validar
+ * @param {object} [opts]
+ * @param {boolean} [opts.allowFuture=true] - Si es false, rechaza fechas en el
+ *   futuro (con 1 día de margen por husos horarios). Se usa en la ENTRADA de
+ *   compras/recepciones: un albarán no puede tener fecha futura (dedazo). Las
+ *   fechas PASADAS/retroactivas siguen permitidas (meter una compra olvidada es
+ *   un flujo válido). El default (true) conserva el comportamiento previo, así
+ *   que los rangos de informe (menuEngineering) no cambian.
  * @returns {{ valid: boolean, error?: string, value?: Date }}
  */
-const validateDate = (value) => {
+const validateDate = (value, { allowFuture = true } = {}) => {
     if (!value) return { valid: false, error: 'Fecha es requerida' };
     const date = new Date(value);
     if (isNaN(date.getTime())) {
         return { valid: false, error: 'Formato de fecha inválido' };
     }
-    // Rechazar fechas absurdas (antes de 2020 o más de 1 año en el futuro)
+    // Rechazar fechas absurdas (antes de 2020).
     const minDate = new Date('2020-01-01');
-    const maxDate = new Date();
-    maxDate.setFullYear(maxDate.getFullYear() + 1);
-    if (date < minDate || date > maxDate) {
+    if (date < minDate) {
         return { valid: false, error: 'Fecha fuera de rango válido' };
+    }
+    const maxDate = new Date();
+    if (allowFuture) {
+        // Tope laxo: hasta 1 año vista (rangos de informe, etc.).
+        maxDate.setFullYear(maxDate.getFullYear() + 1);
+        if (date > maxDate) {
+            return { valid: false, error: 'Fecha fuera de rango válido' };
+        }
+    } else {
+        // Compras/recepciones: no se acepta futuro. +1 día de margen por husos
+        // horarios (que "hoy" en local no lo rechace el servidor por TZ).
+        maxDate.setDate(maxDate.getDate() + 1);
+        if (date > maxDate) {
+            return { valid: false, error: 'La fecha no puede ser futura' };
+        }
     }
     return { valid: true, value: date };
 };

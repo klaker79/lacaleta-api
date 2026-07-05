@@ -86,8 +86,9 @@ module.exports = function (pool) {
         try {
             const { proveedorId, fecha, ingredientes, total, estado, iva_pct, bonificacion } = req.body;
 
-            // 🔒 Validar fecha
-            const fechaCheck = validateDate(fecha);
+            // 🔒 Validar fecha — un pedido/albarán no puede tener fecha futura
+            // (dedazo tipo 30-07). Retroactivas (pasadas) sí se permiten.
+            const fechaCheck = validateDate(fecha, { allowFuture: false });
             if (!fechaCheck.valid) {
                 return res.status(400).json({ error: fechaCheck.error });
             }
@@ -232,6 +233,14 @@ module.exports = function (pool) {
             const { id } = req.params;
             const { estado, ingredientes, totalRecibido, fechaRecepcion, fecha_recepcion, total_recibido, total, iva_pct, bonificacion } = req.body;
             const fechaRecepcionFinal = fecha_recepcion || fechaRecepcion;
+            // 🔒 Si el body trae fecha de recepción, no puede ser futura (dedazo).
+            // Retroactivas OK. Si no viene, se conserva la persistida / hoy (más abajo).
+            if (fechaRecepcionFinal) {
+                const recepCheck = validateDate(fechaRecepcionFinal, { allowFuture: false });
+                if (!recepCheck.valid) {
+                    return res.status(400).json({ error: `Fecha de recepción inválida: ${recepCheck.error}` });
+                }
+            }
             // 🧾 IVA del albarán (Migración 015): si no llega en el body pasamos null
             // y COALESCE conserva el valor guardado (la recepción NO debe perder el
             // IVA que se puso al crear/editar el pedido). NO entra en `total`.

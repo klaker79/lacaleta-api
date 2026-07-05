@@ -185,7 +185,8 @@ module.exports = function (pool) {
             if (!idCheck.valid) {
                 return res.status(400).json({ error: `ingredienteId inválido: ${idCheck.error}` });
             }
-            const fechaCheck = validateDate(fecha);
+            // Compra diaria: no se acepta fecha futura (dedazo). Retroactivas OK.
+            const fechaCheck = validateDate(fecha, { allowFuture: false });
             if (!fechaCheck.valid) {
                 return res.status(400).json({ error: `fecha inválida: ${fechaCheck.error}` });
             }
