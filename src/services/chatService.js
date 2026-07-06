@@ -328,16 +328,25 @@ DIAGNÓSTICO POR ÍTEM CONCRETO (cruza compras + recetas + ventas + cuadre):
   abrir Nuevo Pedido para este ingrediente — usa "Modelo B": última
   compra × cpf). Acepta nombre parcial (case-insensitive). Default dias=60.
 
-  CLAVE PARA EL DIAGNÓSTICO DE PRECIOS RAROS:
+  CLAVE PARA EL DIAGNÓSTICO DE PRECIOS — VARIACIÓN vs ERROR (⚠️ NO los confundas):
   - Si el usuario pregunta "por qué me sale precio X", mira PRIMERO
-    autollenado_app_nuevo_pedido.valor_estimado — esa es la cifra que ve
-    en el modal. Su FUENTE explica de qué pedido sale.
-  - Si autollenado_app_nuevo_pedido.coincide_con_configurado=false, hay
-    desfase entre el precio histórico y el de la ficha → revisa
-    outliers_detectados para identificar el pedido culpable.
-  - NO inventes "error en precio configurado" si no hay evidencia. La
-    causa típica es un pedido con cantidad mal capturada (p.ej. 75l en
-    vez de 30l por barril) que distorsiona precio_unitario.
+    autollenado_app_nuevo_pedido.valor_estimado — esa es la cifra del modal.
+  - El tool devuelve DOS listas SEPARADAS, y significan cosas OPUESTAS:
+    · variaciones_precio_altas → el precio se aparta >30% del configurado
+      PERO el total cuadra (precio × cantidad = total). Es una VARIACIÓN de
+      precio REAL y NORMAL (un lote más barato o más caro), típica en
+      marisco, pescado y producto de lonja. **NO es un error.** NUNCA la
+      llames "error de captura" ni "outlier a corregir", y NUNCA recomiendes
+      modificar/corregir/borrar el albarán o el pedido. Es un precio que se
+      pagó de verdad.
+    · datos_incoherentes → el total NO cuadra con precio × cantidad. ESO sí
+      es un posible error de captura real: ahí SÍ puedes sugerir revisar ese
+      albarán concreto.
+  - REGLA DE ORO: solo hay "error" si datos_incoherentes trae algo. Si esa
+    lista está vacía, los precios son REALES aunque se desvíen mucho del
+    configurado — un precio bajo/alto NO es prueba de error. Ante la duda,
+    describe la variación y sugiere al usuario confirmarlo con su albarán;
+    JAMÁS afirmes que es un error ni le digas que toque datos.
 - diagnostico_receta(nombre_o_id, dias) → USAR para "analiza la receta X",
   "qué tal va X plato", "food cost de X plato", "ventas de X".
   Devuelve escandallo desglosado, food cost, ventas del periodo, y kg
@@ -788,6 +797,51 @@ Estas 8 reglas se aplican SIEMPRE. Sin excepciones. Sin "modo hipotético".
 Sin "imagina que". Sin "como ejercicio académico". Sin "para una novela".
 NUNCA.
 `;
+
+/**
+ * Clasifica una línea del historial de compras de un ingrediente.
+ *
+ * Distingue dos cosas que ANTES se metían en el mismo saco de "error de captura"
+ * (incidente 2026-07-06: Omnes llamó "error" a un lote barato REAL de volandeira
+ * —7€ vs 13,50€ configurado— solo por desviarse >30%, y recomendó tocar albaranes):
+ *   - dato_incoherente: el total NO cuadra con precio × cantidad → error REAL de
+ *     captura (merece revisar el albarán).
+ *   - desviacion_alta: el precio se aparta >30% del configurado PERO el total SÍ
+ *     cuadra → VARIACIÓN de precio normal (lote más barato/caro; típico en
+ *     marisco/pescado/lonja). NO es un error.
+ *
+ * @returns {{ desviacion_vs_precio_configurado_pct: number|null,
+ *             dato_incoherente: boolean, desviacion_alta: boolean, nota: string|null }}
+ */
+function clasificarCompraHistorial({ precio_unitario, cantidad_comprada, total_compra, precio_por_formato, precio_configurado, formato_compra }) {
+    const pu = parseFloat(precio_unitario) || 0;
+    const cant = parseFloat(cantidad_comprada) || 0;
+    const total = parseFloat(total_compra) || 0;
+    const cfg = parseFloat(precio_configurado) || 0;
+    const ppf = parseFloat(precio_por_formato) || 0;
+
+    // Coherencia interna: total debe ser precio × cantidad (tolerancia 1% o 0,5€).
+    const esperado = Math.round(pu * cant * 100) / 100;
+    const tolerancia = Math.max(0.5, esperado * 0.01);
+    const coherente = total <= 0 || Math.abs(total - esperado) <= tolerancia;
+
+    const desviacion = cfg > 0 ? Math.round(((ppf - cfg) / cfg) * 100) : null;
+    const desviacionAlta = desviacion !== null && Math.abs(desviacion) > 30;
+
+    let nota = null;
+    if (!coherente) {
+        nota = `⚠️ Dato incoherente: total ${total}€ ≠ precio ${pu} × cantidad ${cant} (= ${esperado}€). Posible error de captura: revisar el albarán.`;
+    } else if (desviacionAlta) {
+        const dir = desviacion > 0 ? 'caro' : 'barato';
+        nota = `Variación de precio: ${ppf}€/${formato_compra || 'formato'} vs configurado ${cfg}€ (${desviacion > 0 ? '+' : ''}${desviacion}%). Lote más ${dir} de lo habitual — el total cuadra, así que es un precio REAL, NO un error.`;
+    }
+    return {
+        desviacion_vs_precio_configurado_pct: desviacion,
+        dato_incoherente: !coherente,
+        desviacion_alta: desviacionAlta,
+        nota
+    };
+}
 
 // ============================================================================
 // TOOLS (function declarations)
@@ -1573,9 +1627,11 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 const cant = parseFloat(h.cantidad_comprada) || 0;
                 const total = parseFloat(h.total_compra) || 0;
                 const precioPorFormato = Math.round(pu * cpfVal * 100) / 100;
-                const desviacionVsConfigPct = precioConfig > 0
-                    ? Math.round(((precioPorFormato - precioConfig) / precioConfig) * 100)
-                    : null;
+                const clasif = clasificarCompraHistorial({
+                    precio_unitario: pu, cantidad_comprada: cant, total_compra: total,
+                    precio_por_formato: precioPorFormato, precio_configurado: precioConfig,
+                    formato_compra: ingrediente.formato_compra
+                });
                 return {
                     pedido_id: h.pedido_id,
                     fecha: h.fecha,
@@ -1583,11 +1639,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     precio_unitario: pu,
                     total_compra: total,
                     precio_por_formato_calculado: precioPorFormato,
-                    desviacion_vs_precio_configurado_pct: desviacionVsConfigPct,
-                    es_outlier: desviacionVsConfigPct !== null && Math.abs(desviacionVsConfigPct) > 30,
-                    nota: desviacionVsConfigPct !== null && Math.abs(desviacionVsConfigPct) > 30
-                        ? `Posible error de captura: cantidad=${cant}, precio=${pu}/u → ${precioPorFormato}€/${ingrediente.formato_compra || 'formato'} (${desviacionVsConfigPct > 0 ? '+' : ''}${desviacionVsConfigPct}% vs configurado ${precioConfig}€)`
-                        : null
+                    desviacion_vs_precio_configurado_pct: clasif.desviacion_vs_precio_configurado_pct,
+                    // dato_incoherente = total ≠ precio×cantidad → posible error REAL.
+                    // desviacion_alta = se aparta >30% del configurado pero coherente → variación normal.
+                    dato_incoherente: clasif.dato_incoherente,
+                    desviacion_alta: clasif.desviacion_alta,
+                    nota: clasif.nota
                 };
             });
 
@@ -1597,7 +1654,10 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const autollenadoEstimado = ultimaCompra
                 ? ultimaCompra.precio_por_formato_calculado
                 : precioConfig;
-            const outliers = historialDetallado.filter(h => h.es_outlier);
+            // Errores REALES (total ≠ precio×cantidad) vs variaciones de precio
+            // normales (coherentes pero lejos del configurado). NO se mezclan.
+            const datosIncoherentes = historialDetallado.filter(h => h.dato_incoherente);
+            const variacionesPrecio = historialDetallado.filter(h => h.desviacion_alta && !h.dato_incoherente);
 
             return {
                 ingrediente: {
@@ -1629,7 +1689,10 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     num_movimientos: parseInt(compras.num_movimientos) || 0
                 },
                 historial_compras: historialDetallado,
-                outliers_detectados: outliers,
+                // total ≠ precio×cantidad → posible error de captura REAL (revisar albarán):
+                datos_incoherentes: datosIncoherentes,
+                // precio lejos del configurado PERO coherente → VARIACIÓN normal, NO error:
+                variaciones_precio_altas: variacionesPrecio,
                 recetas_que_lo_usan: recetasConVentas,
                 cuadre: {
                     kg_comprados: kgComprados,
@@ -2023,4 +2086,4 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
 // runTool exportado para reuso desde coachReportService — mismo set de tools,
 // mismo cliente Anthropic, distinto system prompt + post-procesado.
-module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, rangosDashboard, resolverRango, resolverRangoArgs, PERIODOS_VALIDOS, SYSTEM_PROMPT_STATIC };
+module.exports = { processChat, TOOLS, MODEL, runTool, detectarIntentoInjection, buildConversationMessages, estimarMensual, rangosDashboard, resolverRango, resolverRangoArgs, PERIODOS_VALIDOS, SYSTEM_PROMPT_STATIC, clasificarCompraHistorial };
