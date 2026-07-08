@@ -28,6 +28,7 @@
 const { log } = require('../utils/logger');
 const { personalCostExpr } = require('../utils/personalCost');
 const { condicionGastosOperativosSql } = require('../utils/gastosOperativos');
+const { prorratearGastosFijos } = require('../utils/prorrateo');
 
 function rangoMes(mes) {
     // mes: 'YYYY-MM' o null/undefined → mes actual
@@ -403,8 +404,20 @@ async function generarInformeMensual(pool, restauranteId, mes) {
         // 🍽️ La comida de personal SÍ resta (es gasto operativo real), pero NO es food
         // cost (no toca cogs/food_cost_pct). Las mermas NO se restan aquí (variante
         // conservadora; ver food cost real arriba y la sección Mermas).
+        // 📅 Gastos fijos DEVENGADOS por días con ventas (criterio Iker 2026-07-08,
+        // el mismo que la Cuenta de Resultados del Diario y Omnes resumen_pyg):
+        // gasto fijo diario × nº de días CON VENTAS del mes; los días sin ventas
+        // no cargan fijos. `evolucion` trae exactamente una fila por día con ventas.
+        const hoyInforme = new Date();
+        const hoyExclusivoInforme = new Date(Date.UTC(
+            hoyInforme.getUTCFullYear(), hoyInforme.getUTCMonth(), hoyInforme.getUTCDate() + 1
+        )).toISOString().slice(0, 10);
+        const prInforme = prorratearGastosFijos(
+            gastosFijos.total, rango.inicio, rango.fin, hoyExclusivoInforme, evolucion.length
+        );
+        const gastosFijosDevengados = prInforme.gastos_fijos_periodo;
         const margenBruto = ingresos.mes_actual - cogsActual;
-        const beneficioNeto = margenBruto - gastosFijos.total - comidaPersonal - personalExtra;
+        const beneficioNeto = margenBruto - gastosFijosDevengados - comidaPersonal - personalExtra;
         const margenNetoPct = ingresos.mes_actual > 0
             ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
             : 0;
@@ -432,7 +445,11 @@ async function generarInformeMensual(pool, restauranteId, mes) {
                 ingresos: Math.round(ingresos.mes_actual * 100) / 100,
                 cogs: Math.round(cogsActual * 100) / 100,
                 margen_bruto: Math.round(margenBruto * 100) / 100,
-                gastos_fijos: Math.round(gastosFijos.total * 100) / 100,
+                // Devengado por días con ventas (lo que resta en ESTE P&L).
+                gastos_fijos: Math.round(gastosFijosDevengados * 100) / 100,
+                // Referencia del mes completo (lo que suma la lista de gastos).
+                gastos_fijos_mes_completo: Math.round(gastosFijos.total * 100) / 100,
+                dias_con_ventas: evolucion.length,
                 gastos_fijos_conceptos: gastosFijos.num_conceptos,
                 comida_personal: Math.round(comidaPersonal * 100) / 100,
                 personal_extra: Math.round(personalExtra * 100) / 100,

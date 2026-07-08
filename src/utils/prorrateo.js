@@ -17,10 +17,15 @@
  * @param {string} hoyExclusivo    YYYY-MM-DD = hoy+1 (inyectable para tests).
  *                                  Recorta `hasta` para no contar días futuros
  *                                  sin datos de ventas.
+ * @param {number|null} diasConVentas  Nº de días CON VENTAS dentro del periodo.
+ *   Criterio de Iker (2026-07-08, Cuenta de Resultados del Diario): el gasto
+ *   fijo diario se descuenta en los días trabajados; los días sin ventas NO
+ *   cargan gasto fijo. Si se pasa, el devengo usa este número; si es null,
+ *   cae al comportamiento antiguo (días de calendario del periodo).
  * @returns {{ hasta_efectivo: string, dias_periodo: number, dias_mes: number,
- *             parcial: boolean, gastos_fijos_periodo: number }}
+ *             dias_devengo: number, parcial: boolean, gastos_fijos_periodo: number }}
  */
-function prorratearGastosFijos(gastosFijosMes, desde, hasta, hoyExclusivo) {
+function prorratearGastosFijos(gastosFijosMes, desde, hasta, hoyExclusivo, diasConVentas = null) {
     const MS_DIA = 86400000;
     const monto = Number(gastosFijosMes) || 0;
     const hastaEfectivo = hasta < hoyExclusivo ? hasta : hoyExclusivo;
@@ -32,13 +37,17 @@ function prorratearGastosFijos(gastosFijosMes, desde, hasta, hoyExclusivo) {
     // común de un único mes (mayo=31, junio=30, febrero=28/29...).
     const d = new Date(`${desde}T00:00:00Z`);
     const diasMes = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    const diasDevengo = Number.isFinite(diasConVentas)
+        ? Math.max(0, Math.min(diasConVentas, diasPeriodo))
+        : diasPeriodo;
     const gastosFijosPeriodo = diasMes > 0
-        ? Math.round((monto * diasPeriodo / diasMes) * 100) / 100
+        ? Math.round((monto * diasDevengo / diasMes) * 100) / 100
         : 0;
     return {
         hasta_efectivo: hastaEfectivo,
         dias_periodo: diasPeriodo,
         dias_mes: diasMes,
+        dias_devengo: diasDevengo,
         parcial: hastaEfectivo < hasta,
         gastos_fijos_periodo: gastosFijosPeriodo
     };

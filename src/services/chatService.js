@@ -375,7 +375,12 @@ responde. Una respuesta con autocorrección queda poco profesional.
 / principios de Omnes SIN periodo, son del HISTÓRICO COMPLETO → di "en el histórico"
 o "en el periodo analizado", NUNCA un nº de días concreto. (3) Si el usuario te da
 los datos en el mensaje sin especificar días (p.ej. "0 ventas en el periodo"),
-repite "en el periodo analizado" — no te inventes cuántos días son.
+repite "en el periodo analizado" — no te inventes cuántos días son. (4) Si el
+usuario CITA un periodo o rango explícito en su mensaje (p.ej. "últimos 90 días",
+"del 2026-04-09 al 2026-07-09"), PASA ese rango como desde/hasta a
+analisis_menu_engineering / analisis_omnes y cita platos y unidades de ESE periodo
+— NO respondas con el histórico completo ni mezcles ventanas distintas en el mismo
+relato sin avisar.
 
 INGENIERÍA DE MENÚ Y OMNES (USAR SIEMPRE que el usuario hable de
 "matriz BCG", "estrella/puzzle/caballo/perro", "ingeniería de menú",
@@ -1256,15 +1261,22 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3
             `, [restauranteId, desde, hasta])).rows[0];
             const personal_extra_periodo = parseFloat(peRow.personal_extra_periodo) || 0;
-            // Prorrateo de gastos fijos a los días reales del periodo. Evita el
-            // artefacto de comparar ingresos de un mes parcial (p.ej. 9 días)
-            // contra un mes entero de fijos. Para un mes cerrado, el prorrateo
-            // da el importe completo (sin cambio de comportamiento).
+            // Devengo de gastos fijos por DÍAS CON VENTAS del periodo (criterio de
+            // Iker 2026-07-08, el MISMO que la Cuenta de Resultados del Diario):
+            // cada día trabajado carga su gasto fijo diario (fijos_mes/días del mes);
+            // los días sin ventas NO cargan fijos. Así el beneficio que da Omnes
+            // cuadra EXACTAMENTE con el TOTAL MES de la tabla del Diario.
             const hoy = new Date();
             const hoyExclusivo = new Date(Date.UTC(
                 hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() + 1
             )).toISOString().slice(0, 10);
-            const pr = prorratearGastosFijos(gastos_fijos_mes, desde, hasta, hoyExclusivo);
+            const dcvRow = (await pool.query(`
+                SELECT COUNT(DISTINCT DATE(fecha)) AS dias_con_ventas
+                FROM ventas
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3 AND deleted_at IS NULL
+            `, [restauranteId, desde, hasta])).rows[0];
+            const dias_con_ventas = parseInt(dcvRow.dias_con_ventas) || 0;
+            const pr = prorratearGastosFijos(gastos_fijos_mes, desde, hasta, hoyExclusivo, dias_con_ventas);
             // ⚠️ Food cost = COGS / INGRESOS DE ESA MISMA FUENTE. cogs_periodo
             // sale de ventas_diarias_resumen (buckets food+beverage). El
             // denominador DEBE ser ing_food + ing_beverage (misma base), NO
@@ -1284,6 +1296,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                     hasta,
                     hasta_efectivo: pr.hasta_efectivo,
                     dias_periodo: pr.dias_periodo,
+                    dias_con_ventas,
                     parcial: pr.parcial
                 },
                 ingresos,
@@ -1303,7 +1316,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 margen_bruto: Math.round((ingresos - cogs_periodo) * 100) / 100,
                 margen_neto_aprox: margen_neto,
                 num_tickets: parseInt(ventas.num_tickets) || 0,
-                nota: `cogs_periodo es el COGS real (Jack Miller, fuente ventas_diarias_resumen). USA food_cost_pct (o split food/beverage) para food cost; compras_periodo es solo cash-flow de albaranes, NO food cost. comida_personal es el gasto en comida del equipo: es un GASTO operativo aparte que SÍ resta al beneficio neto (ya está restado en margen_neto_aprox), pero NO es food cost ni COGS ni se incluye en compras_periodo. IMPORTANTE: gastos_fijos_periodo ya está PRORRATEADO a los ${pr.dias_periodo} días reales del periodo (gastos_fijos_mes es la referencia de un mes completo). personal_extra_periodo es el pago a EXTRAS por horas del periodo (coste operativo real con fecha, NO se prorratea); YA está restado en margen_neto_aprox, igual que comida_personal. USA gastos_fijos_periodo, comida_personal, personal_extra_periodo y margen_neto_aprox para el beneficio del periodo, NUNCA gastos_fijos_mes. ${pr.parcial ? `El periodo es PARCIAL (${pr.dias_periodo} días, hasta ${pr.hasta_efectivo}): indícalo claramente al usuario y NO extrapoles a "necesitas facturar X al mes" sin avisar de que el mes está incompleto.` : ''} Indica SIEMPRE el rango de fechas exacto en tu respuesta.`
+                nota: `cogs_periodo es el COGS real (Jack Miller, fuente ventas_diarias_resumen). USA food_cost_pct (o split food/beverage) para food cost; compras_periodo es solo cash-flow de albaranes, NO food cost. comida_personal es el gasto en comida del equipo: es un GASTO operativo aparte que SÍ resta al beneficio neto (ya está restado en margen_neto_aprox), pero NO es food cost ni COGS ni se incluye en compras_periodo. IMPORTANTE: gastos_fijos_periodo se devenga SOLO en los ${pr.dias_devengo} días CON VENTAS del periodo (gasto fijo diario = gastos_fijos_mes/días del mes; los días sin ventas NO cargan gasto fijo — es el MISMO criterio que la Cuenta de Resultados del Diario, así el beneficio cuadra con esa tabla). gastos_fijos_mes es la referencia de un mes completo. personal_extra_periodo es el pago a EXTRAS por horas del periodo (coste operativo real con fecha, NO se prorratea); YA está restado en margen_neto_aprox, igual que comida_personal. USA gastos_fijos_periodo, comida_personal, personal_extra_periodo y margen_neto_aprox para el beneficio del periodo, NUNCA gastos_fijos_mes. ${pr.parcial ? `El periodo es PARCIAL (${pr.dias_periodo} días, hasta ${pr.hasta_efectivo}): indícalo claramente al usuario y NO extrapoles a "necesitas facturar X al mes" sin avisar de que el mes está incompleto.` : ''} Indica SIEMPRE el rango de fechas exacto en tu respuesta.`
             };
         }
 
