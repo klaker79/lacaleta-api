@@ -27,6 +27,7 @@
 
 const { log } = require('../utils/logger');
 const { personalCostExpr } = require('../utils/personalCost');
+const { condicionGastosOperativosSql } = require('../utils/gastosOperativos');
 
 function rangoMes(mes) {
     // mes: 'YYYY-MM' o null/undefined → mes actual
@@ -210,13 +211,16 @@ async function getCogsMes(pool, restauranteId, rango) {
 }
 
 async function getGastosFijosMes(pool, restauranteId) {
-    // gastos_fijos.monto_mensual ya es mensual (no hay frecuencia)
+    // gastos_fijos.monto_mensual ya es mensual (no hay frecuencia).
+    // OPERATIVOS: excluye impuestos no operativos (IVA/IGIC/IRPF/Sociedades);
+    // el IAE/IBI/tasas SÍ cuentan. Misma regla que el P&L y el equilibrio.
     const sql = `
         SELECT COALESCE(SUM(monto_mensual), 0)::numeric AS total,
                COUNT(*) AS num_conceptos
         FROM gastos_fijos
         WHERE restaurante_id = $1
           AND (activo IS NULL OR activo = TRUE)
+          AND ${condicionGastosOperativosSql()}
     `;
     const r = await pool.query(sql, [restauranteId]);
     return {
