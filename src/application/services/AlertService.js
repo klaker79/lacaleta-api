@@ -11,10 +11,15 @@ class AlertService {
         this.pool = dependencies.pool || require('../../infrastructure/database/connection');
         this.alertRepo = new AlertRepository(this.pool);
 
-        // Umbrales configurables
+        // Umbrales configurables — ALINEADOS con los canónicos de la app
+        // (CLAUDE.md): food cost ≤30 excelente, 31-35 objetivo, 36-40 vigilar,
+        // >40 ALERTA; margen ≥67 verde, 62-66 aviso, <62 ALERTA. Antes esta capa
+        // alertaba a >35 de food cost y <60 de margen — números que no existían
+        // en ningún otro sitio de la app y descuadraban con los badges del
+        // escandallo/dashboard (2026-07-08).
         this.thresholds = {
-            marginLow: 60,           // % mínimo de margen
-            foodCostHigh: 35,        // % máximo de food cost
+            marginLow: 62,           // % mínimo de margen (canónico: <62 = rojo)
+            foodCostHigh: 40,        // % máximo de food cost (canónico: >40 = alerta)
             priceIncreaseAlert: 10,  // % de incremento de precio para alertar
             stockDaysWarning: 3      // días de stock para alertar
         };
