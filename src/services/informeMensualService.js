@@ -29,6 +29,7 @@ const { log } = require('../utils/logger');
 const { personalCostExpr } = require('../utils/personalCost');
 const { condicionGastosOperativosSql } = require('../utils/gastosOperativos');
 const { prorratearGastosFijos } = require('../utils/prorrateo');
+const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
 
 function rangoMes(mes) {
     // mes: 'YYYY-MM' o null/undefined → mes actual
@@ -201,14 +202,43 @@ async function getCogsMes(pool, restauranteId, rango) {
     // Es la misma fórmula sellada en el baseline (project_kpis_sellados_2026_04_20).
     // Usar compras (precios_compra_diarios) inflaría food cost en meses con
     // pedidos grandes que aún no se han vendido.
+    //
+    // 🏷️ Bucketing canónico (2026-07-08): MISMA query que /analytics/pnl-breakdown
+    // (LEFT JOIN recetas con deleted_at IS NULL + listas de categoriaClassifier).
+    // Antes el food cost del informe dividía el COGS de vdr (TODOS los buckets)
+    // entre SUM(total) de la tabla `ventas` — numerador y denominador de fuentes
+    // distintas, el patrón exacto del bug del fc_total 29% de Omnes (PR #373).
+    // Devuelve:
+    //   cogs_total → para el P&L (todo coste real, incluido bucket 'otros',
+    //                igual que la tarjeta Beneficio Bruto del Diario).
+    //   cogs_fb / ing_fb → para el food cost (solo food+beverage, como el
+    //                dashboard, Omnes y el punto de equilibrio).
+    const beverageList = beverageCategoriesSqlList();
+    const otherList = otherCategoriesSqlList();
     const sql = `
-        SELECT COALESCE(SUM(coste_ingredientes), 0)::numeric AS cogs_actual
-        FROM ventas_diarias_resumen
-        WHERE restaurante_id = $1
-          AND fecha >= $2 AND fecha < $3
+        SELECT
+            CASE
+                WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${beverageList}) THEN 'beverage'
+                WHEN LOWER(TRIM(COALESCE(r.categoria, ''))) IN (${otherList})    THEN 'otros'
+                ELSE 'food'
+            END AS bucket,
+            COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric AS cogs,
+            COALESCE(SUM(vdr.total_ingresos), 0)::numeric AS ingresos
+        FROM ventas_diarias_resumen vdr
+        LEFT JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
+        WHERE vdr.restaurante_id = $1
+          AND vdr.fecha >= $2 AND vdr.fecha < $3
+        GROUP BY 1
     `;
     const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin]);
-    return parseFloat(r.rows[0].cogs_actual) || 0;
+    let cogs_total = 0, cogs_fb = 0, ing_fb = 0;
+    for (const row of r.rows) {
+        const cogs = parseFloat(row.cogs) || 0;
+        const ing = parseFloat(row.ingresos) || 0;
+        cogs_total += cogs;
+        if (row.bucket !== 'otros') { cogs_fb += cogs; ing_fb += ing; }
+    }
+    return { cogs_total, cogs_fb, ing_fb };
 }
 
 async function getGastosFijosMes(pool, restauranteId) {
@@ -220,7 +250,7 @@ async function getGastosFijosMes(pool, restauranteId) {
                COUNT(*) AS num_conceptos
         FROM gastos_fijos
         WHERE restaurante_id = $1
-          AND (activo IS NULL OR activo = TRUE)
+          AND activo = TRUE
           AND ${condicionGastosOperativosSql()}
     `;
     const r = await pool.query(sql, [restauranteId]);
@@ -265,7 +295,7 @@ async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
             SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
                    ${gastoExpr} AS gasto
             FROM pedidos p
-            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id AND pr.restaurante_id = $1
             WHERE p.restaurante_id = $1
               AND p.fecha >= $2 AND p.fecha < $3
               AND p.deleted_at IS NULL
@@ -275,7 +305,7 @@ async function getTopProveedores(pool, restauranteId, rango, limit = 8) {
             SELECT COALESCE(pr.nombre, '(sin proveedor)') AS proveedor,
                    ${gastoExpr} AS gasto
             FROM pedidos p
-            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+            LEFT JOIN proveedores pr ON p.proveedor_id = pr.id AND pr.restaurante_id = $1
             WHERE p.restaurante_id = $1
               AND p.fecha >= $4 AND p.fecha < $5
               AND p.deleted_at IS NULL
@@ -381,8 +411,15 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             getPersonalExtraMes(pool, restauranteId, rango)
         ]);
 
-        const foodCostPct = ingresos.mes_actual > 0
-            ? Math.round((cogsActual / ingresos.mes_actual) * 10000) / 100
+        // 🏷️ Food cost CANÓNICO: (cogs food+beverage) / (ingresos food+beverage)
+        // de ventas_diarias_resumen — la MISMA fórmula y fuente que el dashboard
+        // (pnl-breakdown), Omnes (fc_total) y el punto de equilibrio. El bucket
+        // 'otros' (suministros/preparaciones base) queda fuera del food cost pero
+        // SÍ cuenta como coste en el P&L (cogsPL), igual que la tarjeta Beneficio
+        // Bruto del Diario.
+        const cogsPL = cogsActual.cogs_total;
+        const foodCostPct = cogsActual.ing_fb > 0
+            ? Math.round((cogsActual.cogs_fb / cogsActual.ing_fb) * 10000) / 100
             : 0;
 
         // Food cost REAL: incluye también lo perdido por mermas. Un plato
@@ -395,9 +432,9 @@ async function generarInformeMensual(pool, restauranteId, mes) {
         // cambiar la cifra que el dueño enseña a socios/inversores. Decisión
         // de Iker 2026-05-12.
         const mermasValor = parseFloat(mermas.valor_total) || 0;
-        const cogsConMermas = cogsActual + mermasValor;
-        const foodCostRealPct = ingresos.mes_actual > 0
-            ? Math.round((cogsConMermas / ingresos.mes_actual) * 10000) / 100
+        const cogsConMermas = cogsActual.cogs_fb + mermasValor;
+        const foodCostRealPct = cogsActual.ing_fb > 0
+            ? Math.round((cogsConMermas / cogsActual.ing_fb) * 10000) / 100
             : 0;
 
         // P&L: ingresos − COGS − gastos fijos − comida de personal = beneficio neto.
@@ -416,7 +453,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             gastosFijos.total, rango.inicio, rango.fin, hoyExclusivoInforme, evolucion.length
         );
         const gastosFijosDevengados = prInforme.gastos_fijos_periodo;
-        const margenBruto = ingresos.mes_actual - cogsActual;
+        const margenBruto = ingresos.mes_actual - cogsPL;
         const beneficioNeto = margenBruto - gastosFijosDevengados - comidaPersonal - personalExtra;
         const margenNetoPct = ingresos.mes_actual > 0
             ? Math.round((beneficioNeto / ingresos.mes_actual) * 10000) / 100
@@ -434,7 +471,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             ingresos,
             food_cost: {
                 mes_actual_pct: foodCostPct,
-                cogs_actual: Math.round(cogsActual * 100) / 100,
+                cogs_actual: Math.round(cogsPL * 100) / 100,
                 // Food cost REAL = (COGS ventas + valor mermas) / ingresos.
                 // Refleja la pérdida operativa total, no solo lo vendido.
                 real_pct: foodCostRealPct,
@@ -443,7 +480,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             },
             pyg: {
                 ingresos: Math.round(ingresos.mes_actual * 100) / 100,
-                cogs: Math.round(cogsActual * 100) / 100,
+                cogs: Math.round(cogsPL * 100) / 100,
                 margen_bruto: Math.round(margenBruto * 100) / 100,
                 // Devengado por días con ventas (lo que resta en ESTE P&L).
                 gastos_fijos: Math.round(gastosFijosDevengados * 100) / 100,

@@ -138,8 +138,18 @@ async function getMenuEngineering(pool, restauranteId, opts = {}) {
 
     const promedioMargen = totalVentasRestaurante > 0 ? sumaMargenes / totalVentasRestaurante : 0;
     const platosConVentas = analisis.filter(p => p.popularidad > 0);
-    const promedioFoodCost = platosConVentas.length > 0
-        ? platosConVentas.reduce((sum, p) => sum + p.foodCost, 0) / platosConVentas.length
+    // 🏷️ Food cost medio del menú = COGS/ingresos (coste total vendido ÷ ventas
+    // totales), NO media simple de porcentajes por plato. La media simple daba
+    // un número que no cuadraba con el food cost canónico del resto de la app
+    // (un plato caro con food cost bajo pesa distinto) — misma lección que el
+    // fix del 29% de Omnes (feedback_datos_cuadran_entre_pestanas). El frontend
+    // (recomendaciones-plato.js) usa esta MISMA fórmula.
+    const sumaCosteVendido = platosConVentas.reduce((s, p) => s + p.coste * p.popularidad, 0);
+    const sumaIngresosVendidos = platosConVentas.reduce(
+        (s, p) => s + (parseFloat(p.precio_venta) || 0) * p.popularidad, 0
+    );
+    const promedioFoodCost = sumaIngresosVendidos > 0
+        ? (sumaCosteVendido / sumaIngresosVendidos) * 100
         : 0;
 
     return analisis.map(p => {

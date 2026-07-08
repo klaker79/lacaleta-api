@@ -12,11 +12,17 @@
  * La lista de gastos fijos del usuario NO se toca; solo se excluyen de los
  * agregados que alimentan indicadores financieros.
  *
- * Se detecta por PALABRA (\y word boundary) para no dar falsos positivos:
+ * Se detecta por PALABRA COMPLETA para no dar falsos positivos:
  * "Seguridad Social" NO matchea "sociedades".
+ *
+ * Límite de palabra EXPLÍCITO `(^|[^a-z0-9])...([^a-z0-9]|$)` en vez de `\y`:
+ * el `\y` de Postgres trata el guion bajo como carácter de palabra, así que
+ * "iva_trimestral" NO se excluía en backend pero SÍ en frontend (que separa
+ * por [^a-z0-9]). Con la clase explícita ambos lados parten las palabras
+ * EXACTAMENTE igual (con `~*` la clase también es case-insensitive).
  */
 
-const IMPUESTOS_NO_OPERATIVOS_REGEX = '\\y(iva|igic|irpf|sociedades)\\y';
+const IMPUESTOS_NO_OPERATIVOS_REGEX = '(^|[^a-z0-9])(iva|igic|irpf|sociedades)([^a-z0-9]|$)';
 
 /**
  * Devuelve el fragmento SQL que, en un WHERE, deja SOLO los gastos operativos

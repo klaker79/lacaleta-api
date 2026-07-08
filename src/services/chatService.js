@@ -297,14 +297,14 @@ LISTAS / DETALLE (para análisis por ítem concreto):
 - obtener_recetas → Recetas Y VINOS con precio venta e ingredientes
 - obtener_ventas → SOLO últimas 300 ventas. NO uses para totales del mes.
 - obtener_pedidos → SOLO últimos 300 pedidos. NO uses para totales del mes.
-- obtener_gastos → Gastos fijos mensuales
+- obtener_gastos → LISTA de gastos fijos mensuales (todos los conceptos, como la ve el usuario, IVA/IRPF incluidos). ⚠️ La SUMA de esta lista es el total BRUTO: NO es el "gastos fijos" del P&L/equilibrio, que usa solo los OPERATIVOS (excluye IVA/IGIC/IRPF/Sociedades; el IAE/IBI/tasas sí cuentan) y viene en resumen_pyg.gastos_fijos_mes. Si el usuario pregunta "cuánto suman mis gastos fijos", da las DOS cifras con su etiqueta (lista completa vs operativos del P&L) para que no parezcan contradictorias.
 - obtener_proveedores → Lista proveedores
 - obtener_horarios → Turnos de trabajo
 
 AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "mejor"):
 - resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
 - resumen_ventas_periodo(periodo) → Total ingresos, nº tickets, ticket medio, top recetas. Pasa periodo (mes/semana/ultimos_7_dias…), no fechas.
-- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos (mes completo + PRORRATEADO al periodo), comida_personal (gasto operativo aparte, NO food cost, ya restado en el beneficio) y margen bruto/neto. Para el beneficio del periodo usa SIEMPRE gastos_fijos_periodo y margen_neto_aprox (ya prorrateados), NUNCA gastos_fijos_mes. Si periodo.parcial=true (mes en curso, periodo.dias_periodo días), DILO al usuario y no extrapoles a importes mensuales sin avisar. Indica siempre el rango de fechas usado. Si mencionas un "coste fijo por día", calcúlalo SIEMPRE como gastos_fijos_mes / días naturales del mes (≈30), NUNCA como gastos_fijos_mes / días transcurridos: la tarifa diaria de junio es 6700/30 = 223 €/día, no 6700/9.
+- resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos (mes completo + devengado en los días CON VENTAS del periodo, mismo criterio que la Cuenta de Resultados del Diario), comida_personal (gasto operativo aparte, NO food cost, ya restado en el beneficio) y margen bruto/neto. Para el beneficio del periodo usa SIEMPRE gastos_fijos_periodo y margen_neto_aprox (ya prorrateados), NUNCA gastos_fijos_mes. Si periodo.parcial=true (mes en curso, periodo.dias_periodo días), DILO al usuario y no extrapoles a importes mensuales sin avisar. Indica siempre el rango de fechas usado. Si mencionas un "coste fijo por día", calcúlalo SIEMPRE como gastos_fijos_mes / días naturales del mes (≈30), NUNCA como gastos_fijos_mes / días transcurridos: la tarifa diaria de junio es 6700/30 = 223 €/día, no 6700/9.
 - resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
 - resumen_compras_periodo(periodo) → Total compras + por proveedor. Pasa periodo (mes/semana/ultimos_7_dias…), no fechas.
 - resumen_mermas(periodo) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost. Pasa periodo, no fechas.
@@ -1092,10 +1092,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
         case 'obtener_gastos':
             // Schema real: concepto (VARCHAR), monto_mensual (NUMERIC, ya mensualizado),
             // activo (BOOL, no hay deleted_at). Sin columnas "frecuencia" ni "categoria".
+            // activo = TRUE: el MISMO filtro que GET /gastos-fijos (la lista que ve
+            // el usuario) — Omnes debe ver exactamente los mismos conceptos.
             return (await pool.query(`
                 SELECT id, concepto, monto_mensual, activo, created_at
                 FROM gastos_fijos
-                WHERE restaurante_id = $1 AND (activo IS NULL OR activo = TRUE)
+                WHERE restaurante_id = $1 AND activo = TRUE
                 ORDER BY concepto
             `, [restauranteId])).rows;
 
@@ -1223,10 +1225,17 @@ async function runTool(name, pool, restauranteId, args = {}) {
                   COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(12,2) AS cogs,
                   COALESCE(SUM(vdr.total_ingresos),   0)::numeric(12,2) AS ingresos_cat
                 FROM ventas_diarias_resumen vdr
-                JOIN recetas r ON r.id = vdr.receta_id
+                LEFT JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
                 WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
                 GROUP BY 1
             `, [restauranteId, desde, hasta])).rows;
+            // ⚠️ LEFT JOIN + deleted_at IS NULL = EXACTAMENTE el mismo JOIN que
+            // /analytics/pnl-breakdown. Antes (INNER JOIN sin filtro) las ventas
+            // de recetas borradas caían en su categoría vieja (o desaparecían si
+            // la receta ya no existía) y el split food/beverage de Omnes
+            // divergía ~0,1pt del dashboard (La Nave 5: 40 filas, 2.735,80€ en
+            // 90 días). Ahora receta borrada → categoria NULL → bucket 'food',
+            // igual que el dashboard: MISMOS números en todas las pestañas.
             let cogs_food = 0, cogs_beverage = 0, ing_food = 0, ing_beverage = 0;
             for (const r of cogsSplit) {
                 if (r.tipo === 'food')     { cogs_food     = parseFloat(r.cogs) || 0; ing_food     = parseFloat(r.ingresos_cat) || 0; }
@@ -1243,7 +1252,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const gastos = (await pool.query(`
                 SELECT COALESCE(SUM(monto_mensual), 0)::numeric(12,2) AS gastos_fijos_mes
                 FROM gastos_fijos
-                WHERE restaurante_id = $1 AND (activo IS NULL OR activo = TRUE)
+                WHERE restaurante_id = $1 AND activo = TRUE
                   AND ${condicionGastosOperativosSql()}
             `, [restauranteId])).rows[0];
             const ingresos = parseFloat(ventas.ingresos) || 0;

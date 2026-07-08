@@ -75,9 +75,12 @@ function makePoolMock({
                 }] };
             }
 
-            // COGS (ventas_diarias_resumen sin join con recetas)
-            if (/from ventas_diarias_resumen/.test(s) && /coalesce\(sum\(coste_ingredientes\)/.test(s)) {
-                return { rows: [{ cogs_actual: cogs_actual }] };
+            // COGS por buckets (query canónica = pnl-breakdown, 2026-07-08):
+            // el servicio suma cogs_total (P&L) y cogs_fb/ing_fb (food cost).
+            // El mock simula todo en el bucket 'food' con los mismos ingresos
+            // que la tabla ventas → el fc esperado sigue siendo cogs/ingresos.
+            if (/from ventas_diarias_resumen vdr/.test(s) && /as bucket/.test(s)) {
+                return { rows: [{ bucket: 'food', cogs: cogs_actual, ingresos: ingresos_actual }] };
             }
 
             // Gastos fijos
