@@ -197,19 +197,26 @@ module.exports = function (pool) {
                 const totalIngresos = parseFloat(row.total_ingresos);
 
                 // Coste TOTAL del bucket (día+receta).
-                // - Receta viva: cálculo en vivo, multiplicando por factor_variante
-                //   vía cantidadPonderada (botella vs copa).
-                // - Receta soft-eliminada: snapshot histórico directo de
-                //   ventas_diarias_resumen.coste_ingredientes (ya incluye
-                //   factor_variante aplicado en la inserción).
+                // FUENTE CANÓNICA: ventas_diarias_resumen.coste_ingredientes — el
+                // coste CONGELADO el día de la venta (ya incluye factor_variante).
+                // Es la MISMA fuente que /analytics/pnl-breakdown (tarjetas KPI del
+                // Diario/Dashboard, Omnes, equilibrio). Antes las recetas vivas se
+                // recalculaban EN VIVO con los precios de hoy → si un precio cambiaba
+                // tras la venta, la tabla Cuenta de Resultados divergía de las
+                // tarjetas (La Nave 5 2026-07-08: 4.994,84 vs 5.003,48, 8,64€).
+                // El recálculo en vivo queda SOLO como fallback si no hay snapshot
+                // (anomalía histórica); para corregir costes en bloque existe
+                // POST /analytics/recalculate-cogs, que actualiza el snapshot.
+                const snap = snapshotMap.get(`${row.receta_id}|${fechaStr}`);
                 let costeTotal;
-                if (row.receta_ingredientes) {
+                if (snap) {
+                    costeTotal = snap.costeTotal;
+                } else if (row.receta_ingredientes) {
                     const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones, row.receta_id);
                     const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
                     costeTotal = costePorUnidad * cantidadPonderada;
                 } else {
-                    const snap = snapshotMap.get(`${row.receta_id}|${fechaStr}`);
-                    costeTotal = snap ? snap.costeTotal : 0;
+                    costeTotal = 0;
                 }
                 const beneficio = totalIngresos - costeTotal;
 
