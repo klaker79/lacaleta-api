@@ -16,6 +16,7 @@ const Anthropic = require('@anthropic-ai/sdk').default;
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
+const { condicionGastosOperativosSql } = require('../utils/gastosOperativos');
 const { prorratearGastosFijos } = require('../utils/prorrateo');
 const { personalCostExpr } = require('../utils/personalCost');
 const {
@@ -1231,10 +1232,14 @@ async function runTool(name, pool, restauranteId, args = {}) {
             const cogs_periodo = cogs_food + cogs_beverage;
             // Real schema of gastos_fijos: monto_mensual is already monthly,
             // no frecuencia column, activo boolean (no deleted_at).
+            // OPERATIVOS: excluye impuestos NO operativos (IVA/IGIC/IRPF/Sociedades);
+            // el IAE/IBI/tasas SÍ cuentan. Misma regla que el P&L y el equilibrio
+            // del frontend → el beneficio de Omnes cuadra con el Diario.
             const gastos = (await pool.query(`
                 SELECT COALESCE(SUM(monto_mensual), 0)::numeric(12,2) AS gastos_fijos_mes
                 FROM gastos_fijos
                 WHERE restaurante_id = $1 AND (activo IS NULL OR activo = TRUE)
+                  AND ${condicionGastosOperativosSql()}
             `, [restauranteId])).rows[0];
             const ingresos = parseFloat(ventas.ingresos) || 0;
             const compras_periodo = parseFloat(compras.total_compras) || 0;
