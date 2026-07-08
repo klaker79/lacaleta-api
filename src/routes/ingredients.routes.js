@@ -8,6 +8,7 @@ const { log } = require('../utils/logger');
 const { validatePrecio, validateCantidad, sanitizeString, validateRequired, validateId } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
 const onboardingService = require('../services/onboardingService');
+const { precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera, cpfSeguro } = require('../utils/supplierPricing');
 
 /**
  * Resuelve el precio CANÓNICO (€/unidad-base) de una asociación ingrediente↔proveedor
@@ -922,42 +923,64 @@ module.exports = function (pool) {
             RETURNING *
         `, values);
 
-            // ⚡ SYNC: si esta asociacion es la principal (o lo acaba de ser) y se actualizo
-            // el precio, sincronizar tambien ingredientes.precio para que el lapiz de la ficha
-            // muestre el mismo dato. Solo afecta al ingrediente actual del tenant.
+            // ⚡ PROPAGACIÓN AL INGREDIENTE (Opción A, Migración 017): si esta asociación es
+            // la PRINCIPAL, volcamos su precio —y su formato de compra si lo tiene— al
+            // ingrediente, para que pedidos e inventario usen ese formato igual que si se
+            // hubiera configurado en la pestaña Ingredientes.
             //
-            // 🛡️ GUARD (Migración 017): NO sobrescribir si el precio nuevo se aparta > 70%
-            // del actual del ingrediente. Ese salto brutal casi siempre es un error de captura
-            // (p.ej. teclear el precio de una CAJA como si fuera €/unidad-base al marcar
-            // principal) y reventaría el escandallo de todos los platos con este ingrediente.
-            // El precio del proveedor SÍ se guarda; solo se frena el volcado automático a la
-            // ficha y se avisa al frontend con `precio_sync_omitido` para que muestre un aviso.
+            // INVARIANTE: ingredientes.precio está en €/FORMATO (getIngredientUnitPrice hace
+            // precio/cpf; recalcular hace pmc×cpf). ip.precio es €/unidad-base. Por eso las 3
+            // cosas van ATÓMICAS y coherentes: formato_compra, cantidad_por_formato y
+            // precio = €base × cpf. Nunca se toca el cpf sin reajustar el precio.
+            //
+            // 🛡️ GUARD ±70%: se compara el precio UNITARIO (€/base) nuevo contra el unitario
+            // actual (precio_ficha/cpf) — manzana con manzana. Si el salto es brutal (error de
+            // captura típico), NO se toca el ingrediente (ni precio ni formato) y se avisa con
+            // precio_sync_omitido. Si el precio está FIJADO en la ficha, se respeta (no se toca).
             if (fmt.precio !== undefined && result.rows[0]?.es_proveedor_principal) {
                 try {
-                    const nuevo = parseFloat(result.rows[0].precio);
-                    const curRow = await pool.query(
-                        'SELECT precio FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                    const row = result.rows[0];
+                    const ingRow = await pool.query(
+                        `SELECT precio, cantidad_por_formato, precio_fijado
+                         FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL`,
                         [id, req.restauranteId]
                     );
-                    const actual = parseFloat(curRow.rows[0]?.precio);
-                    const desviaMucho = !isNaN(actual) && actual > 0 &&
-                        Math.abs(nuevo - actual) / actual > 0.70;
+                    const ing = ingRow.rows[0];
+                    if (ing && !ing.precio_fijado) {
+                        const precioBase = parseFloat(row.precio); // €/unidad-base canónico del proveedor
+                        const tieneFormato = row.formato && parseFloat(row.cantidad_por_formato) > 0;
+                        const cpfActual = cpfSeguro(ing.cantidad_por_formato);
+                        const cpfNuevo = tieneFormato ? parseFloat(row.cantidad_por_formato) : cpfActual;
 
-                    if (desviaMucho) {
-                        log('warn', 'Sync precio proveedor principal OMITIDO: desviación > 70%', {
-                            ingrediente_id: id, proveedor_id: supplierId,
-                            precio_actual: actual, precio_nuevo: nuevo,
-                        });
-                        result.rows[0].precio_sync_omitido = true;
-                        result.rows[0].precio_actual_ingrediente = actual;
-                    } else {
-                        await pool.query(
-                            'UPDATE ingredientes SET precio = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
-                            [nuevo, id, req.restauranteId]
-                        );
+                        const unitActual = precioUnitarioIngrediente(ing.precio, ing.cantidad_por_formato);
+                        if (desviacionSupera(precioBase, unitActual)) {
+                            log('warn', 'Propagación proveedor principal OMITIDA: desviación unitaria > 70%', {
+                                ingrediente_id: id, proveedor_id: supplierId,
+                                unit_actual: unitActual, unit_nuevo: precioBase,
+                            });
+                            row.precio_sync_omitido = true;
+                            row.precio_actual_ingrediente = unitActual;
+                        } else {
+                            const precioFicha = precioFichaDesdeBase(precioBase, cpfNuevo);
+                            if (tieneFormato) {
+                                await pool.query(
+                                    `UPDATE ingredientes
+                                     SET precio = $1, formato_compra = $2, cantidad_por_formato = $3
+                                     WHERE id = $4 AND restaurante_id = $5 AND deleted_at IS NULL`,
+                                    [precioFicha, row.formato, cpfNuevo, id, req.restauranteId]
+                                );
+                                row.formato_propagado = true;
+                            } else {
+                                // Sin formato en el proveedor: solo precio, conservando el cpf existente.
+                                await pool.query(
+                                    'UPDATE ingredientes SET precio = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
+                                    [precioFicha, id, req.restauranteId]
+                                );
+                            }
+                        }
                     }
                 } catch (syncErr) {
-                    log('warn', 'Sync precio proveedor principal -> ingrediente fallido', {
+                    log('warn', 'Propagación proveedor principal -> ingrediente fallida', {
                         ingrediente_id: id, error: syncErr.message
                     });
                 }
