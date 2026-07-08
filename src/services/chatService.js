@@ -1260,7 +1260,16 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() + 1
             )).toISOString().slice(0, 10);
             const pr = prorratearGastosFijos(gastos_fijos_mes, desde, hasta, hoyExclusivo);
-            const fc_total = ingresos > 0 ? +(100 * cogs_periodo / ingresos).toFixed(1) : null;
+            // ⚠️ Food cost = COGS / INGRESOS DE ESA MISMA FUENTE. cogs_periodo
+            // sale de ventas_diarias_resumen (buckets food+beverage). El
+            // denominador DEBE ser ing_food + ing_beverage (misma base), NO
+            // `ingresos` (SUM(total) de la tabla `ventas`, que incluye ventas de
+            // 'otros'/recetas borradas/sin receta cuyo coste NO está en el
+            // numerador → food cost falsamente bajo). Bug detectado 2026-07-08:
+            // La Nave 5 daba fc_total 29% con COGS de 352k dividido entre 415k;
+            // el real es 34,2%. `ingresos` se sigue usando tal cual para el P&L.
+            const ingresos_food_bev = ing_food + ing_beverage;
+            const fc_total = ingresos_food_bev > 0 ? +(100 * cogs_periodo / ingresos_food_bev).toFixed(1) : null;
             const fc_food  = ing_food > 0 ? +(100 * cogs_food / ing_food).toFixed(1) : null;
             const fc_bev   = ing_beverage > 0 ? +(100 * cogs_beverage / ing_beverage).toFixed(1) : null;
             const margen_neto = Math.round((ingresos - cogs_periodo - pr.gastos_fijos_periodo - comida_personal - personal_extra_periodo) * 100) / 100;
