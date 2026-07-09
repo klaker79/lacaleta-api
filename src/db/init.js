@@ -631,6 +631,16 @@ async function initializeDatabase(pool) {
     log('info', 'Columnas formato_compra/cantidad_por_formato/rendimiento/alergenos verificadas');
   } catch (e) { log('warn', 'Migración columnas ingredientes', { error: e.message }); }
 
+  // Alérgenos EXTRA por receta (trazas / contaminación cruzada / emplatado):
+  // se SUMAN a los heredados de los ingredientes (nunca los quitan). Nullable,
+  // por defecto []. Ver [[project_alergenos_2026_06_11]] + Opción A 2026-07-09.
+  try {
+    await pool.query(`
+            ALTER TABLE recetas ADD COLUMN IF NOT EXISTS alergenos_extra JSONB DEFAULT '[]';
+        `);
+    log('info', 'Columna recetas.alergenos_extra verificada');
+  } catch (e) { log('warn', 'Migración recetas.alergenos_extra', { error: e.message }); }
+
   // Columna formato_override en compras_pendientes (para selector de formato en revisión de albaranes)
   try {
     await pool.query(`
