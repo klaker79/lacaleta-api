@@ -82,11 +82,13 @@ module.exports = function (pool) {
                 ORDER BY DATE(v.fecha), receta
             `, [req.restauranteId, `${anoActual}-${String(mesActual).padStart(2, '0')}-01`, `${mesActual === 12 ? anoActual + 1 : anoActual}-${String(mesActual === 12 ? 1 : mesActual + 1).padStart(2, '0')}-01`]);
 
-            // Snapshot histórico de coste TOTAL agregado (para fallback de recetas
-            // eliminadas). coste_ingredientes ya incluye factor_variante aplicado
-            // en sales.routes.js (línea 265), así que se usa DIRECTO sin volver a
-            // multiplicar por cantidadPonderada — eso sería doble factor_variante.
-            // Claves: `${receta_id}|${YYYY-MM-DD}` → { costeTotal }.
+            // Snapshot de coste TOTAL agregado de ventas_diarias_resumen — FUENTE
+            // CANÓNICA del coste para TODAS las recetas (vivas y eliminadas): es el
+            // coste del día que se vendió, la misma fuente que /analytics/
+            // pnl-breakdown (auditoría 2026-07-09). coste_ingredientes ya incluye
+            // factor_variante aplicado en sales.routes.js, así que se usa DIRECTO
+            // sin volver a multiplicar por cantidadPonderada — eso sería doble
+            // factor_variante. Claves: `${receta_id}|${YYYY-MM-DD}` → { costeTotal }.
             const snapshotsResult = await pool.query(`
                 SELECT receta_id, fecha::text as fecha, coste_ingredientes
                 FROM ventas_diarias_resumen
@@ -197,19 +199,31 @@ module.exports = function (pool) {
                 const totalIngresos = parseFloat(row.total_ingresos);
 
                 // Coste TOTAL del bucket (día+receta).
-                // - Receta viva: cálculo en vivo, multiplicando por factor_variante
-                //   vía cantidadPonderada (botella vs copa).
-                // - Receta soft-eliminada: snapshot histórico directo de
-                //   ventas_diarias_resumen.coste_ingredientes (ya incluye
-                //   factor_variante aplicado en la inserción).
+                //
+                // ⛔ COSTE CANÓNICO = SNAPSHOT de ventas_diarias_resumen (el coste
+                // DEL DÍA QUE SE VENDIÓ, congelado al vender; ya incluye
+                // factor_variante). Decisión contable de Iker (auditoría
+                // 2026-07-09): el P&L cuenta el coste del día de la venta, NO el
+                // coste a precios de hoy. Es la MISMA fuente que /analytics/
+                // pnl-breakdown → la tabla "Cuenta de Resultados" y las tarjetas
+                // KPI del Diario dan EXACTAMENTE el mismo número (antes el coste
+                // de recetas vivas se recalculaba con los precios medios actuales
+                // y divergía de la tarjeta: 8,64€ en La Nave 5, y la cifra se
+                // movía sola al recibir compras).
+                //
+                // Fallback SOLO si no hay snapshot (ventas antiguas previas a la
+                // existencia de vdr): cálculo en vivo para recetas vivas, 0 para
+                // eliminadas (comportamiento previo).
                 let costeTotal;
-                if (row.receta_ingredientes) {
+                const snap = snapshotMap.get(`${row.receta_id}|${fechaStr}`);
+                if (snap) {
+                    costeTotal = snap.costeTotal;
+                } else if (row.receta_ingredientes) {
                     const costePorUnidad = calcularCosteReceta(row.receta_ingredientes, row.porciones, row.receta_id);
                     const cantidadPonderada = parseFloat(row.cantidad_ponderada) || cantidadVendida;
                     costeTotal = costePorUnidad * cantidadPonderada;
                 } else {
-                    const snap = snapshotMap.get(`${row.receta_id}|${fechaStr}`);
-                    costeTotal = snap ? snap.costeTotal : 0;
+                    costeTotal = 0;
                 }
                 const beneficio = totalIngresos - costeTotal;
 
