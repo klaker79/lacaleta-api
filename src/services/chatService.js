@@ -18,6 +18,7 @@ const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/b
 const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
 const { condicionGastosOperativosSql } = require('../utils/gastosOperativos');
 const { prorratearGastosFijos } = require('../utils/prorrateo');
+const { computeBreakevenBackend } = require('../utils/breakevenCalc');
 const { personalCostExpr } = require('../utils/personalCost');
 const {
     getMenuEngineering,
@@ -305,6 +306,7 @@ AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "me
 - resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
 - resumen_ventas_periodo(periodo) → Total ingresos, nº tickets, ticket medio, top recetas. Pasa periodo (mes/semana/ultimos_7_dias…), no fechas.
 - resumen_pyg(fecha_desde, fecha_hasta) → P&L: ingresos, COGS real (cogs_periodo), food_cost_pct total + split food/beverage, compras periodo (cash-flow, NO food cost), gastos fijos (mes completo + PRORRATEADO al periodo), comida_personal (gasto operativo aparte, NO food cost, ya restado en el beneficio) y margen bruto/neto. Para el beneficio del periodo usa SIEMPRE gastos_fijos_periodo y margen_neto_aprox (ya prorrateados), NUNCA gastos_fijos_mes. Si periodo.parcial=true (mes en curso, periodo.dias_periodo días), DILO al usuario y no extrapoles a importes mensuales sin avisar. Indica siempre el rango de fechas usado. Si mencionas un "coste fijo por día", calcúlalo SIEMPRE como gastos_fijos_mes / días naturales del mes (≈30), NUNCA como gastos_fijos_mes / días transcurridos: la tarifa diaria de junio es 6700/30 = 223 €/día, no 6700/9.
+- punto_equilibrio(dias_servicio?) → PUNTO DE EQUILIBRIO (número de supervivencia): €/día y €/mes a facturar para no perder, platos/mes y platos/día, margen por plato. MISMA fórmula y datos que el bloque de la pestaña Análisis: gastos fijos OPERATIVOS ÷ (1 − food cost GLOBAL de los ÚLTIMOS 90 DÍAS). Úsala SIEMPRE que pregunten por punto de equilibrio, break-even, "cuánto necesito facturar/vender para no perder" o número de supervivencia. Al citar, di SIEMPRE que el food cost es el global (comida+bebida) de los últimos 90 días y sobre cuántos días de servicio va el €/día.
 - resumen_food_cost_recetas → Food cost por receta ordenado de peor a mejor + margen + precio venta.
 - resumen_compras_periodo(periodo) → Total compras + por proveedor. Pasa periodo (mes/semana/ultimos_7_dias…), no fechas.
 - resumen_mermas(periodo) → Pérdidas registradas: total €, por motivo (incl. "Ajuste de inventario" de los recuentos físicos) y top ingredientes. Para "cuánto he perdido", "cuánto sumaron los ajustes de inventario". NO es food cost. Pasa periodo, no fechas.
@@ -465,6 +467,9 @@ FOOD COST: (coste_porcion / precio_venta) × 100
   USA siempre resumen_pyg y lee el campo food_cost_pct (o food_cost_food_pct / food_cost_beverage_pct si te piden split).
   NUNCA calcules food cost del periodo como compras / ingresos — eso es cash-flow de compras, NO food cost.
   El COGS real está precalculado con Jack Miller en ventas_diarias_resumen y resumen_pyg ya lo devuelve listo.
+  ⚠️ ETIQUETA SIEMPRE el food cost que cites: di si es GLOBAL (comida+bebida), SOLO COMIDA o SOLO BEBIDA, y de QUÉ PERIODO.
+  En la app conviven varios correctos a la vez: la tarjeta del Diario muestra SOLO COMIDA del periodo seleccionado; el
+  Punto de Equilibrio muestra el GLOBAL de los últimos 90 días. Si no etiquetas, el cliente cree que la app se contradice.
 
 ⚠️⚠️ DEFINICIÓN DE PERIODOS — DEBE COINCIDIR CON EL DASHBOARD (si no, el cliente
   ve que el chat le contradice y pierde la confianza):
@@ -935,6 +940,17 @@ const TOOLS = [
         }
     },
     {
+        name: 'punto_equilibrio',
+        description: 'PUNTO DE EQUILIBRIO (número de supervivencia) con la MISMA fórmula y datos que el bloque de la pestaña Análisis: gastos fijos OPERATIVOS (sin IVA/IGIC/IRPF/Sociedades) ÷ (1 − food cost GLOBAL comida+bebida de los ÚLTIMOS 90 DÍAS). Devuelve €/día y €/mes a facturar para no perder dinero, platos/mes y platos/día, margen por plato, ticket medio real y la ventana usada. Úsala SIEMPRE que pregunten por punto de equilibrio, break-even, "cuánto necesito facturar/vender para no perder" o número de supervivencia.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                dias_servicio: { type: 'integer', description: 'Días de servicio al mes (default 26, el mismo que usa la pestaña Análisis). Solo cámbialo si el usuario lo indica.' }
+            },
+            required: []
+        }
+    },
+    {
         name: 'resumen_food_cost_recetas',
         description: 'Food cost calculado por cada receta (con precio_unitario_real y rendimiento) ordenado de peor a mejor. Usa esto para preguntas de "qué recetas tienen peor food cost", "recetas fuera de rango", etc. Devuelve también margen y precio venta.',
         input_schema: { type: 'object', properties: {}, required: [] }
@@ -1310,6 +1326,71 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 margen_neto_aprox: margen_neto,
                 num_tickets: parseInt(ventas.num_tickets) || 0,
                 nota: `cogs_periodo es el COGS real (Jack Miller, fuente ventas_diarias_resumen). USA food_cost_pct (o split food/beverage) para food cost; compras_periodo es solo cash-flow de albaranes, NO food cost. comida_personal es el gasto en comida del equipo: es un GASTO operativo aparte que SÍ resta al beneficio neto (ya está restado en margen_neto_aprox), pero NO es food cost ni COGS ni se incluye en compras_periodo. IMPORTANTE: gastos_fijos_periodo ya está PRORRATEADO a los ${pr.dias_periodo} días reales del periodo (gastos_fijos_mes es la referencia de un mes completo). personal_extra_periodo es el pago a EXTRAS por horas del periodo (coste operativo real con fecha, NO se prorratea); YA está restado en margen_neto_aprox, igual que comida_personal. USA gastos_fijos_periodo, comida_personal, personal_extra_periodo y margen_neto_aprox para el beneficio del periodo, NUNCA gastos_fijos_mes. ${pr.parcial ? `El periodo es PARCIAL (${pr.dias_periodo} días, hasta ${pr.hasta_efectivo}): indícalo claramente al usuario y NO extrapoles a "necesitas facturar X al mes" sin avisar de que el mes está incompleto.` : ''} Indica SIEMPRE el rango de fechas exacto en tu respuesta.`
+            };
+        }
+
+        case 'punto_equilibrio': {
+            // MISMOS datos que el bloque de Análisis del frontend (auditoría 2026-07-09):
+            //  - gastos fijos OPERATIVOS (condicionGastosOperativosSql, igual que resumen_pyg)
+            //  - food cost GLOBAL (comida+bebida, excluye 'otros') de los ÚLTIMOS 90 DÍAS,
+            //    mismo bucketing/join que /analytics/pnl-breakdown, redondeado a 1 decimal
+            //    como getFoodCostCanonical del frontend
+            //  - ticket medio real del periodo = ingresos / unidades (food+bev)
+            // La fórmula vive en utils/breakevenCalc (pura, testeada).
+            const hoy = new Date();
+            const isoUTC = (d) => d.toISOString().slice(0, 10);
+            const desde90 = isoUTC(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() - 90)));
+            const hasta90 = isoUTC(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() + 1)));
+            const gastosBE = (await pool.query(`
+                SELECT COALESCE(SUM(monto_mensual), 0)::numeric(12,2) AS gastos_operativos
+                FROM gastos_fijos
+                WHERE restaurante_id = $1 AND (activo IS NULL OR activo = TRUE)
+                  AND ${condicionGastosOperativosSql()}
+            `, [restauranteId])).rows[0];
+            const fcRow = (await pool.query(`
+                SELECT COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(14,2) AS cogs,
+                       COALESCE(SUM(vdr.total_ingresos), 0)::numeric(14,2) AS ingresos
+                FROM ventas_diarias_resumen vdr
+                LEFT JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
+                WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
+                  AND LOWER(TRIM(COALESCE(r.categoria, ''))) NOT IN (${otherCategoriesSqlList()})
+            `, [restauranteId, desde90, hasta90])).rows[0];
+            const cogsBE = parseFloat(fcRow.cogs) || 0;
+            const ingBE = parseFloat(fcRow.ingresos) || 0;
+            // 1 decimal, EXACTAMENTE como getFoodCostCanonical del frontend.
+            const fcGlobal = ingBE > 0 ? Math.round((cogsBE / ingBE) * 1000) / 10 : null;
+            // Ticket medio PONDERADO del MENÚ, calculado EXACTAMENTE como el
+            // bloque del frontend (breakeven-calc.js): Σ precio_venta×unidades /
+            // Σ unidades sobre los PLATOS del menu-engineering con ventas en la
+            // ventana (mismo servicio que /analysis/menu-engineering). NO usar el
+            // ticket por ítem de vdr (incluye cafés/panes → ~7€ y los platos/mes
+            // saldrían el doble que en la pestaña Análisis).
+            const platosME = await getMenuEngineering(pool, restauranteId, { desde: desde90, hasta: hasta90 });
+            const conVentas = (Array.isArray(platosME) ? platosME : [])
+                .filter(p => (parseFloat(p.popularidad) || 0) > 0);
+            const unidadesME = conVentas.reduce((s, p) => s + (parseFloat(p.popularidad) || 0), 0);
+            const sumTicketME = conVentas.reduce(
+                (s, p) => s + (parseFloat(p.precio_venta) || 0) * (parseFloat(p.popularidad) || 0), 0
+            );
+            const ticketME = unidadesME > 0 ? sumTicketME / unidadesME : null;
+            const be = computeBreakevenBackend({
+                gastosOperativosMes: parseFloat(gastosBE.gastos_operativos) || 0,
+                foodCostPct: fcGlobal,
+                ticketMedio: ticketME,
+                diasServicio: args?.dias_servicio
+            });
+            if (!be) {
+                return {
+                    error: 'datos_insuficientes',
+                    detalle: 'Faltan gastos fijos operativos, ventas de los últimos 90 días o ticket medio válido para calcular el punto de equilibrio.',
+                    gastos_operativos_mes: parseFloat(gastosBE.gastos_operativos) || 0,
+                    food_cost_pct_90d: fcGlobal
+                };
+            }
+            return {
+                ...be,
+                ventana: { desde: desde90, hasta: hasta90, dias: 90 },
+                nota: `MISMA fórmula y MISMAS fuentes que el bloque "Punto de Equilibrio" de la pestaña Análisis: gastos fijos OPERATIVOS (sin IVA/IGIC/IRPF/Sociedades) ÷ (1 − food cost GLOBAL comida+bebida de los últimos 90 días, ${be.food_cost_pct}%), con el ticket medio ponderado del menú (${be.ticket_medio}€, del mismo menu-engineering que la pestaña) → los números deben coincidir con lo que el cliente ve en Análisis. Los €/día van sobre ${be.dias_servicio} días de servicio al mes. Cita SIEMPRE el periodo (últimos 90 días) y que el food cost es el global.`
             };
         }
 
