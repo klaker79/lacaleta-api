@@ -1337,10 +1337,17 @@ async function runTool(name, pool, restauranteId, args = {}) {
             //    como getFoodCostCanonical del frontend
             //  - ticket medio real del periodo = ingresos / unidades (food+bev)
             // La fórmula vive en utils/breakevenCalc (pura, testeada).
+            // Fechas LOCALES (como resolverRango y como ventanaMovil() del
+            // frontend), NO UTC: con UTC, de madrugada la ventana quedaba
+            // desplazada un día y Omnes daba ±1 plato respecto a la pestaña
+            // Análisis (detectado por Iker el 2026-07-09 a las 2:43: 3.803 vs
+            // 3.802 platos).
             const hoy = new Date();
-            const isoUTC = (d) => d.toISOString().slice(0, 10);
-            const desde90 = isoUTC(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() - 90)));
-            const hasta90 = isoUTC(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() + 1)));
+            const pad2BE = (n) => String(n).padStart(2, '0');
+            const isoLocal = (d) => `${d.getFullYear()}-${pad2BE(d.getMonth() + 1)}-${pad2BE(d.getDate())}`;
+            const addDiasBE = (d, n) => { const c = new Date(d); c.setDate(c.getDate() + n); return c; };
+            const desde90 = isoLocal(addDiasBE(hoy, -90));
+            const hasta90 = isoLocal(addDiasBE(hoy, 1));
             const gastosBE = (await pool.query(`
                 SELECT COALESCE(SUM(monto_mensual), 0)::numeric(12,2) AS gastos_operativos
                 FROM gastos_fijos
