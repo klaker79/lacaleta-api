@@ -10,6 +10,64 @@ const { logChange } = require('../utils/auditLog');
 const onboardingService = require('../services/onboardingService');
 
 /**
+ * Resuelve el precio CANÓNICO (€/unidad-base) de una asociación ingrediente↔proveedor
+ * y sus campos de formato opcionales, a partir del body de POST/PUT.
+ *
+ * Reglas (NO-DESTRUCTIVO):
+ *  - Si llega un formato COMPLETO (formato + cantidad_por_formato + precio_formato),
+ *    se DERIVA precio = precio_formato / cantidad_por_formato y se memorizan los 3
+ *    campos. `precio` sigue siendo €/unidad-base, igual que siempre.
+ *  - Si NO llega formato, se usa `precio` tal cual (comportamiento histórico) y los
+ *    3 campos de formato se ponen a NULL.
+ *  - `requerirPrecio`: en POST el precio es obligatorio (o el formato que lo deriva);
+ *    en PUT puede omitirse (solo se marca principal, p.ej.).
+ *
+ * @returns {{precio:number|undefined, formato:string|null, cantidad:number|null,
+ *            precioFormato:number|null, error?:string}}
+ */
+function resolverFormatoProveedor(body, requerirPrecio = true) {
+    const { precio, formato, cantidad_por_formato, precio_formato } = body || {};
+
+    const tieneFormato =
+        formato !== undefined && formato !== null && String(formato).trim() !== '' &&
+        cantidad_por_formato !== undefined && cantidad_por_formato !== null && cantidad_por_formato !== '' &&
+        precio_formato !== undefined && precio_formato !== null && precio_formato !== '';
+
+    if (tieneFormato) {
+        const cant = parseFloat(cantidad_por_formato);
+        const pf = parseFloat(precio_formato);
+        if (isNaN(cant) || cant <= 0) {
+            return { error: 'cantidad_por_formato debe ser un número > 0' };
+        }
+        if (isNaN(pf) || pf < 0) {
+            return { error: 'precio_formato debe ser un número válido >= 0' };
+        }
+        // Precio canónico €/unidad-base derivado, redondeado a 2 decimales (misma
+        // escala que la columna `precio` DECIMAL(10,2)).
+        const derivado = Math.round((pf / cant) * 100) / 100;
+        return {
+            precio: derivado,
+            formato: String(formato).trim().slice(0, 100),
+            cantidad: cant,
+            precioFormato: pf,
+        };
+    }
+
+    // Sin formato: precio directo (histórico). Los campos de formato se limpian.
+    if (precio === undefined || precio === null || precio === '') {
+        if (requerirPrecio) {
+            return { error: 'precio es requerido (o un formato de compra que lo derive)' };
+        }
+        return { precio: undefined, formato: null, cantidad: null, precioFormato: null };
+    }
+    const precioNum = parseFloat(precio);
+    if (isNaN(precioNum) || precioNum < 0) {
+        return { error: 'Precio debe ser un número válido >= 0' };
+    }
+    return { precio: precioNum, formato: null, cantidad: null, precioFormato: null };
+}
+
+/**
  * @param {Pool} pool - PostgreSQL connection pool
  */
 module.exports = function (pool) {
@@ -640,6 +698,7 @@ module.exports = function (pool) {
             //    soft-deleted (auditoria A1-A5).
             const result = await pool.query(`
             SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
+                   ip.formato, ip.cantidad_por_formato, ip.precio_formato,
                    ip.es_proveedor_principal, ip.created_at,
                    p.nombre as proveedor_nombre
             FROM ingredientes_proveedores ip
@@ -675,6 +734,7 @@ module.exports = function (pool) {
 
             const result = await pool.query(`
             SELECT ip.id, ip.ingrediente_id, ip.proveedor_id, ip.precio,
+                   ip.formato, ip.cantidad_por_formato, ip.precio_formato,
                    ip.es_proveedor_principal, ip.created_at,
                    p.nombre as proveedor_nombre, p.contacto, p.telefono, p.email
             FROM ingredientes_proveedores ip
@@ -695,16 +755,19 @@ module.exports = function (pool) {
     router.post('/ingredients/:id/suppliers', authMiddleware, async (req, res) => {
         try {
             const { id } = req.params;
-            const { proveedor_id, precio, es_proveedor_principal } = req.body;
+            const { proveedor_id, es_proveedor_principal } = req.body;
 
-            if (!proveedor_id || precio === undefined) {
-                return res.status(400).json({ error: 'proveedor_id y precio son requeridos' });
+            if (!proveedor_id) {
+                return res.status(400).json({ error: 'proveedor_id es requerido' });
             }
 
-            const precioNum = parseFloat(precio);
-            if (isNaN(precioNum) || precioNum < 0) {
-                return res.status(400).json({ error: 'Precio debe ser un número válido >= 0' });
+            // Resolver precio canónico (€/unidad-base) + formato opcional. Si viene
+            // un formato completo, el precio se DERIVA de él; si no, se usa el precio directo.
+            const fmt = resolverFormatoProveedor(req.body, true);
+            if (fmt.error) {
+                return res.status(400).json({ error: fmt.error });
             }
+            const precioNum = fmt.precio;
 
             // Verificar ingrediente
             const checkIng = await pool.query(
@@ -747,12 +810,14 @@ module.exports = function (pool) {
 
             // UPSERT - insertar o actualizar si ya existe
             const result = await pool.query(`
-            INSERT INTO ingredientes_proveedores (ingrediente_id, proveedor_id, precio, es_proveedor_principal)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO ingredientes_proveedores
+                (ingrediente_id, proveedor_id, precio, es_proveedor_principal, formato, cantidad_por_formato, precio_formato)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (ingrediente_id, proveedor_id)
-            DO UPDATE SET precio = $3, es_proveedor_principal = $4
+            DO UPDATE SET precio = $3, es_proveedor_principal = $4,
+                          formato = $5, cantidad_por_formato = $6, precio_formato = $7
             RETURNING *
-        `, [id, proveedor_id, precioNum, es_proveedor_principal || false]);
+        `, [id, proveedor_id, precioNum, es_proveedor_principal || false, fmt.formato, fmt.cantidad, fmt.precioFormato]);
 
             // ⚡ SYNC: Actualizar columna ingredientes del proveedor desde la tabla relacional
             await pool.query(`
@@ -774,7 +839,14 @@ module.exports = function (pool) {
     router.put('/ingredients/:id/suppliers/:supplierId', authMiddleware, async (req, res) => {
         try {
             const { id, supplierId } = req.params;
-            const { precio, es_proveedor_principal } = req.body;
+            const { es_proveedor_principal } = req.body;
+
+            // Resolver precio canónico + formato opcional. En PUT el precio NO es
+            // obligatorio (se puede llamar solo para marcar principal).
+            const fmt = resolverFormatoProveedor(req.body, false);
+            if (fmt.error) {
+                return res.status(400).json({ error: fmt.error });
+            }
 
             // Verificar que la asociación existe y que TANTO ingrediente COMO proveedor
             // pertenecen al tenant actual. Sin el JOIN con proveedores, un token de
@@ -816,13 +888,21 @@ module.exports = function (pool) {
             const values = [];
             let paramCount = 1;
 
-            if (precio !== undefined) {
-                const precioNum = parseFloat(precio);
-                if (isNaN(precioNum) || precioNum < 0) {
-                    return res.status(400).json({ error: 'Precio debe ser un número válido >= 0' });
-                }
+            if (fmt.precio !== undefined) {
                 updates.push(`precio = $${paramCount++}`);
-                values.push(precioNum);
+                values.push(fmt.precio);
+            }
+
+            // Solo tocar las columnas de formato si la petición trae un formato completo.
+            // Así "marcar principal" (que reenvía el precio actual SIN formato) no borra
+            // la memoria de formato existente de la fila.
+            if (fmt.formato !== null) {
+                updates.push(`formato = $${paramCount++}`);
+                values.push(fmt.formato);
+                updates.push(`cantidad_por_formato = $${paramCount++}`);
+                values.push(fmt.cantidad);
+                updates.push(`precio_formato = $${paramCount++}`);
+                values.push(fmt.precioFormato);
             }
 
             if (es_proveedor_principal !== undefined) {
@@ -845,12 +925,37 @@ module.exports = function (pool) {
             // ⚡ SYNC: si esta asociacion es la principal (o lo acaba de ser) y se actualizo
             // el precio, sincronizar tambien ingredientes.precio para que el lapiz de la ficha
             // muestre el mismo dato. Solo afecta al ingrediente actual del tenant.
-            if (precio !== undefined && result.rows[0]?.es_proveedor_principal) {
+            //
+            // 🛡️ GUARD (Migración 017): NO sobrescribir si el precio nuevo se aparta > 70%
+            // del actual del ingrediente. Ese salto brutal casi siempre es un error de captura
+            // (p.ej. teclear el precio de una CAJA como si fuera €/unidad-base al marcar
+            // principal) y reventaría el escandallo de todos los platos con este ingrediente.
+            // El precio del proveedor SÍ se guarda; solo se frena el volcado automático a la
+            // ficha y se avisa al frontend con `precio_sync_omitido` para que muestre un aviso.
+            if (fmt.precio !== undefined && result.rows[0]?.es_proveedor_principal) {
                 try {
-                    await pool.query(
-                        'UPDATE ingredientes SET precio = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
-                        [parseFloat(precio), id, req.restauranteId]
+                    const nuevo = parseFloat(result.rows[0].precio);
+                    const curRow = await pool.query(
+                        'SELECT precio FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                        [id, req.restauranteId]
                     );
+                    const actual = parseFloat(curRow.rows[0]?.precio);
+                    const desviaMucho = !isNaN(actual) && actual > 0 &&
+                        Math.abs(nuevo - actual) / actual > 0.70;
+
+                    if (desviaMucho) {
+                        log('warn', 'Sync precio proveedor principal OMITIDO: desviación > 70%', {
+                            ingrediente_id: id, proveedor_id: supplierId,
+                            precio_actual: actual, precio_nuevo: nuevo,
+                        });
+                        result.rows[0].precio_sync_omitido = true;
+                        result.rows[0].precio_actual_ingrediente = actual;
+                    } else {
+                        await pool.query(
+                            'UPDATE ingredientes SET precio = $1 WHERE id = $2 AND restaurante_id = $3 AND deleted_at IS NULL',
+                            [nuevo, id, req.restauranteId]
+                        );
+                    }
                 } catch (syncErr) {
                     log('warn', 'Sync precio proveedor principal -> ingrediente fallido', {
                         ingrediente_id: id, error: syncErr.message

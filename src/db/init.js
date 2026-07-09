@@ -441,6 +441,35 @@ async function initializeDatabase(pool) {
     log('info', 'Migración 016 pedidos.bonificacion completada');
   } catch (e) { log('warn', 'Migración 016 pedidos.bonificacion', { error: e.message }); }
 
+  // Migración 017 (2026-07-08): FORMATO DE COMPRA por proveedor en la pivote
+  // ingredientes_proveedores. Hasta ahora `precio` era el ÚNICO número por proveedor
+  // y se asumía SIEMPRE en la unidad base del ingrediente. Cuando dos proveedores
+  // venden el MISMO ingrediente en formatos distintos (p.ej. uno por docena y otro
+  // por caja), no había forma de representarlo y el comparador "mejor precio"
+  // mezclaba peras con manzanas, y "marcar principal" podía sincronizar un precio
+  // de caja como si fuera €/unidad-base.
+  //
+  // DISEÑO NO-DESTRUCTIVO:
+  //  - Columnas OPCIONALES (DEFAULT NULL). Las filas existentes NO cambian: siguen
+  //    interpretando `precio` como €/unidad-base, exactamente como hoy.
+  //  - `precio` SIGUE SIENDO EL CANÓNICO €/unidad-base. Todo lo que lo lee o escribe
+  //    (IngredientService, COGS mensual, sync a ingredientes.precio, análisis del
+  //    modal, updatePrincipalSupplierPrice tras compra) NO cambia de semántica.
+  //  - Cuando se informa un formato, el backend DERIVA precio = precio_formato /
+  //    cantidad_por_formato y lo guarda en `precio`. Los tres campos nuevos solo
+  //    memorizan "cómo lo compro" para mostrarlo y reeditarlo.
+  try {
+    await pool.query(`
+            ALTER TABLE ingredientes_proveedores
+                ADD COLUMN IF NOT EXISTS formato VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(12,4)
+                    CHECK (cantidad_por_formato IS NULL OR cantidad_por_formato > 0),
+                ADD COLUMN IF NOT EXISTS precio_formato NUMERIC(12,2)
+                    CHECK (precio_formato IS NULL OR precio_formato >= 0);
+        `);
+    log('info', 'Migración 017 ingredientes_proveedores formato de compra completada');
+  } catch (e) { log('warn', 'Migración 017 ingredientes_proveedores.formato', { error: e.message }); }
+
   // Añadir columnas para verificación de email
   try {
     await pool.query(`
