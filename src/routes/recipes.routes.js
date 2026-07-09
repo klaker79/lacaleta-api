@@ -7,6 +7,7 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { logChange } = require('../utils/auditLog');
 const { sanitizeString, validatePrecio, validateNumber, validateId } = require('../utils/validators');
+const { sanitizeAlergenos } = require('../utils/alergenos');
 const onboardingService = require('../services/onboardingService');
 
 /**
@@ -237,7 +238,7 @@ module.exports = function (pool) {
 
     router.post('/recipes', authMiddleware, async (req, res) => {
         try {
-            const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
+            const { nombre, categoria, precio_venta, porciones, ingredientes, codigo, alergenos_extra } = req.body;
 
             if (!nombre || !nombre.trim()) {
                 return res.status(400).json({ error: 'El nombre de la receta es requerido' });
@@ -249,9 +250,12 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: vIngs.error, details: vIngs.details });
             }
 
+            // Alérgenos EXTRA del plato (trazas/contaminación): solo códigos UE válidos.
+            const alergenosExtra = sanitizeAlergenos(alergenos_extra);
+
             const result = await pool.query(
-                'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, codigo, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-                [sanitizeString(nombre), sanitizeString(categoria) || 'principal', validatePrecio(precio_venta), validateNumber(porciones, 1, 1, 1000), JSON.stringify(ingredientes || []), sanitizeString(codigo) || null, req.restauranteId]
+                'INSERT INTO recetas (nombre, categoria, precio_venta, porciones, ingredientes, codigo, alergenos_extra, restaurante_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+                [sanitizeString(nombre), sanitizeString(categoria) || 'principal', validatePrecio(precio_venta), validateNumber(porciones, 1, 1, 1000), JSON.stringify(ingredientes || []), sanitizeString(codigo) || null, JSON.stringify(alergenosExtra), req.restauranteId]
             );
             onboardingService.markStep(pool, req.restauranteId, 'recetas');
             res.status(201).json(result.rows[0]);
@@ -266,7 +270,7 @@ module.exports = function (pool) {
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
             const id = idCheck.value;
-            const { nombre, categoria, precio_venta, porciones, ingredientes, codigo } = req.body;
+            const { nombre, categoria, precio_venta, porciones, ingredientes, codigo, alergenos_extra } = req.body;
 
             // 🔒 Validación: cada ingrediente/subreceta debe existir y ser del mismo tenant
             const vIngs = await validarIngredientesReceta(ingredientes, req.restauranteId);
@@ -280,10 +284,16 @@ module.exports = function (pool) {
                 [id, req.restauranteId]
             );
 
+            // Alérgenos EXTRA: si el cliente lo manda, se actualiza (saneado); si no
+            // viene en el body, se conserva el existente (no se pisa con []).
+            const alergenosExtra = (alergenos_extra !== undefined)
+                ? sanitizeAlergenos(alergenos_extra)
+                : sanitizeAlergenos(before.rows[0]?.alergenos_extra);
+
             // 🔒 deleted_at IS NULL: no revivir recetas borradas via PUT
             const result = await pool.query(
-                'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6 WHERE id=$7 AND restaurante_id=$8 AND deleted_at IS NULL RETURNING *',
-                [sanitizeString(nombre), sanitizeString(categoria), validatePrecio(precio_venta), validateNumber(porciones, 1, 1, 1000), JSON.stringify(ingredientes || []), sanitizeString(codigo) || null, id, req.restauranteId]
+                'UPDATE recetas SET nombre=$1, categoria=$2, precio_venta=$3, porciones=$4, ingredientes=$5, codigo=$6, alergenos_extra=$7 WHERE id=$8 AND restaurante_id=$9 AND deleted_at IS NULL RETURNING *',
+                [sanitizeString(nombre), sanitizeString(categoria), validatePrecio(precio_venta), validateNumber(porciones, 1, 1, 1000), JSON.stringify(ingredientes || []), sanitizeString(codigo) || null, JSON.stringify(alergenosExtra), id, req.restauranteId]
             );
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Receta no encontrada' });
