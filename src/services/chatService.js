@@ -1206,6 +1206,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
             // (suministros/preparaciones base). Mantenemos contrato externo del chat
             // exponiendo food + beverage; el bucket 'otros' se excluye de food cost
             // como en el dashboard (no son ventas a cliente final).
+            // LEFT JOIN + deleted_at IS NULL = EXACTAMENTE el mismo join que
+            // /analytics/pnl-breakdown (analytics.routes.js): una receta borrada
+            // cae al bucket 'food' (categoria NULL) en AMBOS. Antes era INNER JOIN
+            // sin filtro → una bebida borrada contaba como beverage aquí y como
+            // food en el dashboard, y el split fc_food/fc_bev no cuadraba
+            // (auditoría 2026-07-09).
             const beverageList = beverageCategoriesSqlList();
             const otherList = otherCategoriesSqlList();
             const cogsSplit = (await pool.query(`
@@ -1218,7 +1224,7 @@ async function runTool(name, pool, restauranteId, args = {}) {
                   COALESCE(SUM(vdr.coste_ingredientes), 0)::numeric(12,2) AS cogs,
                   COALESCE(SUM(vdr.total_ingresos),   0)::numeric(12,2) AS ingresos_cat
                 FROM ventas_diarias_resumen vdr
-                JOIN recetas r ON r.id = vdr.receta_id
+                LEFT JOIN recetas r ON r.id = vdr.receta_id AND r.deleted_at IS NULL
                 WHERE vdr.restaurante_id = $1 AND vdr.fecha >= $2 AND vdr.fecha < $3
                 GROUP BY 1
             `, [restauranteId, desde, hasta])).rows;
