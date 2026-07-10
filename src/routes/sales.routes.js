@@ -9,6 +9,11 @@ const { log } = require('../utils/logger');
 const { validateCantidad, validateId } = require('../utils/validators');
 const { expandRecipeToBase, loadYieldConfig, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
 const { logChange } = require('../utils/auditLog');
+const { agregarDeduccionesOrdenadas, esDeadlock } = require('../utils/stockDeduction');
+
+// Reintentos ante deadlock/serialization_failure (errores transitorios; la transacción
+// hizo rollback completo, así que reintentar es seguro).
+const MAX_INTENTOS_VENTA = 3;
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -82,6 +87,11 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'Cantidad debe ser un número positivo' });
             }
 
+            // 🔁 Reintento ante deadlock: si Postgres corta por "deadlock detected" (alta
+            // concurrencia de ventas), se reejecuta la transacción entera. El rollback es
+            // total, así que reintentar es seguro y no duplica nada.
+            for (let intento = 1; intento <= MAX_INTENTOS_VENTA; intento++) {
+              try {
             await client.query('BEGIN');
 
             const recetaResult = await client.query('SELECT * FROM recetas WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL', [recetaId, req.restauranteId]);
@@ -199,8 +209,12 @@ module.exports = function (pool) {
             const yieldCfg = await loadYieldConfig(client, req.restauranteId);
             const baseIngs = await expandRecipeToBase(receta, client, req.restauranteId, yieldCfg);
             const stockDeductions = []; // ⚡ FIX BUG-02: Rastrear descuentos reales
-            for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngs) {
-                if (!ingId) continue;
+            // 🔒 ANTI-DEADLOCK (2026-07-10): bloquear/descontar SIEMPRE en orden de id
+            // ascendente y con duplicados agregados. Antes se bloqueaba en orden de receta,
+            // y dos ventas concurrentes con ingredientes compartidos entraban en abrazo
+            // mortal ("deadlock detected"). Con orden global fijo el ciclo es imposible.
+            const deducciones = agregarDeduccionesOrdenadas(baseIngs, cantidadValidada * factorVariante);
+            for (const { ingredienteId: ingId, cantidad: cantidadADescontar } of deducciones) {
                 const lockResult = await client.query(
                     'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                     [ingId, req.restauranteId]
@@ -210,7 +224,6 @@ module.exports = function (pool) {
                     continue;
                 }
                 const stockAntes = parseFloat(lockResult.rows[0].stock_actual) || 0;
-                const cantidadADescontar = cantidadPorPorcion * cantidadValidada * factorVariante;
                 const updateResult = await client.query(
                     'UPDATE ingredientes SET stock_actual = GREATEST(0, stock_actual - $1), ultima_actualizacion_stock = NOW() WHERE id = $2 AND restaurante_id = $3 RETURNING stock_actual',
                     [cantidadADescontar, ingId, req.restauranteId]
@@ -297,8 +310,17 @@ module.exports = function (pool) {
             });
 
             res.status(201).json(ventaResult.rows[0]);
+            return;
+              } catch (errTxn) {
+                await client.query('ROLLBACK');
+                if (esDeadlock(errTxn) && intento < MAX_INTENTOS_VENTA) {
+                    log('warn', 'Deadlock registrando venta — reintentando', { intento, error: errTxn.message });
+                    continue;
+                }
+                throw errTxn;
+              }
+            }
         } catch (err) {
-            await client.query('ROLLBACK');
             log('error', 'Error registrando venta', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         } finally {
@@ -777,11 +799,12 @@ REGLAS:
                 );
 
                 // 🧪 FIX subrecetas: expandir a ingredientes BASE antes de descontar stock
+                // 🔒 ANTI-DEADLOCK: mismo orden de lock (id asc, duplicados agregados) que el
+                // POST /sales single, para no cruzarse en abrazo mortal entre transacciones.
                 const bulkDeductions = [];
                 const baseIngsBulk = await expandRecipeToBase(receta, client, req.restauranteId, yieldCfgBulk);
-                for (const { ingredienteId: ingId, cantidadPorPorcion } of baseIngsBulk) {
-                    const cantidadADescontar = cantidadPorPorcion * cantidad * factorAplicado;
-                    if (!(cantidadADescontar > 0) || !ingId) continue;
+                const deduccionesBulk = agregarDeduccionesOrdenadas(baseIngsBulk, cantidad * factorAplicado);
+                for (const { ingredienteId: ingId, cantidad: cantidadADescontar } of deduccionesBulk) {
                     const lockRes = await client.query(
                         'SELECT id, stock_actual FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL FOR UPDATE',
                         [ingId, req.restauranteId]
