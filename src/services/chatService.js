@@ -13,6 +13,7 @@
  */
 
 const Anthropic = require('@anthropic-ai/sdk').default;
+const grounding = require('./omnesGrounding');
 const { log } = require('../utils/logger');
 const { getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { beverageCategoriesSqlList, otherCategoriesSqlList } = require('../utils/categoriaClassifier');
@@ -296,8 +297,8 @@ PERSONALIDAD Y TONO (aplícalo SIEMPRE):
 LISTAS / DETALLE (para análisis por ítem concreto):
 - obtener_ingredientes → Ingredientes con precios reales (precio_unitario_real, valor_stock, activo)
 - obtener_recetas → Recetas Y VINOS con precio venta e ingredientes
-- obtener_ventas → SOLO últimas 300 ventas. NO uses para totales del mes.
-- obtener_pedidos → SOLO últimos 300 pedidos. NO uses para totales del mes.
+- obtener_ventas → devuelve { muestra_de_lineas, ventas:[…] } — MUESTRA de las últimas 300 líneas. NO cuentes/sumes para totales: usa resumen_ventas_periodo/resumen_pyg.
+- obtener_pedidos → devuelve { muestra_de_lineas, pedidos:[…] } — MUESTRA de las últimas 300 líneas (1 fila por ingrediente). Para nº de pedidos o totales usa resumen_compras_periodo (num_pedidos + total exactos).
 - obtener_gastos → Gastos fijos mensuales
 - obtener_proveedores → Lista proveedores
 - obtener_horarios → Turnos de trabajo
@@ -431,6 +432,17 @@ menciónalas al usuario por si quería otro ítem.
 
 🚨 PROHIBIDO sumar totales manualmente sobre obtener_ventas u obtener_pedidos.
   Siempre usa la tool de resumen_*_periodo correspondiente.
+
+🔒 REGLA DE FUNDAMENTACIÓN (INQUEBRANTABLE): CADA cifra dura que escribas —
+  conteos (nº de pedidos/ventas/tickets/platos/proveedores…), totales de dinero,
+  porcentajes, food cost, medias— DEBE proceder LITERALMENTE del resultado de una
+  tool ejecutada en ESTE turno. Prohibido estimarla, recordarla de mensajes
+  anteriores o contarla/sumarla a mano sobre listas (obtener_*). Para conteos y
+  totales de un periodo usa SIEMPRE resumen_*_periodo / resumen_pyg /
+  resumen_inventario / diagnostico_*. Si NINGUNA tool te da la cifra exacta,
+  dilo explícitamente ("no tengo el dato exacto") — NUNCA la inventes. Una
+  respuesta con un número inventado o estimado es un fallo grave. Si dudas de un
+  número, vuelve a consultarlo con la tool antes de responder.
 
 ═══════════════════════════════════════════════════════════
 📐 FÓRMULAS (CRÍTICO - USAR CORRECTAMENTE)
@@ -1089,8 +1101,8 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ORDER BY r.nombre
             `, [restauranteId])).rows;
 
-        case 'obtener_ventas':
-            return (await pool.query(`
+        case 'obtener_ventas': {
+            const rows = (await pool.query(`
                 SELECT v.id, v.receta_id, r.nombre as receta_nombre, r.categoria,
                        v.cantidad, v.precio_unitario, v.total, v.fecha
                 FROM ventas v
@@ -1099,6 +1111,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ORDER BY v.fecha DESC
                 LIMIT 300
             `, [restauranteId])).rows;
+            return {
+                _aviso: 'MUESTRA de las últimas 300 líneas de venta, NO todas. NO cuentes ni sumes estas filas para totales/conteos: usa resumen_ventas_periodo o resumen_pyg.',
+                muestra_de_lineas: rows.length,
+                ventas: rows
+            };
+        }
 
         case 'obtener_gastos':
             // Schema real: concepto (VARCHAR), monto_mensual (NUMERIC, ya mensualizado),
@@ -1118,12 +1136,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ORDER BY p.nombre
             `, [restauranteId])).rows;
 
-        case 'obtener_pedidos':
+        case 'obtener_pedidos': {
             // precioReal / precioUnitario are UNIT prices in the JSONB.
             // subtotal = (cantidadRecibida || cantidad) × unit price; 'no-entregado' → 0.
             // 🍽️ Excluye las líneas de comida personal (no son gasto del restaurante;
             // van a su pestaña). El total del pedido se muestra ya descontado.
-            return (await pool.query(`
+            const rows = (await pool.query(`
                 SELECT p.id, p.fecha, p.estado,
                        (p.total - ${personalCostExpr('p')})::numeric(12,2) AS total,
                        pr.nombre as proveedor_nombre,
@@ -1147,6 +1165,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 ORDER BY p.fecha DESC
                 LIMIT 300
             `, [restauranteId])).rows;
+            return {
+                _aviso: 'MUESTRA de las últimas 300 líneas de pedido (una fila por ingrediente), NO todos los pedidos. Para "cuántos pedidos/compras" o totales usa resumen_compras_periodo (trae num_pedidos y total exactos). NUNCA cuentes estas filas.',
+                muestra_de_lineas: rows.length,
+                pedidos: rows
+            };
+        }
 
         case 'obtener_resumen_ventas':
             return (await pool.query(`
@@ -2118,6 +2142,8 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
 
     let usageAggregate = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
     let finalText = '';
+    const groundingModeActual = grounding.groundingMode();
+    let groundingRetries = 0;
 
     for (let iter = 0; iter < MAX_AGENT_ITERATIONS; iter++) {
         const response = await client.messages.create({
@@ -2141,6 +2167,30 @@ async function processChat({ message, pool, restauranteId, lang = 'es', restaura
                 .map(b => b.text)
                 .join('\n')
                 .trim();
+
+            // 🔒 BLINDAJE DE FUNDAMENTACIÓN (Capa 3+4): comprueba que toda cifra
+            // dura de la respuesta procede de una tool de este turno. En 'log'
+            // solo mide; en 'block' fuerza un re-query (máx. MAX_GROUNDING_RETRIES).
+            if (groundingModeActual !== 'off' && finalText) {
+                const check = grounding.verifyAnswer(finalText, messages);
+                if (!check.ok) {
+                    log('warn', 'omnes-grounding: cifras no fundamentadas', {
+                        restauranteId,
+                        modo: groundingModeActual,
+                        reintento: groundingRetries,
+                        no_fundamentadas: check.ungrounded.map(u => u.raw),
+                        cifras_revisadas: check.checked,
+                        numeros_de_tools: check.toolNums,
+                        pregunta: (message || '').slice(0, 160)
+                    });
+                    if (groundingModeActual === 'block' && groundingRetries < grounding.MAX_GROUNDING_RETRIES) {
+                        groundingRetries++;
+                        messages.push({ role: 'assistant', content: response.content });
+                        messages.push({ role: 'user', content: [{ type: 'text', text: grounding.correctionMessage(check.ungrounded) }] });
+                        continue; // re-consulta
+                    }
+                }
+            }
             break;
         }
 
