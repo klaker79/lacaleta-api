@@ -374,7 +374,10 @@ module.exports = function (pool) {
     // así que va tras ocrDisabledGuard igual que el resto de endpoints OCR. Con
     // OCR_ENABLED sin definir (prod), devuelve 410 y NO escribe nada → producción
     // inalcanzable para el OCR pase lo que pase. Solo staging lo tendrá a true.
-    router.post('/parse-albaran', ocrDisabledGuard, authMiddleware, costlyApiLimiter, async (req, res) => {
+    // Orden: costlyApiLimiter PRIMERO (rate-limit antes de cualquier trabajo/auth,
+    // best practice y lo que exige el CodeQL js/missing-rate-limiting), luego el guard,
+    // luego auth.
+    router.post('/parse-albaran', costlyApiLimiter, ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const { imageBase64, mediaType, filename } = req.body;
 
