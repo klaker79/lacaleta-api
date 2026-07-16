@@ -370,7 +370,14 @@ module.exports = function (pool) {
     // 📸 ESCANEO DE ALBARANES CON CLAUDE VISION
     // ==========================================
 
-    router.post('/parse-albaran', authMiddleware, costlyApiLimiter, async (req, res) => {
+    // 🔒 BACKSTOP (Ley 2 OCR albarán): /parse-albaran escribe en compras_pendientes,
+    // así que va tras ocrDisabledGuard igual que el resto de endpoints OCR. Con
+    // OCR_ENABLED sin definir (prod), devuelve 410 y NO escribe nada → producción
+    // inalcanzable para el OCR pase lo que pase. Solo staging lo tendrá a true.
+    // Orden: costlyApiLimiter PRIMERO (rate-limit antes de cualquier trabajo/auth,
+    // best practice y lo que exige el CodeQL js/missing-rate-limiting), luego el guard,
+    // luego auth.
+    router.post('/parse-albaran', costlyApiLimiter, ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const { imageBase64, mediaType, filename } = req.body;
 
