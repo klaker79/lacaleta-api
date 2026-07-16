@@ -658,6 +658,19 @@ async function initializeDatabase(pool) {
     log('info', 'Columnas proveedor/numero_factura en compras_pendientes verificadas');
   } catch (e) { log('warn', 'Migración proveedor/numero_factura', { error: e.message }); }
 
+  // 🖼️ Columna image_hash en compras_pendientes (dedup de albaranes por hash de imagen).
+  // /parse-albaran (OCR) la INSERTA y la usa en la query de deduplicado, pero nunca se
+  // había añadido al esquema → el endpoint fallaba con `column "image_hash" does not exist`
+  // (no saltaba porque el OCR estaba desactivado). Nullable/aditiva. Índice para el dedup.
+  try {
+    await pool.query(`
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS image_hash TEXT;
+            CREATE INDEX IF NOT EXISTS idx_compras_pendientes_image_hash
+              ON compras_pendientes (restaurante_id, image_hash) WHERE image_hash IS NOT NULL;
+        `);
+    log('info', 'Columna image_hash en compras_pendientes verificada');
+  } catch (e) { log('warn', 'Migración image_hash', { error: e.message }); }
+
   // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
   // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
   try {
