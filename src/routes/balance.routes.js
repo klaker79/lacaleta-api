@@ -7,10 +7,41 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFile } = require('child_process');
 const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
 const { personalCostExpr } = require('../utils/personalCost');
+
+/**
+ * Convierte cualquier audio (webm, m4a, mp4, 3gp, ogg…) a WAV 16kHz mono con
+ * ffmpeg, porque Gemini solo acepta wav/mp3/ogg/aac/flac y el móvil suele grabar
+ * en webm (navegador) o m4a (grabadora Android). Devuelve el Buffer WAV.
+ * Si ffmpeg falla o no está, propaga el error y el llamador reintenta con el original.
+ */
+function transcodeAudioToWav(inputBuffer) {
+    return new Promise((resolve, reject) => {
+        const id = crypto.randomBytes(8).toString('hex');
+        const inPath = path.join(os.tmpdir(), `voz-${id}.in`);
+        const outPath = path.join(os.tmpdir(), `voz-${id}.wav`);
+        const cleanup = () => { fs.unlink(inPath, () => {}); fs.unlink(outPath, () => {}); };
+        fs.writeFile(inPath, inputBuffer, (werr) => {
+            if (werr) { cleanup(); return reject(werr); }
+            // ffmpeg autodetecta el formato de entrada por el contenido (no por la extensión).
+            execFile('ffmpeg', ['-y', '-i', inPath, '-ar', '16000', '-ac', '1', '-f', 'wav', outPath], { timeout: 20000 }, (eerr) => {
+                if (eerr) { cleanup(); return reject(eerr); }
+                fs.readFile(outPath, (rerr, out) => {
+                    cleanup();
+                    if (rerr) return reject(rerr);
+                    resolve(out);
+                });
+            });
+        });
+    });
+}
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -919,7 +950,19 @@ REGLAS:
             if (!GEMINI_API_KEY) {
                 return res.status(503).json({ error: 'La transcripción de voz no está configurada en el servidor (falta GEMINI_API_KEY).' });
             }
-            const mt = mimeType || 'audio/webm';
+            // Normalizamos SIEMPRE a WAV con ffmpeg: da igual que el móvil mande webm
+            // (navegador) o m4a/3gp (grabadora Android) — Gemini solo traga wav/mp3/ogg/aac/flac.
+            let mt = mimeType || 'audio/webm';
+            let dataB64 = audioBase64;
+            try {
+                const wav = await transcodeAudioToWav(Buffer.from(audioBase64, 'base64'));
+                dataB64 = wav.toString('base64');
+                mt = 'audio/wav';
+                log('info', 'Audio de voz convertido a WAV', { origen: mimeType || 'desconocido', bytesWav: wav.length });
+            } catch (convErr) {
+                // Si ffmpeg falla, seguimos con el original (Gemini aún puede aceptar wav/ogg/mp3 tal cual).
+                log('warn', 'No se pudo convertir el audio a WAV, se envía el original', { error: convErr.message, mime: mt });
+            }
             const prompt = `Este audio es un PEDIDO dictado por voz (español, hostelería). Transcríbelo e interprétalo.
 
 Devuelve ÚNICAMENTE un JSON válido (sin markdown, sin explicaciones):
@@ -936,9 +979,9 @@ REGLAS:
             // GEMINI_MODEL fuerza uno concreto si se define.
             const modelos = process.env.GEMINI_MODEL
                 ? [process.env.GEMINI_MODEL]
-                : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.0-flash-001'];
+                : ['gemini-flash-latest', 'gemini-2.0-flash-001', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
             const body = JSON.stringify({
-                contents: [{ parts: [{ inline_data: { mime_type: mt, data: audioBase64 } }, { text: prompt }] }],
+                contents: [{ parts: [{ inline_data: { mime_type: mt, data: dataB64 } }, { text: prompt }] }],
                 generationConfig: { temperature: 0 }
             });
             let gr = null;
