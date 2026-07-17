@@ -5,6 +5,9 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 
+# ffmpeg: normaliza el audio de los pedidos por voz (webm/m4a/3gp → wav) antes de Gemini.
+RUN apk add --no-cache ffmpeg
+
 COPY package*.json ./
 
 RUN npm install --production
