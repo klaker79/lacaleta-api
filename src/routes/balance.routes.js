@@ -1037,7 +1037,7 @@ REGLAS:
     // que el OCR no supo machear, guardamos el texto leído como alias del ingrediente
     // → la próxima vez el matching (/parse-albaran) lo casa solo. Por tenant.
     // ==========================================
-    router.post('/purchases/alias', ocrDisabledGuard, authMiddleware, async (req, res) => {
+    router.post('/purchases/alias', costlyApiLimiter, ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const ingId = parseInt(req.body.ingredienteId);
             const aliasTxt = (req.body.alias || '').toString().trim();
