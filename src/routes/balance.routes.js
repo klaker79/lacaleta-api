@@ -931,7 +931,10 @@ REGLAS:
 - Un producto por línea. Ignora muletillas.
 - Si no hay cantidad clara, usa 1. NUNCA inventes productos que no se oigan.`;
 
-            const gr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            // gemini-1.5-flash tiene un tier gratis generoso y acepta audio; 2.0-flash
+            // agota la cuota gratis enseguida (429). Configurable por env por si acaso.
+            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+            const gr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
