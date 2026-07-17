@@ -901,6 +901,83 @@ REGLAS:
     });
 
     // ==========================================
+    // 🎙️ PEDIDO POR VOZ desde AUDIO (staging-gated). Para la app instalada de
+    // Android, donde el reconocedor del navegador (Web Speech) NO está disponible:
+    // el móvil GRABA el audio y aquí se transcribe+interpreta con Gemini (Claude no
+    // acepta audio). Devuelve las mismas líneas {producto, cantidad, unidad}.
+    // ==========================================
+    router.post('/parse-pedido-voz-audio', costlyApiLimiter, ocrDisabledGuard, authMiddleware, async (req, res) => {
+        try {
+            const { audioBase64, mimeType } = req.body;
+            if (!audioBase64) {
+                return res.status(400).json({ error: 'Se requiere audioBase64' });
+            }
+            if (audioBase64.length > 8 * 1024 * 1024) {
+                return res.status(413).json({ error: 'Audio demasiado largo. Sé más breve.' });
+            }
+            const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+            if (!GEMINI_API_KEY) {
+                return res.status(503).json({ error: 'La transcripción de voz no está configurada en el servidor (falta GEMINI_API_KEY).' });
+            }
+            const mt = mimeType || 'audio/webm';
+            const prompt = `Este audio es un PEDIDO dictado por voz (español, hostelería). Transcríbelo e interprétalo.
+
+Devuelve ÚNICAMENTE un JSON válido (sin markdown, sin explicaciones):
+{"lineas":[{"producto":"nombre del producto tal como se dijo","cantidad":5,"unidad":"caja"}]}
+
+REGLAS:
+- Números en palabras -> cifra ("cinco"->5, "media"->0.5, "una docena"->12, "un par"->2).
+- "unidad": kg, ud, caja, litro, bandeja, saco, bote... si no se dice, usa "ud".
+- Un producto por línea. Ignora muletillas.
+- Si no hay cantidad clara, usa 1. NUNCA inventes productos que no se oigan.`;
+
+            const gr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ inline_data: { mime_type: mt, data: audioBase64 } }, { text: prompt }] }],
+                    generationConfig: { temperature: 0 }
+                })
+            });
+
+            if (!gr.ok) {
+                const errTxt = await gr.text().catch(() => '');
+                log('error', 'Error de Gemini transcribiendo audio', { status: gr.status, body: errTxt.slice(0, 300) });
+                return res.status(502).json({ error: 'Error transcribiendo el audio con IA' });
+            }
+            const gdata = await gr.json();
+            let textContent = (gdata?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
+            textContent = textContent.replace(/```json/g, '').replace(/```/g, '').trim();
+            const startIdx = textContent.indexOf('{');
+            const endIdx = textContent.lastIndexOf('}');
+            if (startIdx === -1 || endIdx === -1) {
+                return res.status(500).json({ error: 'No entendí el audio' });
+            }
+            let data;
+            try {
+                data = JSON.parse(textContent.substring(startIdx, endIdx + 1));
+            } catch (parseError) {
+                log('error', 'Error parseando JSON de audio', { error: parseError.message });
+                return res.status(500).json({ error: 'Error parseando el audio' });
+            }
+            const lineas = Array.isArray(data.lineas)
+                ? data.lineas
+                    .filter((l) => l && l.producto)
+                    .map((l) => ({
+                        producto: String(l.producto).trim(),
+                        cantidad: Math.abs(parseFloat(l.cantidad)) || 1,
+                        unidad: (l.unidad && String(l.unidad)) || 'ud'
+                    }))
+                : [];
+            log('info', 'Pedido por voz (audio) interpretado', { restauranteId: req.restauranteId, items: lineas.length });
+            res.json({ success: true, lineas });
+        } catch (err) {
+            log('error', 'Error en parse-pedido-voz-audio', { error: err.message });
+            res.status(500).json({ error: 'Error interno procesando el audio' });
+        }
+    });
+
+    // ==========================================
     // 🔔 COMPRAS PENDIENTES (Cola de revisión)
     // ==========================================
 
