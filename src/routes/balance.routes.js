@@ -814,6 +814,93 @@ REGLAS CRÍTICAS DE PRECISIÓN:
     });
 
     // ==========================================
+    // 🎙️ PEDIDO POR VOZ (staging-gated como el OCR)
+    // Convierte lo dictado (transcript de la Web Speech API del móvil) en líneas
+    // {producto, cantidad, unidad}. El emparejado con el catálogo se hace en el
+    // frontend (ya tiene window.ingredientes). NO escribe nada: solo interpreta.
+    // Mismo orden de middleware que /parse-albaran (rate-limit → guard → auth).
+    // ==========================================
+    router.post('/parse-pedido-voz', costlyApiLimiter, ocrDisabledGuard, authMiddleware, async (req, res) => {
+        try {
+            const { transcript } = req.body;
+            if (!transcript || typeof transcript !== 'string' || !transcript.trim()) {
+                return res.status(400).json({ error: 'Se requiere transcript' });
+            }
+            if (transcript.length > 2000) {
+                return res.status(413).json({ error: 'Transcripción demasiado larga' });
+            }
+            const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+            if (!ANTHROPIC_API_KEY) {
+                return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada en el servidor' });
+            }
+
+            const prompt = `Eres un asistente que convierte un PEDIDO DICTADO por voz (español, hostelería) en líneas estructuradas.
+
+Texto dictado: "${transcript.replace(/"/g, "'")}"
+
+Devuelve ÚNICAMENTE un JSON válido (sin markdown, sin explicaciones):
+{"lineas":[{"producto":"nombre del producto tal como se dijo","cantidad":5,"unidad":"caja"}]}
+
+REGLAS:
+- Interpreta números en palabras ("cinco"->5, "media"->0.5, "una docena"->12, "un par"->2).
+- "unidad": kg, ud, caja, litro, bandeja, saco, bote... si no se dice, usa "ud".
+- Un producto por línea. Ignora muletillas ("ponme", "y", "también", "eh", "a ver").
+- Si no hay cantidad clara para un producto, usa 1.
+- NUNCA inventes productos que no se mencionan.`;
+
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': ANTHROPIC_API_KEY,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-sonnet-4-6',
+                    max_tokens: 1024,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                log('error', 'Error de Claude API entendiendo dictado', errorData);
+                return res.status(500).json({ error: 'Error entendiendo el dictado con IA' });
+            }
+
+            const claudeResponse = await response.json();
+            let textContent = (claudeResponse.content?.[0]?.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
+            const startIdx = textContent.indexOf('{');
+            const endIdx = textContent.lastIndexOf('}');
+            if (startIdx === -1 || endIdx === -1) {
+                return res.status(500).json({ error: 'No se pudo entender el dictado' });
+            }
+            let data;
+            try {
+                data = JSON.parse(textContent.substring(startIdx, endIdx + 1));
+            } catch (parseError) {
+                log('error', 'Error parseando JSON de dictado', { error: parseError.message });
+                return res.status(500).json({ error: 'Error parseando el dictado' });
+            }
+            const lineas = Array.isArray(data.lineas)
+                ? data.lineas
+                    .filter((l) => l && l.producto)
+                    .map((l) => ({
+                        producto: String(l.producto).trim(),
+                        cantidad: Math.abs(parseFloat(l.cantidad)) || 1,
+                        unidad: (l.unidad && String(l.unidad)) || 'ud'
+                    }))
+                : [];
+
+            log('info', 'Pedido por voz interpretado', { restauranteId: req.restauranteId, items: lineas.length });
+            res.json({ success: true, lineas });
+        } catch (err) {
+            log('error', 'Error en parse-pedido-voz', { error: err.message });
+            res.status(500).json({ error: 'Error interno procesando el dictado' });
+        }
+    });
+
+    // ==========================================
     // 🔔 COMPRAS PENDIENTES (Cola de revisión)
     // ==========================================
 
