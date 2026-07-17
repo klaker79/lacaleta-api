@@ -931,21 +931,30 @@ REGLAS:
 - Un producto por línea. Ignora muletillas.
 - Si no hay cantidad clara, usa 1. NUNCA inventes productos que no se oigan.`;
 
-            // gemini-1.5-flash tiene un tier gratis generoso y acepta audio; 2.0-flash
-            // agota la cuota gratis enseguida (429). Configurable por env por si acaso.
-            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-            const gr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ inline_data: { mime_type: mt, data: audioBase64 } }, { text: prompt }] }],
-                    generationConfig: { temperature: 0 }
-                })
+            // Los modelos de Gemini varían por key/región y cuota (2.0-flash da 429,
+            // 1.5-flash da 404 en algunas keys). Probamos varios hasta que uno responda.
+            // GEMINI_MODEL fuerza uno concreto si se define.
+            const modelos = process.env.GEMINI_MODEL
+                ? [process.env.GEMINI_MODEL]
+                : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.0-flash-001'];
+            const body = JSON.stringify({
+                contents: [{ parts: [{ inline_data: { mime_type: mt, data: audioBase64 } }, { text: prompt }] }],
+                generationConfig: { temperature: 0 }
             });
-
-            if (!gr.ok) {
-                const errTxt = await gr.text().catch(() => '');
-                log('error', 'Error de Gemini transcribiendo audio', { status: gr.status, body: errTxt.slice(0, 300) });
+            let gr = null;
+            let ultimoErr = null;
+            for (const modelo of modelos) {
+                const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body
+                });
+                if (resp.ok) { gr = resp; log('info', 'Gemini transcribiendo con modelo', { modelo }); break; }
+                ultimoErr = { modelo, status: resp.status, body: (await resp.text().catch(() => '')).slice(0, 200) };
+                log('warn', 'Modelo Gemini no disponible, probando siguiente', ultimoErr);
+            }
+            if (!gr) {
+                log('error', 'Ningún modelo Gemini respondió', ultimoErr || {});
                 return res.status(502).json({ error: 'Error transcribiendo el audio con IA' });
             }
             const gdata = await gr.json();
