@@ -433,7 +433,8 @@ module.exports = function (pool) {
             const imageHash = crypto.createHash('sha256').update(imageBase64).digest('hex');
 
             const hashCheck = await pool.query(
-                `SELECT batch_id, fecha, COUNT(*) as item_count
+                `SELECT batch_id, fecha, COUNT(*) as item_count,
+                        MAX(proveedor) as proveedor, array_agg(ingrediente_nombre) as items
                  FROM compras_pendientes
                  WHERE restaurante_id = $1 AND image_hash = $2
                    AND estado IN ('pendiente', 'aprobado')
@@ -450,7 +451,7 @@ module.exports = function (pool) {
                 return res.json({
                     success: true,
                     batchId: dup.batch_id,
-                    proveedor: null,
+                    proveedor: dup.proveedor || null,
                     fecha: dup.fecha,
                     totalItems: parseInt(dup.item_count),
                     matched: 0,
@@ -460,6 +461,8 @@ module.exports = function (pool) {
                         batchId: dup.batch_id,
                         fecha: dup.fecha,
                         itemCount: parseInt(dup.item_count),
+                        proveedor: dup.proveedor || null,
+                        items: Array.isArray(dup.items) ? dup.items.filter(Boolean).slice(0, 8) : [],
                         similarity: 100,
                         source: 'image_hash'
                     }
@@ -630,7 +633,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             const numFactura = (data.numero_factura || '').toString().trim();
             if (numFactura) {
                 const facturaCheck = await pool.query(
-                    `SELECT batch_id, fecha, COUNT(*) as item_count
+                    `SELECT batch_id, fecha, COUNT(*) as item_count,
+                            MAX(proveedor) as proveedor, array_agg(ingrediente_nombre) as items
                      FROM compras_pendientes
                      WHERE restaurante_id = $1
                        AND TRIM(numero_factura) = $2
@@ -652,6 +656,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                             batchId: dup.batch_id,
                             fecha: dup.fecha,
                             itemCount: parseInt(dup.item_count),
+                            proveedor: dup.proveedor || null,
+                            items: Array.isArray(dup.items) ? dup.items.filter(Boolean).slice(0, 8) : [],
                             similarity: 100,
                             source: 'numero_factura',
                             numero_factura: numFactura
