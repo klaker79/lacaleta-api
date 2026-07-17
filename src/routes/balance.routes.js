@@ -1033,6 +1033,49 @@ REGLAS:
     });
 
     // ==========================================
+    // 🧠 ALIAS APRENDIDO (OCR albarán): cuando el usuario relaciona a mano una línea
+    // que el OCR no supo machear, guardamos el texto leído como alias del ingrediente
+    // → la próxima vez el matching (/parse-albaran) lo casa solo. Por tenant.
+    // ==========================================
+    router.post('/purchases/alias', costlyApiLimiter, ocrDisabledGuard, authMiddleware, async (req, res) => {
+        try {
+            const ingId = parseInt(req.body.ingredienteId);
+            const aliasTxt = (req.body.alias || '').toString().trim();
+            if (!ingId || !aliasTxt) {
+                return res.status(400).json({ error: 'Se requiere ingredienteId y alias' });
+            }
+            if (aliasTxt.length > 200) {
+                return res.status(400).json({ error: 'Alias demasiado largo' });
+            }
+            // El ingrediente debe pertenecer al tenant (no se pueden crear alias cruzados).
+            const ing = await pool.query(
+                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                [ingId, req.restauranteId]
+            );
+            if (!ing.rows.length) {
+                return res.status(404).json({ error: 'Ingrediente no encontrado' });
+            }
+            // Dedup: no duplicar el mismo alias (case-insensitive) para el tenant.
+            const dup = await pool.query(
+                'SELECT id FROM ingredientes_alias WHERE restaurante_id = $1 AND LOWER(TRIM(alias)) = LOWER(TRIM($2)) LIMIT 1',
+                [req.restauranteId, aliasTxt]
+            );
+            if (dup.rows.length) {
+                return res.json({ success: true, alreadyExists: true });
+            }
+            await pool.query(
+                'INSERT INTO ingredientes_alias (restaurante_id, ingrediente_id, alias) VALUES ($1, $2, $3)',
+                [req.restauranteId, ingId, aliasTxt]
+            );
+            log('info', 'Alias de ingrediente aprendido (OCR)', { restauranteId: req.restauranteId, ingredienteId: ingId });
+            res.json({ success: true });
+        } catch (err) {
+            log('error', 'Error guardando alias de ingrediente', { error: err.message });
+            res.status(500).json({ error: 'Error guardando alias' });
+        }
+    });
+
+    // ==========================================
     // 🔔 COMPRAS PENDIENTES (Cola de revisión)
     // ==========================================
 
