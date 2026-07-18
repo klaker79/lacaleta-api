@@ -545,7 +545,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
 5. NO INCLUIR como líneas de producto: totales, subtotales, IVA, bases imponibles, portes, recargos de equivalencia.
 
-6. IVA (campo "iva_pct"): busca el TIPO de IVA aplicado (ej. "IVA 10%", "I.V.A. 21%", "10%", "21%"). Pon SOLO el número (10 o 21). Si el albarán muestra VARIOS tipos, usa el que aplique a la MAYORÍA de las líneas. Si no aparece ningún IVA, usa null. NO lo confundas con el recargo de equivalencia.
+6. IVA (campo "iva_pct"): busca el TIPO de IVA aplicado. OJO: puede aparecer como "IVA", "I.V.A.", "IVE" (gallego), "IVE" en una columna de la tabla, "% IVA", "Tipo IVA", "COTA IVE" (esa es la cuota, el tipo está al lado). Coge el TIPO en porcentaje (ej. 10 o 21), NO el importe en euros. Pon SOLO el número. Si hay VARIOS tipos, usa el que aplique a la MAYORÍA de las líneas. Si no aparece, usa null. NO lo confundas con el recargo de equivalencia (RE) ni con el descuento (Dto).
 
 6. Si un campo no es legible, usa null. NUNCA inventes datos.`
                             }
@@ -634,6 +634,13 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 }
             }
 
+            // IVA del albarán (tipo único, 0-100; null si no aparece). Se calcula AQUÍ,
+            // antes del dedup, para poder incluirlo también en el aviso de duplicado (reescaneo).
+            // Va APARTE — NO entra en base, food cost ni stock; solo display (total con IVA).
+            const ivaPctAlbaran = (data.iva_pct !== null && data.iva_pct !== undefined && !isNaN(parseFloat(data.iva_pct)))
+                ? Math.min(100, Math.max(0, parseFloat(data.iva_pct)))
+                : null;
+
             // ── Dedup por numero_factura: mismo nº + mismo restaurante = duplicado seguro ──
             // Solo bloquea si el batch sigue pendiente o aprobado (rechazados se pueden volver a subir)
             const numFactura = (data.numero_factura || '').toString().trim();
@@ -658,6 +665,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     });
                     return res.json({
                         success: false,
+                        iva_pct: ivaPctAlbaran,
                         duplicateWarning: {
                             batchId: dup.batch_id,
                             fecha: dup.fecha,
@@ -834,13 +842,6 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             log('info', 'Albarán escaneado y pendientes creados', {
                 batchId, proveedor: data.proveedor, fecha, items: data.lineas.length, matched
             });
-
-            // IVA del albarán (Migr. 015): tipo único, 0-100. null si el albarán no lo muestra.
-            // Va APARTE — NO entra en base, food cost ni stock; solo alimenta el campo IVA
-            // de la recepción (total con IVA / tesorería), como el resto de la app.
-            const ivaPctAlbaran = (data.iva_pct !== null && data.iva_pct !== undefined && !isNaN(parseFloat(data.iva_pct)))
-                ? Math.min(100, Math.max(0, parseFloat(data.iva_pct)))
-                : null;
 
             const albaranResponse = {
                 success: true,
