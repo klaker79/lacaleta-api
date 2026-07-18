@@ -508,6 +508,7 @@ Retorna ÚNICAMENTE un JSON válido (sin explicaciones, sin markdown):
   "proveedor": "nombre EXACTO de la empresa emisora tal como aparece en el documento",
   "numero_factura": "número de serie/albarán/factura tal como aparece (ej: '426', 'A-7005900', 'F2024-001')",
   "fecha": "YYYY-MM-DD",
+  "iva_pct": 10,
   "lineas": [
     {
       "producto": "nombre EXACTO del producto tal como aparece impreso",
@@ -539,7 +540,9 @@ REGLAS CRÍTICAS DE PRECISIÓN:
    - Si solo ves importe total y cantidad: precio_unitario = total / cantidad.
    - "unidad": extrae la unidad si aparece (kg, ud, litro, caja, bandeja). Si no aparece, usa "ud".
 
-5. NO INCLUIR: líneas de totales, subtotales, IVA, bases imponibles, portes, recargos de equivalencia.
+5. NO INCLUIR como líneas de producto: totales, subtotales, IVA, bases imponibles, portes, recargos de equivalencia.
+
+6. IVA (campo "iva_pct"): busca el TIPO de IVA aplicado (ej. "IVA 10%", "I.V.A. 21%", "10%", "21%"). Pon SOLO el número (10 o 21). Si el albarán muestra VARIOS tipos, usa el que aplique a la MAYORÍA de las líneas. Si no aparece ningún IVA, usa null. NO lo confundas con el recargo de equivalencia.
 
 6. Si un campo no es legible, usa null. NUNCA inventes datos.`
                             }
@@ -829,11 +832,19 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 batchId, proveedor: data.proveedor, fecha, items: data.lineas.length, matched
             });
 
+            // IVA del albarán (Migr. 015): tipo único, 0-100. null si el albarán no lo muestra.
+            // Va APARTE — NO entra en base, food cost ni stock; solo alimenta el campo IVA
+            // de la recepción (total con IVA / tesorería), como el resto de la app.
+            const ivaPctAlbaran = (data.iva_pct !== null && data.iva_pct !== undefined && !isNaN(parseFloat(data.iva_pct)))
+                ? Math.min(100, Math.max(0, parseFloat(data.iva_pct)))
+                : null;
+
             const albaranResponse = {
                 success: true,
                 batchId,
                 proveedor: data.proveedor || null,
                 fecha,
+                iva_pct: ivaPctAlbaran,
                 totalItems: data.lineas.length,
                 matched,
                 unmatched: data.lineas.length - matched,
