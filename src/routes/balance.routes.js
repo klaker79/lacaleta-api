@@ -506,6 +506,7 @@ TAREA: Extrae TODOS los datos del documento con PRECISIÓN EXACTA. Copia el text
 Retorna ÚNICAMENTE un JSON válido (sin explicaciones, sin markdown):
 {
   "proveedor": "nombre EXACTO de la empresa emisora tal como aparece en el documento",
+  "cif": "CIF/NIF de la empresa EMISORA (quien factura), tal como aparece (ej: 'B70365523', 'B-12345678'). null si no aparece",
   "numero_factura": "número de serie/albarán/factura tal como aparece (ej: '426', 'A-7005900', 'F2024-001')",
   "fecha": "YYYY-MM-DD",
   "iva_pct": 10,
@@ -525,6 +526,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 1. PROVEEDOR: Copia el nombre de la empresa emisora EXACTAMENTE como aparece en la cabecera del documento. Incluye razón social completa (ej: "AS VACAS DA ULLOA SCG", no "Sen Mais").
 
 2. NÚMERO DE FACTURA/ALBARÁN: Busca en la cabecera campos como "Serie/Número", "Nº Albarán", "Nº Factura", "Serie", "Número". Copia el valor EXACTO.
+
+2b. CIF/NIF: copia el CIF de la empresa EMISORA (la que factura, normalmente arriba a la izquierda o junto a su razón social), NO el del cliente/destinatario. Formato tal cual (letra + números). null si no aparece.
 
 3. FECHA: 
    - Busca la fecha en la cabecera del documento (no en caducidades ni lotes).
@@ -843,6 +846,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 success: true,
                 batchId,
                 proveedor: data.proveedor || null,
+                cif: data.cif || null,
                 fecha,
                 iva_pct: ivaPctAlbaran,
                 totalItems: data.lineas.length,
