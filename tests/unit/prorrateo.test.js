@@ -62,4 +62,43 @@ describe('prorratearGastosFijos', () => {
         // 2900 * 10 / 29 = 1000
         expect(r.gastos_fijos_periodo).toBe(1000);
     });
+
+    // ── Criterio Iker 2026-07-08: devengo por DÍAS CON VENTAS ─────────────
+    // El mismo criterio que la Cuenta de Resultados del Diario: cada día
+    // trabajado carga su gasto fijo diario; los días sin ventas NO cargan.
+
+    test('días con ventas < días de calendario → devenga solo los trabajados (caso La Nave 5 julio)', () => {
+        // Julio, hoy=8 (8 días de calendario) pero solo 4 días con ventas.
+        // Operativos 40406.58 → diario 1303.44 → 4 días = 5213.75 (redondeo a cts).
+        const r = prorratearGastosFijos(40406.58, '2026-07-01', '2026-08-01', '2026-07-09', 4);
+        expect(r.dias_periodo).toBe(8);
+        expect(r.dias_devengo).toBe(4);
+        expect(r.gastos_fijos_periodo).toBe(Math.round((40406.58 * 4 / 31) * 100) / 100);
+    });
+
+    test('mes cerrado con días sin ventas → devenga solo los días con ventas', () => {
+        // Junio cerrado (30 días) pero abrió 26.
+        const r = prorratearGastosFijos(FIJOS, '2026-06-01', '2026-07-01', '2026-08-01', 26);
+        expect(r.dias_periodo).toBe(30);
+        expect(r.dias_devengo).toBe(26);
+        expect(r.gastos_fijos_periodo).toBe(Math.round((FIJOS * 26 / 30) * 100) / 100);
+    });
+
+    test('0 días con ventas → 0 fijos (sin columnas no hay cargo, como la tabla)', () => {
+        const r = prorratearGastosFijos(FIJOS, '2026-06-01', '2026-07-01', '2026-08-01', 0);
+        expect(r.dias_devengo).toBe(0);
+        expect(r.gastos_fijos_periodo).toBe(0);
+    });
+
+    test('diasConVentas null/omitido → comportamiento antiguo (días de calendario)', () => {
+        const r = prorratearGastosFijos(FIJOS, '2026-05-01', '2026-06-01', '2026-06-10', null);
+        expect(r.dias_devengo).toBe(31);
+        expect(r.gastos_fijos_periodo).toBe(FIJOS);
+    });
+
+    test('diasConVentas mayor que los días del periodo → se recorta al calendario', () => {
+        const r = prorratearGastosFijos(FIJOS, '2026-06-01', '2026-07-01', '2026-08-01', 99);
+        expect(r.dias_devengo).toBe(30);
+        expect(r.gastos_fijos_periodo).toBe(FIJOS);
+    });
 });

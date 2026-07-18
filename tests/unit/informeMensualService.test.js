@@ -120,6 +120,21 @@ function makePoolMock({
     };
 }
 
+/**
+ * Genera n filas de evolución diaria (días CON ventas). Desde 2026-07-08 los
+ * gastos fijos del P&L se DEVENGAN por días con ventas (criterio Iker, el
+ * mismo que la Cuenta de Resultados del Diario): para que un test espere el
+ * mes COMPLETO de fijos, el mock debe tener tantos días con ventas como días
+ * naturales tiene el mes (abril 2026 = 30).
+ */
+function evolucionDias(n, mes = '2026-04') {
+    return Array.from({ length: n }, (_, i) => ({
+        dia: `${mes}-${String(i + 1).padStart(2, '0')}`,
+        ingresos: 100
+    }));
+}
+const MES_COMPLETO = { evolucion: evolucionDias(30) };
+
 describe('informeMensualService — cálculos del P&L', () => {
     test('throws si no se pasa restauranteId', async () => {
         await expect(generarInformeMensual(makePoolMock(), null, '2026-04'))
@@ -132,7 +147,8 @@ describe('informeMensualService — cálculos del P&L', () => {
             ingresos_anterior: 8000,
             cogs_actual: 3500,
             gastos_fijos_total: 4000,
-            gastos_fijos_count: 5
+            gastos_fijos_count: 5,
+            ...MES_COMPLETO
         });
         const r = await generarInformeMensual(pool, 3, '2026-04');
 
@@ -156,7 +172,8 @@ describe('informeMensualService — cálculos del P&L', () => {
             ingresos_actual: 10000,
             cogs_actual: 3500,
             gastos_fijos_total: 4000,
-            comida_personal_total: 600
+            comida_personal_total: 600,
+            ...MES_COMPLETO
         });
         const r = await generarInformeMensual(pool, 3, '2026-04');
         // beneficio = 10000 − 3500 − 4000 − 600 = 1900
@@ -172,7 +189,8 @@ describe('informeMensualService — cálculos del P&L', () => {
             ingresos_actual: 10000,
             cogs_actual: 3000,
             gastos_fijos_total: 4000,
-            personal_extra_total: 500
+            personal_extra_total: 500,
+            ...MES_COMPLETO
         });
         const r = await generarInformeMensual(pool, 3, '2026-04');
         // beneficio = 10000 − 3000 − 4000 − 0 − 500 = 2500
@@ -187,7 +205,8 @@ describe('informeMensualService — cálculos del P&L', () => {
         const pool = makePoolMock({
             ingresos_actual: 5000,
             cogs_actual: 2500,
-            gastos_fijos_total: 3500
+            gastos_fijos_total: 3500,
+            ...MES_COMPLETO
         });
         const r = await generarInformeMensual(pool, 3, '2026-04');
 
@@ -206,7 +225,11 @@ describe('informeMensualService — cálculos del P&L', () => {
 
         expect(r.food_cost.mes_actual_pct).toBe(0);
         expect(r.pyg.margen_neto_pct).toBe(0);
-        expect(r.pyg.beneficio_neto).toBe(-600); // -100 - 500
+        // Sin ventas no hay días con ventas → los fijos NO se devengan en este
+        // P&L (criterio 2026-07-08, igual que la Cuenta de Resultados): solo
+        // resta el COGS residual del mock.
+        expect(r.pyg.gastos_fijos).toBe(0);
+        expect(r.pyg.beneficio_neto).toBe(-100);
         expect(r.ingresos.variacion_pct).toBeNull();
     });
 
@@ -226,7 +249,8 @@ describe('informeMensualService — cálculos del P&L', () => {
             gastos_fijos_total: 4000,
             mermas_valor: 500, // dinero perdido en mermas
             mermas_count: 5,
-            mermas_motivos: [{ motivo: 'caducidad', num: 5, valor: 500 }]
+            mermas_motivos: [{ motivo: 'caducidad', num: 5, valor: 500 }],
+            ...MES_COMPLETO
         });
         const r = await generarInformeMensual(pool, 3, '2026-04');
 
@@ -249,7 +273,8 @@ describe('informeMensualService — cálculos del P&L', () => {
             cogs_actual: 3500,
             gastos_fijos_total: 4000,
             mermas_valor: 0,
-            mermas_count: 0
+            mermas_count: 0,
+            ...MES_COMPLETO
         });
         const r = await generarInformeMensual(pool, 3, '2026-04');
         expect(r.food_cost.mes_actual_pct).toBe(35);
