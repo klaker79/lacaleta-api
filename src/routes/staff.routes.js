@@ -5,8 +5,20 @@
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { log } = require('../utils/logger');
-const { sanitizeString, validateNumber, validateId } = require('../utils/validators');
+const { sanitizeString, validateNumber, validateId, validateHora } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
+
+const HORA_ENTRADA_DEFECTO = '10:00';
+
+/**
+ * Normaliza el empleado para el frontend: Postgres devuelve TIME como
+ * 'HH:MM:SS' y el <input type="time"> necesita 'HH:MM'.
+ */
+function normalizarEmpleado(row) {
+    if (!row) return row;
+    const hora = validateHora(row.hora_entrada);
+    return { ...row, hora_entrada: hora.valid ? hora.value : HORA_ENTRADA_DEFECTO };
+}
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -23,7 +35,7 @@ module.exports = function (pool) {
                 'SELECT * FROM empleados WHERE activo = true AND restaurante_id = $1 ORDER BY nombre',
                 [req.restauranteId]
             );
-            res.json(result.rows);
+            res.json(result.rows.map(normalizarEmpleado));
         } catch (err) {
             log('error', 'Error obteniendo empleados', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
@@ -33,16 +45,23 @@ module.exports = function (pool) {
     // POST crear empleado
     router.post('/empleados', authMiddleware, async (req, res) => {
         try {
-            const { nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto } = req.body;
+            const { nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto, hora_entrada } = req.body;
 
             if (!nombre) {
                 return res.status(400).json({ error: 'nombre es requerido' });
             }
 
+            let horaEntrada = HORA_ENTRADA_DEFECTO;
+            if (hora_entrada != null && hora_entrada !== '') {
+                const check = validateHora(hora_entrada);
+                if (!check.valid) return res.status(400).json({ error: check.error });
+                horaEntrada = check.value;
+            }
+
             const result = await pool.query(
-                `INSERT INTO empleados (nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto, restaurante_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-                [sanitizeString(nombre), (color && /^#[0-9a-fA-F]{6}$/.test(color)) ? color : '#3B82F6', validateNumber(horas_contrato, 40, 0, 168), validateNumber(coste_hora, 10, 0, 999), sanitizeString(dias_libres_fijos) || '', sanitizeString(puesto) || 'Camarero', req.restauranteId]
+                `INSERT INTO empleados (nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto, hora_entrada, restaurante_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [sanitizeString(nombre), (color && /^#[0-9a-fA-F]{6}$/.test(color)) ? color : '#3B82F6', validateNumber(horas_contrato, 40, 0, 168), validateNumber(coste_hora, 10, 0, 999), sanitizeString(dias_libres_fijos) || '', sanitizeString(puesto) || 'Camarero', horaEntrada, req.restauranteId]
             );
 
             log('info', 'Empleado creado', { nombre });
@@ -54,7 +73,7 @@ module.exports = function (pool) {
                 datosDespues: result.rows[0],
             });
 
-            res.status(201).json(result.rows[0]);
+            res.status(201).json(normalizarEmpleado(result.rows[0]));
         } catch (err) {
             log('error', 'Error creando empleado', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
@@ -67,14 +86,23 @@ module.exports = function (pool) {
             const idCheck = validateId(req.params.id);
             if (!idCheck.valid) return res.status(400).json({ error: 'ID inválido' });
             const id = idCheck.value;
-            const { nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto } = req.body;
+            const { nombre, color, horas_contrato, coste_hora, dias_libres_fijos, puesto, hora_entrada } = req.body;
+
+            // undefined = no se toca (COALESCE conserva el valor actual)
+            let horaEntrada;
+            if (hora_entrada != null && hora_entrada !== '') {
+                const check = validateHora(hora_entrada);
+                if (!check.valid) return res.status(400).json({ error: check.error });
+                horaEntrada = check.value;
+            }
 
             const result = await pool.query(
-                `UPDATE empleados SET nombre = COALESCE($1, nombre), color = COALESCE($2, color), 
+                `UPDATE empleados SET nombre = COALESCE($1, nombre), color = COALESCE($2, color),
              horas_contrato = COALESCE($3, horas_contrato), coste_hora = COALESCE($4, coste_hora),
-             dias_libres_fijos = COALESCE($5, dias_libres_fijos), puesto = COALESCE($6, puesto)
-             WHERE id = $7 AND restaurante_id = $8 RETURNING *`,
-                [sanitizeString(nombre), (color && /^#[0-9a-fA-F]{6}$/.test(color)) ? color : undefined, horas_contrato != null ? validateNumber(horas_contrato, undefined, 0, 168) : undefined, coste_hora != null ? validateNumber(coste_hora, undefined, 0, 999) : undefined, sanitizeString(dias_libres_fijos), sanitizeString(puesto), id, req.restauranteId]
+             dias_libres_fijos = COALESCE($5, dias_libres_fijos), puesto = COALESCE($6, puesto),
+             hora_entrada = COALESCE($7::time, hora_entrada)
+             WHERE id = $8 AND restaurante_id = $9 RETURNING *`,
+                [sanitizeString(nombre), (color && /^#[0-9a-fA-F]{6}$/.test(color)) ? color : undefined, horas_contrato != null ? validateNumber(horas_contrato, undefined, 0, 168) : undefined, coste_hora != null ? validateNumber(coste_hora, undefined, 0, 999) : undefined, sanitizeString(dias_libres_fijos), sanitizeString(puesto), horaEntrada, id, req.restauranteId]
             );
 
             if (result.rows.length === 0) {
@@ -88,7 +116,7 @@ module.exports = function (pool) {
                 datosDespues: result.rows[0],
             });
 
-            res.json(result.rows[0]);
+            res.json(normalizarEmpleado(result.rows[0]));
         } catch (err) {
             log('error', 'Error actualizando empleado', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
