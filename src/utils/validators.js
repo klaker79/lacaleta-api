@@ -113,6 +113,37 @@ const validateDate = (value, { allowFuture = true } = {}) => {
     return { valid: true, value: date };
 };
 
+// ========== HORAS ==========
+
+/**
+ * Valida una hora del día en formato 'HH:MM' o 'HH:MM:SS'.
+ *
+ * Postgres devuelve las columnas TIME como 'HH:MM:SS', así que aceptamos ambas
+ * formas y normalizamos SIEMPRE a 'HH:MM' (lo que usa el frontend en los
+ * <input type="time"> y en los turnos generados).
+ *
+ * @param {*} value - Valor a validar
+ * @returns {{ valid: boolean, error?: string, value?: string }} value en 'HH:MM'
+ */
+const validateHora = (value) => {
+    if (value === null || value === undefined || value === '') {
+        return { valid: false, error: 'Hora es requerida' };
+    }
+    const match = String(value).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) {
+        return { valid: false, error: 'Formato de hora inválido (HH:MM)' };
+    }
+    const horas = parseInt(match[1], 10);
+    const minutos = parseInt(match[2], 10);
+    if (horas > 23 || minutos > 59) {
+        return { valid: false, error: 'Hora fuera de rango (00:00-23:59)' };
+    }
+    return {
+        valid: true,
+        value: `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}`
+    };
+};
+
 // ========== ENUMS ==========
 
 /**
@@ -137,5 +168,6 @@ module.exports = {
     validateRequired,
     validateId,
     validateDate,
+    validateHora,
     validateEnum
 };
