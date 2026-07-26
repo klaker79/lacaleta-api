@@ -131,6 +131,7 @@ async function initializeDatabase(pool) {
         coste_hora DECIMAL(10, 2) DEFAULT 10.00,
         dias_libres_fijos TEXT DEFAULT '',
         puesto VARCHAR(50) DEFAULT 'Camarero',
+        hora_entrada TIME DEFAULT '10:00',
         activo BOOLEAN DEFAULT TRUE,
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1031,6 +1032,21 @@ async function initializeDatabase(pool) {
     `);
     log('info', 'audit_log triggers append-only creados/verificados');
   } catch (e) { log('warn', 'Migración audit_log triggers', { error: e.message }); }
+
+  // ========== MIGRACIÓN: empleados.hora_entrada (2026-07-26) ==========
+  // Hora de entrada por empleado. Antes el generador de horarios tenía la hora
+  // de un empleado concreto de La Nave 5 escrita a mano en el frontend
+  // ("Fran entra a las 11:30"), lo que se aplicaba a cualquier tenant con un
+  // empleado de nombre parecido. Ahora es un dato de su ficha.
+  // La duración del turno NO se guarda: sale de repartir horas_contrato entre
+  // los días trabajados. Default '10:00' = comportamiento previo para todos.
+  try {
+    await pool.query(`
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS hora_entrada TIME DEFAULT '10:00';
+      UPDATE empleados SET hora_entrada = '10:00' WHERE hora_entrada IS NULL;
+    `);
+    log('info', 'Migración empleados.hora_entrada completada');
+  } catch (e) { log('warn', 'Migración empleados.hora_entrada', { error: e.message }); }
 
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
