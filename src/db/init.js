@@ -132,6 +132,12 @@ async function initializeDatabase(pool) {
         dias_libres_fijos TEXT DEFAULT '',
         puesto VARCHAR(50) DEFAULT 'Camarero',
         hora_entrada TIME DEFAULT '10:00',
+        -- Plantilla de jornada habitual (el generador la aplica; editable por día)
+        jornada_tipo VARCHAR(10) DEFAULT 'seguido',
+        tramo1_inicio TIME,
+        tramo1_fin TIME,
+        tramo2_inicio TIME,
+        tramo2_fin TIME,
         activo BOOLEAN DEFAULT TRUE,
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -141,6 +147,8 @@ async function initializeDatabase(pool) {
         id SERIAL PRIMARY KEY,
         empleado_id INTEGER NOT NULL REFERENCES empleados(id) ON DELETE CASCADE,
         fecha DATE NOT NULL,
+        -- tramo 1 = seguido o primera mitad del partido; tramo 2 = segunda mitad
+        tramo SMALLINT NOT NULL DEFAULT 1,
         turno VARCHAR(20) DEFAULT 'completo',
         hora_inicio TIME,
         hora_fin TIME,
@@ -148,7 +156,8 @@ async function initializeDatabase(pool) {
         notas TEXT,
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(empleado_id, fecha)
+        CONSTRAINT horarios_empleado_fecha_tramo_key UNIQUE (empleado_id, fecha, tramo),
+        CONSTRAINT horarios_tramo_valido CHECK (tramo IN (1, 2))
       );
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
@@ -1034,6 +1043,49 @@ async function initializeDatabase(pool) {
     `);
     log('info', 'Migración empleados.hora_entrada completada');
   } catch (e) { log('warn', 'Migración empleados.hora_entrada', { error: e.message }); }
+
+  // ========== MIGRACIÓN: turno partido (2026-07-26) ==========
+  // El modelo sólo permitía UN turno por empleado y día: `horarios` tenía
+  // UNIQUE(empleado_id, fecha) y la ficha guardaba una única hora de entrada.
+  // En hostelería el turno PARTIDO (ej. 12:00-16:00 + 20:00-00:00) es la norma,
+  // así que era imposible representar el horario real de un restaurante.
+  //
+  // Ahora cada día admite hasta 2 tramos: la clave pasa a (empleado_id, fecha,
+  // tramo). Los horarios existentes se quedan como tramo 1 — no cambia nada de
+  // lo ya planificado.
+  try {
+    await pool.query(`
+      ALTER TABLE horarios ADD COLUMN IF NOT EXISTS tramo SMALLINT NOT NULL DEFAULT 1;
+      ALTER TABLE horarios DROP CONSTRAINT IF EXISTS horarios_empleado_id_fecha_key;
+      ALTER TABLE horarios DROP CONSTRAINT IF EXISTS horarios_empleado_fecha_tramo_key;
+      ALTER TABLE horarios ADD CONSTRAINT horarios_empleado_fecha_tramo_key
+        UNIQUE (empleado_id, fecha, tramo);
+      ALTER TABLE horarios DROP CONSTRAINT IF EXISTS horarios_tramo_valido;
+      ALTER TABLE horarios ADD CONSTRAINT horarios_tramo_valido CHECK (tramo IN (1, 2));
+      CREATE INDEX IF NOT EXISTS idx_horarios_rest_fecha ON horarios(restaurante_id, fecha);
+    `);
+    log('info', 'Migración horarios.tramo (turno partido) completada');
+  } catch (e) { log('warn', 'Migración horarios.tramo', { error: e.message }); }
+
+  // Plantilla de jornada en la ficha del empleado: su horario HABITUAL, que el
+  // generador aplica y luego se puede pisar día a día en la rejilla.
+  // `hora_entrada` (migración anterior) pasa a ser el inicio del tramo 1.
+  try {
+    await pool.query(`
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS jornada_tipo VARCHAR(10) DEFAULT 'seguido';
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS tramo1_inicio TIME;
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS tramo1_fin TIME;
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS tramo2_inicio TIME;
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS tramo2_fin TIME;
+      ALTER TABLE empleados DROP CONSTRAINT IF EXISTS empleados_jornada_tipo_valido;
+      ALTER TABLE empleados ADD CONSTRAINT empleados_jornada_tipo_valido
+        CHECK (jornada_tipo IN ('seguido', 'partido'));
+      -- Arrastrar la hora de entrada existente al tramo 1 (sin tocar el resto).
+      UPDATE empleados SET tramo1_inicio = COALESCE(hora_entrada, '10:00')
+        WHERE tramo1_inicio IS NULL;
+    `);
+    log('info', 'Migración empleados.plantilla_jornada completada');
+  } catch (e) { log('warn', 'Migración empleados.plantilla_jornada', { error: e.message }); }
 
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
