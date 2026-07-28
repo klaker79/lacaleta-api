@@ -13,9 +13,39 @@
 const { pool } = require('../config/database');
 const { log } = require('../utils/logger');
 
+/**
+ * 🔒 Auditoría 2026-07-28: esta clase interpola identificadores (tabla, columnas,
+ * ORDER BY) directamente en el SQL, porque los identificadores NO admiten
+ * placeholders $N. Hoy no es explotable — `orderBy` nunca se alimenta de
+ * req.query y `tableName` es una constante del código —, pero bastaría con que
+ * alguien pasara un valor de usuario para abrir una inyección. Este guard cierra
+ * esa puerta en el sitio, no en cada llamada.
+ *
+ * Acepta solo identificadores SQL simples, con sufijo opcional ASC/DESC:
+ *   'id', 'nombre DESC', 'created_at asc'
+ */
+const SQL_IDENT = /^[a-z_][a-z0-9_]*$/i;
+
+function assertIdent(value, what) {
+    if (typeof value !== 'string' || !SQL_IDENT.test(value)) {
+        throw new Error(`BaseService: ${what} inválido: ${JSON.stringify(value)}`);
+    }
+    return value;
+}
+
+function assertOrderBy(value) {
+    const parts = String(value).trim().split(/\s+/);
+    if (parts.length > 2) throw new Error(`BaseService: orderBy inválido: ${JSON.stringify(value)}`);
+    assertIdent(parts[0], 'columna de orderBy');
+    if (parts[1] && !/^(asc|desc)$/i.test(parts[1])) {
+        throw new Error(`BaseService: dirección de orden inválida: ${JSON.stringify(parts[1])}`);
+    }
+    return parts.join(' ');
+}
+
 class BaseService {
     constructor(tableName) {
-        this.tableName = tableName;
+        this.tableName = assertIdent(tableName, 'nombre de tabla');
         this.pool = pool;
     }
 
@@ -38,9 +68,10 @@ class BaseService {
     async findAll(restauranteId, options = {}) {
         const { orderBy = 'id', includeDeleted = false } = options;
         const deletedClause = includeDeleted ? '' : 'AND deleted_at IS NULL';
+        const safeOrderBy = assertOrderBy(orderBy);
 
         return this.query(
-            `SELECT * FROM ${this.tableName} WHERE restaurante_id = $1 ${deletedClause} ORDER BY ${orderBy}`,
+            `SELECT * FROM ${this.tableName} WHERE restaurante_id = $1 ${deletedClause} ORDER BY ${safeOrderBy}`,
             [restauranteId]
         );
     }
@@ -60,7 +91,7 @@ class BaseService {
      * Crear registro
      */
     async create(data, restauranteId) {
-        const keys = Object.keys(data);
+        const keys = Object.keys(data).map(k => assertIdent(k, 'nombre de columna'));
         const values = Object.values(data);
         const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
 
@@ -76,7 +107,7 @@ class BaseService {
      * Actualizar registro
      */
     async update(id, data, restauranteId) {
-        const keys = Object.keys(data);
+        const keys = Object.keys(data).map(k => assertIdent(k, 'nombre de columna'));
         const values = Object.values(data);
         const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
 
