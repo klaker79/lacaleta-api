@@ -910,6 +910,14 @@ module.exports = function (pool, { resend, JWT_SECRET, INVITATION_CODE }) {
                 return res.status(400).json({ error: 'Faltan datos requeridos (nombre, email, password)' });
             }
 
+            // 🔒 Auditoría 2026-07-28: mismo mínimo que /auth/register y
+            // /auth/reset-password. Sin esto, un admin podía crear usuarios de
+            // equipo con contraseña de 1 carácter — cuentas con acceso completo
+            // al tenant y credencial trivial de adivinar.
+            if (password.length < 8) {
+                return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+            }
+
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(email)) {
                 return res.status(400).json({ error: 'Formato de email inválido' });
