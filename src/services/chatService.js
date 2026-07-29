@@ -25,8 +25,10 @@ const {
     getOmnesAnalysis
 } = require('./menuEngineeringService');
 
+const { ANTHROPIC_MODEL } = require('../config/aiModels');
+
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = ANTHROPIC_MODEL;
 const MAX_TOKENS = 2048;
 const MAX_AGENT_ITERATIONS = 10;
 

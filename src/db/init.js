@@ -1087,6 +1087,114 @@ async function initializeDatabase(pool) {
     log('info', 'Migración empleados.plantilla_jornada completada');
   } catch (e) { log('warn', 'Migración empleados.plantilla_jornada', { error: e.message }); }
 
+  // ==========================================================================
+  // DERIVA DE ESQUEMA: columnas y tablas que el CÓDIGO usa pero init.js nunca
+  // creó (auditoría 2026-07-29).
+  //
+  // En la BD de producción existen porque en su día se añadieron a mano. Pero
+  // init.js es lo único que corre al levantar una base de datos nueva, así que
+  // **toda casa nueva nacía con el esquema incompleto**. Se detectó al comparar
+  // el esquema de producción con el de la BD de la casa Lite, recién creada:
+  // faltaban 13 columnas y 2 tablas que el código consulta.
+  //
+  // Síntomas que producía en una BD nueva:
+  //   - /onboarding y /chat-status devolvían error (columnas onboarding_* y
+  //     chat_consultas_mes inexistentes).
+  //   - stock_movements no existe → InventoryService captura la excepción y
+  //     sigue. El histórico de movimientos de stock se pierde EN SILENCIO.
+  //
+  // Todo aditivo e idempotente (IF NOT EXISTS): en una BD que ya las tenga
+  // —producción— esto es un no-op. Tipos y defaults copiados literalmente del
+  // esquema de producción para que las dos casas no diverjan.
+  //
+  // Las tablas alertas_descartadas, config_gastos y precios_historicos también
+  // faltan en las BD nuevas, pero NO se crean aquí a propósito: no tienen ni
+  // una referencia en el código. Son legado muerto de la BD de producción.
+  // ==========================================================================
+  // ⚠️ Este batch es todo-o-nada: va en una sola pool.query(), así que si un
+  // ALTER falla (p.ej. porque su tabla aún no existe) se pierden TODOS los
+  // demás y solo queda un warn en el log. Las cinco tablas que se tocan aquí
+  // —restaurantes, ingredientes, perdidas_stock, ingredientes_proveedores,
+  // compras_pendientes— se crean bastante más arriba en este mismo fichero.
+  // Si añades una columna de otra tabla, comprueba antes que se cree antes.
+  try {
+    await pool.query(`
+      -- Onboarding y add-on de chat (usados por onboardingService, chatAddonGate,
+      -- chat.routes y webhooks.routes).
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS onboarding_ingredientes_at TIMESTAMPTZ;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS onboarding_proveedores_at  TIMESTAMPTZ;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS onboarding_recetas_at      TIMESTAMPTZ;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS onboarding_pedidos_at      TIMESTAMPTZ;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS onboarding_completado_at   TIMESTAMPTZ;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS chat_addon              BOOLEAN     NOT NULL DEFAULT FALSE;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS chat_consultas_mes      INTEGER     NOT NULL DEFAULT 0;
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS chat_consultas_reset_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+      -- Caducidad de ingredientes.
+      ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS dias_vida_util  INTEGER DEFAULT 7;
+      ALTER TABLE ingredientes ADD COLUMN IF NOT EXISTS fecha_caducidad DATE;
+
+      -- Detalle de pérdidas de stock.
+      ALTER TABLE perdidas_stock ADD COLUMN IF NOT EXISTS coste_estimado NUMERIC(10,2);
+      ALTER TABLE perdidas_stock ADD COLUMN IF NOT EXISTS notas          TEXT;
+      ALTER TABLE perdidas_stock ADD COLUMN IF NOT EXISTS unidad         VARCHAR(20);
+
+      -- Formato de compra por proveedor (lo escribe ingredients.routes.js).
+      ALTER TABLE ingredientes_proveedores ADD COLUMN IF NOT EXISTS precio_formato       NUMERIC(10,2);
+      ALTER TABLE ingredientes_proveedores ADD COLUMN IF NOT EXISTS cantidad_por_formato NUMERIC(10,3);
+
+      -- Dedup de albaranes por hash de imagen (lo escribe /parse-albaran).
+      ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS image_hash TEXT;
+      CREATE INDEX IF NOT EXISTS idx_compras_pendientes_image_hash
+        ON compras_pendientes (restaurante_id, image_hash) WHERE image_hash IS NOT NULL;
+    `);
+    log('info', 'Migración deriva de esquema (columnas) verificada');
+  } catch (e) { log('warn', 'Migración deriva de esquema (columnas)', { error: e.message }); }
+
+  try {
+    // Histórico de movimientos de stock. InventoryService inserta aquí y hoy,
+    // si la tabla no existe, traga la excepción y sigue: el movimiento se pierde
+    // sin dejar rastro. Ojo: la columna es `restaurant_id` (en inglés), no
+    // `restaurante_id` — así está en producción y así la escribe el código.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id             SERIAL PRIMARY KEY,
+        restaurant_id  INTEGER      NOT NULL,
+        ingredient_id  INTEGER      NOT NULL,
+        movement_type  VARCHAR(20)  NOT NULL,
+        quantity       NUMERIC(10,3) NOT NULL,
+        reference_type VARCHAR(20),
+        reference_id   INTEGER,
+        notes          TEXT,
+        created_by     INTEGER,
+        created_at     TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_ingredient ON stock_movements (ingredient_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_date       ON stock_movements (restaurant_id, created_at);
+    `);
+    log('info', 'Tabla stock_movements verificada');
+  } catch (e) { log('warn', 'Migración stock_movements', { error: e.message }); }
+
+  try {
+    // Suscripciones al add-on de chat (las escribe el webhook de Polar).
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chat_addon_subscriptions (
+        id                     SERIAL PRIMARY KEY,
+        restaurante_id         INTEGER     NOT NULL,
+        polar_subscription_id  TEXT        NOT NULL UNIQUE,
+        polar_customer_id      TEXT,
+        status                 TEXT        NOT NULL,
+        current_period_end     TIMESTAMPTZ,
+        raw_event              JSONB,
+        created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_chat_addon_subs_restaurante ON chat_addon_subscriptions (restaurante_id);
+      CREATE INDEX IF NOT EXISTS idx_chat_addon_subs_status      ON chat_addon_subscriptions (status);
+    `);
+    log('info', 'Tabla chat_addon_subscriptions verificada');
+  } catch (e) { log('warn', 'Migración chat_addon_subscriptions', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
