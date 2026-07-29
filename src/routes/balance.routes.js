@@ -664,9 +664,21 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                     log('warn', 'Duplicate albaran blocked by numero_factura', {
                         existingBatchId: dup.batch_id, numero_factura: numFactura, restauranteId: req.restauranteId
                     });
+                    // Contrato unificado de duplicado (2026-07-29): TODOS los caminos
+                    // devuelven success:true + batchId a nivel superior (el batch YA
+                    // existente) + duplicateWarning completo. Antes este camino era el
+                    // único con success:false y sin batchId arriba, así que el cliente
+                    // no podía recuperar el albarán original y se quedaba tirado.
                     return res.json({
-                        success: false,
+                        success: true,
+                        batchId: dup.batch_id,
+                        proveedor: dup.proveedor || data.proveedor || null,
+                        fecha: dup.fecha,
                         iva_pct: ivaPctAlbaran,
+                        totalItems: parseInt(dup.item_count),
+                        matched: 0,
+                        unmatched: 0,
+                        totalImporte: 0,
                         duplicateWarning: {
                             batchId: dup.batch_id,
                             fecha: dup.fecha,
@@ -759,42 +771,22 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 });
             }
 
-            // 🔒 Server-side dedup: reject if ANY batch was created in last 2 minutes
-            // OCR produces different spellings each scan, so comparing names is unreliable.
-            // Physically impossible to scan 2 different albaranes in under 2 minutes.
-            const recentBatch = await pool.query(
-                `SELECT batch_id, COUNT(*) as item_count
-                 FROM compras_pendientes
-                 WHERE restaurante_id = $1
-                   AND created_at >= NOW() - INTERVAL '2 minutes'
-                 GROUP BY batch_id
-                 LIMIT 1`,
-                [req.restauranteId]
-            );
-
-            if (recentBatch.rows.length > 0) {
-                const existing = recentBatch.rows[0];
-                log('warn', 'Duplicate albaran rejected (cooldown 2 min)', {
-                    existingBatchId: existing.batch_id, newBatchId: batchId
-                });
-                return res.json({
-                    success: true,
-                    batchId: existing.batch_id,
-                    proveedor: data.proveedor || null,
-                    fecha,
-                    totalItems: data.lineas.length,
-                    matched,
-                    unmatched: data.lineas.length - matched,
-                    totalImporte: Math.round(totalImporte * 100) / 100,
-                    duplicateWarning: {
-                        batchId: existing.batch_id,
-                        fecha,
-                        itemCount: parseInt(existing.item_count),
-                        similarity: 100,
-                        source: 'recent_duplicate'
-                    }
-                });
-            }
+            // ⛔ ELIMINADO: cooldown de 2 minutos (Iker 2026-07-29).
+            //
+            // Rechazaba CUALQUIER albarán si el tenant había escaneado otro en los 2
+            // minutos anteriores, sin mirar el contenido. La premisa del comentario
+            // original ("es físicamente imposible escanear 2 albaranes distintos en
+            // menos de 2 minutos") es falsa en el uso real: al recibir el género llegan
+            // varios albaranes de golpe y se fotografían seguidos. El resultado era que
+            // el 2º y siguientes salían como "duplicado" y el usuario se quedaba tirado.
+            //
+            // El contenido ya está cubierto por tres detectores REALES, que sí miran lo
+            // que hay en el papel y siguen activos:
+            //   1. image_hash  — misma foto exacta.
+            //   2. numero_factura — mismo número de factura del mismo proveedor.
+            //   3. checkDuplicateAlbaran — mismos ingredientes, ±2 días, ≥70% de parecido.
+            // Un albarán distinto no dispara ninguno de los tres, que es justo lo que
+            // queremos: detectar duplicados por CONTENIDO, no por reloj.
 
             if (placeholders.length > 0) {
                 await pool.query(
@@ -1407,6 +1399,67 @@ REGLAS:
             res.json(rows);
         } catch (err) {
             log('error', 'Error listando compras pendientes', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    /**
+     * GET /purchases/batch/:batchId — un albarán concreto, en CUALQUIER estado.
+     *
+     * `GET /purchases/pending` solo devuelve líneas 'pendiente' y no admite filtrar por
+     * batch, así que un albarán ya aprobado era invisible para el cliente: al reescanearlo,
+     * el dedup devolvía el batch_id original y el móvil no podía cargar ni una línea
+     * ("No pude cargar las líneas del albarán"). Con esto el cliente puede mostrar QUÉ se
+     * registró y cuándo, en vez de un error técnico.
+     *
+     * Read-only y tenant-scoped. Devuelve además el resumen del albarán para poder pintar
+     * el aviso sin tener que recomponerlo en el cliente.
+     */
+    router.get('/purchases/batch/:batchId', ocrDisabledGuard, authMiddleware, async (req, res) => {
+        try {
+            const { batchId } = req.params;
+            if (!batchId || typeof batchId !== 'string' || batchId.length > 64) {
+                return res.status(400).json({ error: 'batchId inválido' });
+            }
+
+            const result = await pool.query(
+                `SELECT cp.*, i.nombre as ingrediente_nombre_db, i.unidad,
+                        i.formato_compra as ingrediente_formato_compra,
+                        i.cantidad_por_formato as ingrediente_cantidad_por_formato
+                   FROM compras_pendientes cp
+                   LEFT JOIN ingredientes i ON cp.ingrediente_id = i.id
+                  WHERE cp.batch_id = $1 AND cp.restaurante_id = $2
+                  ORDER BY cp.id`,
+                [batchId, req.restauranteId]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Albarán no encontrado' });
+            }
+
+            const rows = result.rows;
+            const primera = rows[0];
+            // Estado del albarán = el de sus líneas. Mezclado solo si se aprobó a medias
+            // (aprobar item a item), cosa posible con POST /purchases/pending/:id/approve.
+            const estados = [...new Set(rows.map(r => r.estado))];
+
+            res.json({
+                batchId,
+                estado: estados.length === 1 ? estados[0] : 'mixto',
+                estados,
+                proveedor: primera.proveedor || null,
+                numero_factura: primera.numero_factura || null,
+                fecha: primera.fecha,
+                created_at: primera.created_at,
+                aprobado_at: rows.map(r => r.aprobado_at).find(Boolean) || null,
+                itemCount: rows.length,
+                totalImporte: Math.round(
+                    rows.reduce((s, r) => s + (parseFloat(r.precio) || 0) * (parseFloat(r.cantidad) || 0), 0) * 100
+                ) / 100,
+                items: rows
+            });
+        } catch (err) {
+            log('error', 'Error consultando batch de albarán', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         }
     });
