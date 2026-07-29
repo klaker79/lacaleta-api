@@ -511,6 +511,8 @@ Retorna ÚNICAMENTE un JSON válido (sin explicaciones, sin markdown):
   "numero_factura": "número de serie/albarán/factura tal como aparece (ej: '426', 'A-7005900', 'F2024-001')",
   "fecha": "YYYY-MM-DD",
   "iva_pct": 10,
+  "base_imponible": 8.92,
+  "total_documento": 9.81,
   "lineas": [
     {
       "producto": "nombre EXACTO del producto tal como aparece impreso",
@@ -530,12 +532,17 @@ REGLAS CRÍTICAS DE PRECISIÓN:
 
 2b. CIF/NIF: copia el CIF de la empresa EMISORA (la que factura, normalmente arriba a la izquierda o junto a su razón social), NO el del cliente/destinatario. Formato tal cual (letra + números). null si no aparece.
 
-3. FECHA: 
+3. FECHA:
    - Busca la fecha en la cabecera del documento (no en caducidades ni lotes).
    - Los documentos son RECIENTES (años 2024, 2025, 2026). Si ves "04/02/2026", la fecha es 2026-02-04.
    - Si la fecha dice "04/02/26", el año es 2026 (NO 1926, NO 2006).
    - Formato de salida SIEMPRE: YYYY-MM-DD.
    - CUIDADO: En España las fechas son DD/MM/YYYY, no MM/DD/YYYY.
+   - ⚠️ MUY IMPORTANTE: al lado de la fecha suele ir la HORA, a veces con PUNTO en vez
+     de dos puntos. En "Fecha: 29/07/2026 12.03" la fecha es 2026-07-29 y "12.03" son
+     las 12:03 — NO es parte de la fecha, NO es el mes, NO es el día. Coge SOLO el
+     bloque DD/MM/AAAA y descarta lo que venga detrás.
+   - Lee la fecha dígito a dígito del documento. NO la deduzcas ni la aproximes.
 
 4. PRODUCTOS:
    - Copia el nombre del producto EXACTAMENTE como está impreso (respeta mayúsculas, tildes, abreviaturas).
@@ -543,12 +550,24 @@ REGLAS CRÍTICAS DE PRECISIÓN:
    - "precio_unitario" = precio por UNA unidad/kg (NO el importe total de la línea).
    - Si solo ves importe total y cantidad: precio_unitario = total / cantidad.
    - "unidad": extrae la unidad si aparece (kg, ud, litro, caja, bandeja). Si no aparece, usa "ud".
+   - ⚠️ DECIMALES: copia la cantidad con TODOS los decimales impresos. Si pone "2,615",
+     devuelve 2.615 — NO 2.62, NO 2.6. Es peso real y redondearlo descuadra el importe.
+     Lo mismo con el precio: si pone "3,7543", devuelve 3.7543.
 
 5. NO INCLUIR como líneas de producto: totales, subtotales, IVA, bases imponibles, portes, recargos de equivalencia.
 
 6. IVA (campo "iva_pct"): busca el TIPO de IVA aplicado. OJO: puede aparecer como "IVA", "I.V.A.", "IVE" (gallego), "IVE" en una columna de la tabla, "% IVA", "Tipo IVA", "COTA IVE" (esa es la cuota, el tipo está al lado). Coge el TIPO en porcentaje (ej. 10 o 21), NO el importe en euros. Pon SOLO el número. Si hay VARIOS tipos, usa el que aplique a la MAYORÍA de las líneas. Si no aparece, usa null. NO lo confundas con el recargo de equivalencia (RE) ni con el descuento (Dto).
 
-6. Si un campo no es legible, usa null. NUNCA inventes datos.`
+7. BASE IMPONIBLE y TOTAL DEL DOCUMENTO (campos "base_imponible" y "total_documento"):
+   - "base_imponible": el importe SIN IVA que declara el pie del documento ("Base",
+     "Base imponible", "Base impoñible"). Es un ÚNICO número para todo el albarán.
+   - "total_documento": el importe FINAL a pagar ("Total", "Total factura").
+   - Cópialos tal cual aparecen impresos, sin recalcularlos. null si no aparecen.
+   - Son CRÍTICOS: con ellos se detecta si los precios de las líneas llevan el IVA
+     incluido o no. Búscalos siempre en el pie del documento.
+   - No los metas como líneas de producto (ver regla 5).
+
+8. Si un campo no es legible, usa null. NUNCA inventes datos.`
                             }
                         ]
                     }]
@@ -701,6 +720,53 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 total: l.total != null ? parseFloat(l.total) : null
             }));
 
+            // ── Precios CON IVA incluido → pasarlos a BASE ──────────────────────────────
+            //
+            // Hay proveedores que imprimen el PVP con el IVA dentro. Caso real (OROSA,
+            // 2026-07-29): "MUSLOS DE POLLO 2,615 × 3,75 = 9,81", y al pie "Base 8,92 /
+            // IVA 10 / Cuota 0,89 / Total 9,81". Ese 3,75 €/kg lleva el IVA: la base son
+            // 8,92 y el coste real del kilo es 8,92/2,615 = 3,41 €/kg, no 3,75.
+            //
+            // Volcarlo tal cual metía un 10% de más en el precio del ingrediente, y de ahí
+            // al food cost de toda receta que lo llevara. Además la app volvía a sumar el
+            // IVA sobre un importe que ya lo tenía (9,83 → 10,81 en vez de 9,81).
+            //
+            // Detección: se compara la suma de líneas con la base declarada del albarán.
+            // Si se parece mucho más a base×(1+iva) que a la propia base, los precios
+            // llevan IVA y se dividen por ese factor. Con base 8,92 e IVA 10: la suma
+            // (9,806) queda a 0,006 de 9,812 y a 0,886 de 8,92 — no hay ambigüedad.
+            // Si el albarán ya da precios sin IVA, la suma casa con la base y no se toca.
+            const baseDeclarada = (data.base_imponible !== null && data.base_imponible !== undefined && !isNaN(parseFloat(data.base_imponible)))
+                ? Math.abs(parseFloat(data.base_imponible))
+                : null;
+            let preciosConIvaIncluido = false;
+
+            if (baseDeclarada > 0 && ivaPctAlbaran > 0) {
+                const sumaLineas = data.lineas.reduce((s, l) => s + (l.cantidad * l.precio_unitario), 0);
+                if (sumaLineas > 0) {
+                    const factor = 1 + (ivaPctAlbaran / 100);
+                    const difSinIva = Math.abs(sumaLineas - baseDeclarada);
+                    const difConIva = Math.abs(sumaLineas - (baseDeclarada * factor));
+                    // Tolerancia del 2% sobre la suma para absorber redondeos del albarán.
+                    if (difConIva < difSinIva && (difConIva / sumaLineas) < 0.02) {
+                        preciosConIvaIncluido = true;
+                        // Se reparte con la BASE DECLARADA, no dividiendo por (1+iva): así la
+                        // suma de las líneas da exactamente la base del papel. Dividir por el
+                        // factor dejaba un céntimo de desfase (8,91 frente a 8,92) por el
+                        // redondeo del precio unitario.
+                        const ratio = baseDeclarada / sumaLineas;
+                        data.lineas = data.lineas.map(l => ({
+                            ...l,
+                            precio_unitario: +(l.precio_unitario * ratio).toFixed(4),
+                            total: l.total != null ? +(l.total * ratio).toFixed(2) : null
+                        }));
+                        log('info', 'Albarán con precios IVA incluido: convertidos a base', {
+                            ivaPct: ivaPctAlbaran, baseDeclarada, sumaLineas: +sumaLineas.toFixed(2)
+                        });
+                    }
+                }
+            }
+
             const ingredientesResult = await pool.query(
                 'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
@@ -810,7 +876,14 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 totalItems: data.lineas.length,
                 matched,
                 unmatched: data.lineas.length - matched,
-                totalImporte: Math.round(totalImporte * 100) / 100
+                totalImporte: Math.round(totalImporte * 100) / 100,
+                // Pie del albarán, para poder cuadrar contra el papel. `totalImporte` es
+                // SIEMPRE base sin IVA (si el albarán venía con IVA incluido, ya se convirtió).
+                base_imponible: baseDeclarada,
+                total_documento: (data.total_documento !== null && data.total_documento !== undefined && !isNaN(parseFloat(data.total_documento)))
+                    ? Math.abs(parseFloat(data.total_documento))
+                    : null,
+                precios_con_iva_incluido: preciosConIvaIncluido
             };
             if (duplicateWarning) {
                 albaranResponse.duplicateWarning = duplicateWarning;
