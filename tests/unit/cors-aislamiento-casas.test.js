@@ -13,6 +13,14 @@
 const path = require('path');
 
 const CONFIG = path.join(__dirname, '..', '..', 'src', 'config', 'index.js');
+const SERVER = path.join(__dirname, '..', '..', 'server.js');
+
+/** Quita comentarios: dentro de ellos sí puede citarse un dominio (la explicación). */
+function sinComentariosDe(fuente) {
+    return fuente
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+}
 
 /**
  * Carga src/config con un entorno concreto, sin caché entre casos.
@@ -85,10 +93,32 @@ describe('Aislamiento CORS entre casas', () => {
     test('el fichero de config no lleva dominios de producción escritos a mano', () => {
         const fuente = require('fs').readFileSync(CONFIG, 'utf8');
         // Solo dentro de comentarios (la explicación del porqué). Fuera, ninguno.
-        const sinComentarios = fuente
-            .replace(/\/\*[\s\S]*?\*\//g, '')
-            .replace(/^\s*\/\/.*$/gm, '');
+        const sinComentarios = sinComentariosDe(fuente);
         expect(sinComentarios).not.toContain('app.mindloop.cloud');
         expect(sinComentarios).not.toContain('klaker79.github.io');
+    });
+
+    // ── Lo que de verdad aplica el CORS ─────────────────────────────────────
+    //
+    // La primera versión de este guardián solo miraba `src/config/index.js`, y
+    // pasaba en verde mientras el agujero seguía abierto: el middleware real
+    // vive en `server.js` y tenía SU PROPIA lista de orígenes. Se arregló la
+    // copia equivocada y el test no se enteró.
+    //
+    // Un guardián que valida el fichero que no manda no sirve de nada.
+
+    test('server.js NO mantiene su propia lista de orígenes', () => {
+        const fuente = sinComentariosDe(require('fs').readFileSync(SERVER, 'utf8'));
+        expect(fuente).not.toMatch(/DEFAULT_ORIGINS\s*=\s*\[/);
+        expect(fuente).not.toContain('app.mindloop.cloud');
+        expect(fuente).not.toContain('klaker79.github.io');
+        expect(fuente).not.toContain('admin.mindloop.cloud');
+    });
+
+    test('server.js toma los orígenes de src/config', () => {
+        const fuente = sinComentariosDe(require('fs').readFileSync(SERVER, 'utf8'));
+        // Debe leerlos de la fuente única, no reconstruirlos.
+        expect(fuente).toMatch(/require\(['"]\.\/src\/config['"]\)/);
+        expect(fuente).toMatch(/ALLOWED_ORIGINS\s*=\s*corsConfig\.allowedOrigins/);
     });
 });
