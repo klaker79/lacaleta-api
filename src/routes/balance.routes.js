@@ -11,7 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
-const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase } = require('../utils/businessHelpers');
+const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBackendIngredientUnitPrice, getRecipeCostBase, recalcularPrecioPonderado } = require('../utils/businessHelpers');
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
 const { personalCostExpr } = require('../utils/personalCost');
@@ -1461,6 +1461,126 @@ REGLAS:
         } catch (err) {
             log('error', 'Error consultando batch de albarán', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
+        }
+    });
+
+    /**
+     * POST /purchases/batch/:batchId/revert — deshace el registro de un albarán.
+     *
+     * Revierte EXACTAMENTE lo que aplicó approve-batch, con las mismas fórmulas
+     * (computePurchaseApproval), y devuelve las líneas a 'pendiente' para que el
+     * albarán se pueda volver a procesar — normalmente para recibirlo sobre el pedido
+     * al que pertenece, en vez de haberlo metido como compra suelta.
+     *
+     * Por qué existe: un albarán consolidado como compra suelta sube stock por una vía
+     * que no cierra el pedido. El pedido se queda 'pendiente' y el usuario no puede
+     * recibirlo sin contar el stock dos veces. Sin poder deshacer, la única salida era
+     * avisar del problema y dejarlo ahí, que no es arreglarlo.
+     *
+     * Qué revierte, por línea aprobada:
+     *   - stock_actual  -= cantidad × (formato_override || 1)      [GREATEST(0,…)]
+     *   - precios_compra_diarios: resta cantidad_comprada y total_compra del apunte
+     *     (ingrediente, fecha, tenant, pedido_id NULL). Si queda a cero o menos, borra
+     *     la fila — approve-batch siempre inserta con pedido_id NULL.
+     *   - recalcula ingredientes.precio desde el Diario ya corregido.
+     *
+     * Limitación consciente: `ingredientes_proveedores.precio` NO se restaura, porque
+     * approve-batch lo sobrescribe sin guardar el valor anterior y no hay histórico del
+     * que recuperarlo. El siguiente registro de ese ingrediente/proveedor lo vuelve a
+     * fijar. Se documenta en la respuesta (`precioProveedorNoRestaurado`).
+     */
+    router.post('/purchases/batch/:batchId/revert', ocrDisabledGuard, authMiddleware, requireAdmin, async (req, res) => {
+        const { batchId } = req.params;
+        if (!batchId || typeof batchId !== 'string' || batchId.length > 64) {
+            return res.status(400).json({ error: 'batchId inválido' });
+        }
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const { rows: items } = await client.query(
+                `SELECT * FROM compras_pendientes
+                  WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'aprobado'
+                  ORDER BY id
+                  FOR UPDATE`,
+                [batchId, req.restauranteId]
+            );
+
+            if (items.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'No hay líneas aprobadas en este albarán' });
+            }
+
+            const ingredientesTocados = new Set();
+            let revertidos = 0;
+
+            for (const item of items) {
+                if (!item.ingrediente_id) continue;   // nunca sumó nada
+                const calc = computePurchaseApproval(item);
+                if (calc.rejected) continue;          // approve-batch tampoco lo aplicó
+
+                // 1) Stock
+                await client.query(
+                    `UPDATE ingredientes
+                        SET stock_actual = GREATEST(0, COALESCE(stock_actual, 0) - $1),
+                            ultima_actualizacion_stock = NOW()
+                      WHERE id = $2 AND restaurante_id = $3`,
+                    [calc.stockToAdd, item.ingrediente_id, req.restauranteId]
+                );
+
+                // 2) Diario: restar lo que sumó este albarán
+                await client.query(
+                    `UPDATE precios_compra_diarios
+                        SET cantidad_comprada = cantidad_comprada - $1,
+                            total_compra      = total_compra - $2
+                      WHERE ingrediente_id = $3 AND fecha = $4 AND restaurante_id = $5
+                        AND pedido_id IS NULL`,
+                    [calc.stockToAdd, calc.totalAlbaran, item.ingrediente_id, item.fecha, req.restauranteId]
+                );
+                await client.query(
+                    `DELETE FROM precios_compra_diarios
+                      WHERE ingrediente_id = $1 AND fecha = $2 AND restaurante_id = $3
+                        AND pedido_id IS NULL AND cantidad_comprada <= 0`,
+                    [item.ingrediente_id, item.fecha, req.restauranteId]
+                );
+
+                ingredientesTocados.add(item.ingrediente_id);
+                revertidos++;
+            }
+
+            // 3) Precio del ingrediente, desde el Diario ya corregido
+            for (const ingId of ingredientesTocados) {
+                await recalcularPrecioPonderado(client, ingId, req.restauranteId);
+            }
+
+            // 4) El albarán vuelve a estar disponible
+            await client.query(
+                `UPDATE compras_pendientes
+                    SET estado = 'pendiente', aprobado_at = NULL
+                  WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'aprobado'`,
+                [batchId, req.restauranteId]
+            );
+
+            await client.query('COMMIT');
+
+            log('info', 'Registro de albarán revertido', {
+                batchId, restauranteId: req.restauranteId, revertidos, lineas: items.length
+            });
+
+            res.json({
+                success: true,
+                batchId,
+                revertidos,
+                lineas: items.length,
+                precioProveedorNoRestaurado: true
+            });
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            log('error', 'Error revirtiendo albarán', { batchId, error: err.message });
+            res.status(500).json({ error: 'Error revirtiendo el albarán' });
+        } finally {
+            client.release();
         }
     });
 
