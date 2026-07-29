@@ -11,6 +11,7 @@ const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBacken
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
 const { personalCostExpr } = require('../utils/personalCost');
+const { ANTHROPIC_MODEL } = require('../config/aiModels');
 
 /**
  * Duplicate albaran detection using resolved INGREDIENT IDs.
@@ -457,7 +458,7 @@ module.exports = function (pool) {
                     'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
+                    model: ANTHROPIC_MODEL,
                     max_tokens: 4096,
                     messages: [{
                         role: 'user',

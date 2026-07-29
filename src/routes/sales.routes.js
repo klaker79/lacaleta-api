@@ -10,6 +10,7 @@ const { validateCantidad, validateId } = require('../utils/validators');
 const { expandRecipeToBase, loadYieldConfig, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
 const { logChange } = require('../utils/auditLog');
 const { agregarDeduccionesOrdenadas, esDeadlock } = require('../utils/stockDeduction');
+const { ANTHROPIC_MODEL } = require('../config/aiModels');
 
 // Reintentos ante deadlock/serialization_failure (errores transitorios; la transacción
 // hizo rollback completo, así que reintentar es seguro).
@@ -490,7 +491,7 @@ module.exports = function (pool) {
                     'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
+                    model: ANTHROPIC_MODEL,
                     max_tokens: 32000,
                     messages: [{
                         role: 'user',
