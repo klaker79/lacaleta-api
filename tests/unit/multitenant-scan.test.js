@@ -159,23 +159,89 @@ function readServiceFiles() {
  * Heurística: cualquier backtick string que tenga FROM/INTO/UPDATE/DELETE
  * en mayúscula (las queries del codebase respetan SQL caps).
  */
+/**
+ * Recorre el fichero carácter a carácter y devuelve el contenido de cada
+ * literal de cadena, distinguiendo comentarios de código.
+ *
+ * Por qué no vale una regex: emparejar comillas «a ojo» sobre todo el fichero
+ * descuadra en cuanto un comentario en castellano lleva un apóstrofo, o en
+ * cuanto una query contiene `'pendiente'`. A partir de ahí las comillas se
+ * emparejan corridas y un "literal" acaba abarcando cientos de líneas de
+ * código real. Eso es lo que hacía saltar el guardián de FOR UPDATE en la
+ * rama lite (2026-07-29): de los 6 "literales" que detectaba en
+ * balance.routes.js, 5 eran trozos de fichero, no SQL. El SQL estaba bien.
+ *
+ * @param {string} content
+ * @returns {{quote: '`'|"'"|'"', text: string}[]}
+ */
+function extractStringLiterals(content) {
+    const out = [];
+    let i = 0;
+    const n = content.length;
+
+    while (i < n) {
+        const c = content[i];
+        const next = content[i + 1];
+
+        // Comentario de línea: hasta el salto.
+        if (c === '/' && next === '/') {
+            i = content.indexOf('\n', i);
+            if (i === -1) break;
+            continue;
+        }
+        // Comentario de bloque: hasta el cierre.
+        if (c === '/' && next === '*') {
+            const fin = content.indexOf('*/', i + 2);
+            i = fin === -1 ? n : fin + 2;
+            continue;
+        }
+        // Cadena. Las comillas simples/dobles NO pueden llevar salto de línea
+        // sin escapar; el template literal sí.
+        if (c === '`' || c === "'" || c === '"') {
+            const permiteSalto = c === '`';
+            let j = i + 1;
+            let texto = '';
+            let cerrada = false;
+            while (j < n) {
+                const d = content[j];
+                if (d === '\\') { texto += content.substr(j, 2); j += 2; continue; }
+                if (d === c) { cerrada = true; break; }
+                if (d === '\n' && !permiteSalto) break; // cadena sin cerrar → no era una cadena
+                texto += d;
+                j++;
+            }
+            if (cerrada) {
+                out.push({ quote: c, text: texto });
+                i = j + 1;
+            } else {
+                i++; // apóstrofo suelto (p.ej. "don't" en un comentario ya saltado)
+            }
+            continue;
+        }
+        i++;
+    }
+    return out;
+}
+
+/** ¿Este texto tiene forma de query SQL de verdad? */
+function pareceSql(lit) {
+    return (
+        (/\bSELECT\b/.test(lit) && /\bFROM\b/.test(lit)) ||
+        /\bINSERT\s+INTO\b/.test(lit) ||
+        (/\bUPDATE\b/.test(lit) && /\bSET\b/.test(lit)) ||
+        /\bDELETE\s+FROM\b/.test(lit) ||
+        (/\bWITH\b/.test(lit) && /\bAS\s*\(/.test(lit))
+    );
+}
+
 function extractSqlLiterals(content) {
     const out = [];
-    // Captura template literals: `...` permitiendo \n y `${...}` interpolaciones
-    const re = /`([\s\S]*?)`/g;
-    let m;
-    while ((m = re.exec(content)) !== null) {
-        const lit = m[1];
+    for (const { quote, text: lit } of extractStringLiterals(content)) {
+        if (quote !== '`') continue; // este scan solo mira template literals
         // Forma REAL de SQL, case-sensitive (el codebase respeta SQL caps).
         // Evita falsos positivos con prosa (ej. el system prompt de Omnes en
         // chatService.js menciona "recetas/proveedores" sin ser una query).
-        const looksLikeSql =
-            (/\bSELECT\b/.test(lit) && /\bFROM\b/.test(lit)) ||
-            /\bINSERT\s+INTO\b/.test(lit) ||
-            (/\bUPDATE\b/.test(lit) && /\bSET\b/.test(lit)) ||
-            /\bDELETE\s+FROM\b/.test(lit) ||
-            (/\bWITH\b/.test(lit) && /\bAS\s*\(/.test(lit));
-        if (looksLikeSql) {
+        if (pareceSql(lit)) {
             out.push(lit);
         }
     }
@@ -286,12 +352,14 @@ describe('Locks FOR UPDATE en tablas soft-delete incluyen deleted_at IS NULL', (
 
         test(`${file}: cada FOR UPDATE sobre tabla soft-delete lleva deleted_at IS NULL`, () => {
             const violations = [];
-            // Examina tanto template literals como strings normales con SQL.
-            const literals = [
-                ...extractSqlLiterals(content),
-                ...(content.match(/'([^']*FOR UPDATE[^']*)'/gi) || []).map(s => s.slice(1, -1)),
-                ...(content.match(/"([^"]*FOR UPDATE[^"]*)"/gi) || []).map(s => s.slice(1, -1)),
-            ];
+            // Examina toda cadena del fichero (template literal, comilla simple
+            // o doble). El extractor entiende comentarios y escapes, así que un
+            // apóstrofo en prosa o un `'pendiente'` dentro de una query ya no
+            // descuadran el emparejado de comillas.
+            // Sin filtro de "parece SQL": aquí interesa CUALQUIER cadena que
+            // lockee, aunque se arme por trozos. Con la extracción correcta ya
+            // no hay falsos positivos que justifiquen estrechar la red.
+            const literals = extractStringLiterals(content).map(l => l.text);
             for (const sql of literals) {
                 if (!/FOR UPDATE/i.test(sql)) continue;
                 const softTables = SOFT_DELETE_TABLES.filter(t => new RegExp(`\\b${t}\\b`, 'i').test(sql));
