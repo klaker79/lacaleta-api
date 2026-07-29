@@ -2,9 +2,9 @@ name: Backend CI
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, lite]
   push:
-    branches: [main, develop]
+    branches: [main, develop, lite]
 
 # Permisos mínimos necesarios (CodeQL alert "Workflow does not contain permissions").
 # Solo lectura del repo para checkout + npm install.
