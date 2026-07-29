@@ -46,18 +46,29 @@ const config = {
     },
 
     // CORS
+    //
+    // 🔒 Auditoría 2026-07-29: la lista de orígenes por defecto estaba escrita a
+    // mano y llevaba dominios de PRODUCCIÓN, así que se aplicaba a todas las
+    // casas por igual. Efecto: la API de la casa Lite aceptaba peticiones con
+    // `Origin: https://app.mindloop.cloud` (comprobado en vivo: devolvía 401,
+    // no 403 — o sea, pasaba el CORS y solo la frenaba el token). Cada casa
+    // debe aceptar únicamente su propio frontend.
+    //
+    // En producción los orígenes salen SOLO de ALLOWED_ORIGINS. Los localhost
+    // se quedan para desarrollo, donde sí hacen falta y no hay nada que aislar.
+    // La casa Lite ya tiene ALLOWED_ORIGINS=https://lite.mindloop.cloud.
     cors: {
-        defaultOrigins: [
-            'https://klaker79.github.io',
-            'https://app.mindloop.cloud',
-            'http://localhost:5500',
-            'http://127.0.0.1:5500',
-            'http://localhost:3000',
-            'http://localhost:3001',
-            'http://localhost:3002',
-            'http://localhost:8080'
-        ],
-        envOrigins: process.env.ALLOWED_ORIGINS?.split(',') || []
+        defaultOrigins: process.env.NODE_ENV === 'production'
+            ? []
+            : [
+                'http://localhost:5500',
+                'http://127.0.0.1:5500',
+                'http://localhost:3000',
+                'http://localhost:3001',
+                'http://localhost:3002',
+                'http://localhost:8080'
+            ],
+        envOrigins: process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean) || []
     },
 
     // Rate limiting
@@ -85,5 +96,18 @@ const config = {
 config.cors.allowedOrigins = [
     ...new Set([...config.cors.defaultOrigins, ...config.cors.envOrigins])
 ];
+
+// En producción los orígenes salen solo de ALLOWED_ORIGINS. Si falta, la lista
+// queda vacía y el navegador bloquea TODAS las llamadas del frontend: la app
+// parece caída y el motivo no se ve por ningún lado. Mejor no arrancar y
+// decirlo claro que arrancar rota.
+if (config.server.isProduction && config.cors.allowedOrigins.length === 0) {
+    console.error(
+        '❌ FATAL ERROR: ALLOWED_ORIGINS no configurado.\n'
+        + '   En producción los orígenes CORS salen solo de esta variable.\n'
+        + '   Ejemplo: ALLOWED_ORIGINS=https://lite.mindloop.cloud'
+    );
+    process.exit(1);
+}
 
 module.exports = config;
