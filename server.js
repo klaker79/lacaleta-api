@@ -90,24 +90,23 @@ if (!JWT_SECRET) {
 }
 const PORT = process.env.PORT || 3000;
 
-// CORS: Orígenes permitidos (Combinar entorno + defaults)
-const DEFAULT_ORIGINS = [
-    'https://klaker79.github.io',
-    'https://app.mindloop.cloud',
-    'https://admin.mindloop.cloud',
-    // 🔒 FIX B2: Localhost solo en desarrollo (no exponer en producción)
-    ...(process.env.NODE_ENV !== 'production' ? [
-        'http://localhost:3000',    // Vite dev (demo)
-        'http://localhost:5173',    // Vite dev
-        'http://localhost:5174',    // Admin panel dev
-        'http://localhost:5500',    // Live Server
-        'http://127.0.0.1:5500'
-    ] : [])
-];
-const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : [];
-const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
+// CORS: orígenes permitidos.
+//
+// 🔒 Auditoría 2026-07-30: había DOS listas de orígenes. Esta, que es la que
+// usa de verdad el middleware, y otra en `src/config/index.js` que **no la lee
+// nadie**. Al cerrar el CORS entre casas se tocó la segunda (PR #423), así que
+// el agujero siguió abierto: verificado en vivo, `lite-api` seguía aceptando
+// `Origin: https://app.mindloop.cloud` (respondía 401, no 403 — pasaba el CORS
+// y solo lo frenaba el token).
+//
+// Ahora hay UNA sola lista, la de `src/config`. Duplicarla fue justo lo que
+// permitió arreglar la copia equivocada y creer que estaba hecho.
+//
+// En producción los orígenes salen SOLO de ALLOWED_ORIGINS, para que cada casa
+// (prod / staging / Lite) acepte únicamente su propio frontend. Los localhost
+// siguen valiendo en desarrollo, donde no hay nada que aislar.
+const { cors: corsConfig } = require('./src/config');
+const ALLOWED_ORIGINS = corsConfig.allowedOrigins;
 
 const app = express();
 

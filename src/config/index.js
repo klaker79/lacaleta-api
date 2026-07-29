@@ -57,15 +57,22 @@ const config = {
     // En producción los orígenes salen SOLO de ALLOWED_ORIGINS. Los localhost
     // se quedan para desarrollo, donde sí hacen falta y no hay nada que aislar.
     // La casa Lite ya tiene ALLOWED_ORIGINS=https://lite.mindloop.cloud.
+    // ⚠️ Antes de llevar esto a `main`: en producción `admin.mindloop.cloud`
+    // dejaría de estar permitido por defecto, y el panel de admin SÍ habla con
+    // `lacaleta-api` (comprobado en su bundle). Hay que añadirlo antes a la
+    // variable ALLOWED_ORIGINS del servicio de producción, o se queda fuera.
+    // En la casa Lite no aplica: el panel de admin no habla con `lite-api`.
     cors: {
         defaultOrigins: process.env.NODE_ENV === 'production'
             ? []
             : [
-                'http://localhost:5500',
-                'http://127.0.0.1:5500',
-                'http://localhost:3000',
+                'http://localhost:3000',    // Vite dev (demo)
                 'http://localhost:3001',
                 'http://localhost:3002',
+                'http://localhost:5173',    // Vite dev
+                'http://localhost:5174',    // Admin panel dev
+                'http://localhost:5500',    // Live Server
+                'http://127.0.0.1:5500',
                 'http://localhost:8080'
             ],
         envOrigins: process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean) || []
