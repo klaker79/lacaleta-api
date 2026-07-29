@@ -15,6 +15,7 @@ const { upsertCompraDiaria, resolveProveedorId, updateProveedorPrecio, getBacken
 const { computePurchaseApproval } = require('../utils/purchaseApproveCalc');
 const { logChange } = require('../utils/auditLog');
 const { personalCostExpr } = require('../utils/personalCost');
+const { matchIngrediente } = require('../utils/ingredientMatcher');
 
 /**
  * Convierte cualquier audio (webm, m4a, mp4, 3gp, ogg…) a WAV 16kHz mono con
@@ -688,35 +689,21 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                 total: l.total != null ? parseFloat(l.total) : null
             }));
 
-            // ── Matching de ingredientes (misma lógica que POST /purchases/pending) ──
-            const normalizar = (str) => {
-                return (str || '')
-                    .toLowerCase()
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    .replace(/[^a-z0-9\s]/g, '')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-            };
-
             const ingredientesResult = await pool.query(
                 'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
-            const ingredientesMap = new Map();
-            ingredientesResult.rows.forEach(i => {
-                ingredientesMap.set(normalizar(i.nombre), i.id);
-            });
-
             const aliasResult = await pool.query(
                 `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a
                  JOIN ingredientes i ON a.ingrediente_id = i.id
                  WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
-            const aliasMap = new Map();
-            aliasResult.rows.forEach(a => {
-                aliasMap.set(normalizar(a.alias), a.ingrediente_id);
-            });
+            // Candidatos para el matcheo por palabras (ingredientes + alias aprendidos).
+            const candidatosMatch = [
+                ...ingredientesResult.rows.map(i => ({ id: i.id, nombre: i.nombre })),
+                ...aliasResult.rows.map(a => ({ id: a.ingrediente_id, nombre: a.alias })),
+            ];
 
             // ── Preparar INSERT en compras_pendientes ──
             const batchId = crypto.randomUUID();
@@ -729,30 +716,8 @@ REGLAS CRÍTICAS DE PRECISIÓN:
             const resolvedIngredientIds = [];
 
             for (const linea of data.lineas) {
-                const nombreNorm = normalizar(linea.producto);
-                let ingredienteId = null;
-
-                // 4 niveles de búsqueda
-                ingredienteId = ingredientesMap.get(nombreNorm) || null;
-                if (!ingredienteId) {
-                    for (const [nombreDB, id] of ingredientesMap) {
-                        if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) {
-                            ingredienteId = id;
-                            break;
-                        }
-                    }
-                }
-                if (!ingredienteId) {
-                    ingredienteId = aliasMap.get(nombreNorm) || null;
-                }
-                if (!ingredienteId) {
-                    for (const [aliasNombre, id] of aliasMap) {
-                        if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) {
-                            ingredienteId = id;
-                            break;
-                        }
-                    }
-                }
+                const _m = matchIngrediente(linea.producto, candidatosMatch);
+                const ingredienteId = _m ? _m.id : null;
 
                 if (ingredienteId) {
                     matched++;
@@ -1116,36 +1081,21 @@ REGLAS:
             // Generar batch_id único para agrupar items del mismo albarán
             const batchId = require('crypto').randomUUID();
 
-            // Función para normalizar nombres
-            const normalizar = (str) => {
-                return (str || '')
-                    .toLowerCase()
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    .replace(/[^a-z0-9\s]/g, '')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-            };
-
-            // Obtener ingredientes y alias para matching
+            // Obtener ingredientes y alias para matching (helper por palabras).
             const ingredientesResult = await pool.query(
                 'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
-            const ingredientesMap = new Map();
-            ingredientesResult.rows.forEach(i => {
-                ingredientesMap.set(normalizar(i.nombre), i.id);
-            });
-
             const aliasResult = await pool.query(
                 `SELECT a.alias, a.ingrediente_id FROM ingredientes_alias a
              JOIN ingredientes i ON a.ingrediente_id = i.id
              WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
-            const aliasMap = new Map();
-            aliasResult.rows.forEach(a => {
-                aliasMap.set(normalizar(a.alias), a.ingrediente_id);
-            });
+            const candidatosMatch = [
+                ...ingredientesResult.rows.map(i => ({ id: i.id, nombre: i.nombre })),
+                ...aliasResult.rows.map(a => ({ id: a.ingrediente_id, nombre: a.alias })),
+            ];
 
             const resultados = { recibidos: 0, batchId };
             const values = [];
@@ -1153,36 +1103,8 @@ REGLAS:
             let paramIdx = 1;
 
             for (const compra of compras) {
-                const nombreNorm = normalizar(compra.ingrediente);
-                let ingredienteId = null;
-
-                // Búsqueda exacta
-                ingredienteId = ingredientesMap.get(nombreNorm) || null;
-
-                // Búsqueda parcial en ingredientes
-                if (!ingredienteId) {
-                    for (const [nombreDB, id] of ingredientesMap) {
-                        if (nombreDB.includes(nombreNorm) || nombreNorm.includes(nombreDB)) {
-                            ingredienteId = id;
-                            break;
-                        }
-                    }
-                }
-
-                // Búsqueda en alias
-                if (!ingredienteId) {
-                    ingredienteId = aliasMap.get(nombreNorm) || null;
-                }
-
-                // Búsqueda parcial en alias
-                if (!ingredienteId) {
-                    for (const [aliasNombre, id] of aliasMap) {
-                        if (aliasNombre.includes(nombreNorm) || nombreNorm.includes(aliasNombre)) {
-                            ingredienteId = id;
-                            break;
-                        }
-                    }
-                }
+                const _m = matchIngrediente(compra.ingrediente, candidatosMatch);
+                const ingredienteId = _m ? _m.id : null;
 
                 const precio = Math.abs(parseFloat(compra.precio)) || 0;
                 const cantidad = Math.abs(parseFloat(compra.cantidad)) || 0;
