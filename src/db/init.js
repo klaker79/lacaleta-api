@@ -1266,6 +1266,41 @@ async function initializeDatabase(pool) {
     log('info', 'Relleno de onboarding para tenants con datos previos verificado');
   } catch (e) { log('warn', 'Relleno de onboarding', { error: e.message }); }
 
+  // ==========================================================================
+  // plan_tier: el PAQUETE de pestañas, separado del plan de FACTURACIÓN.
+  //
+  // Hasta ahora la columna `plan` hacía dos trabajos a la vez y se estorbaban:
+  //   - facturación: 'trial' | 'premium' | …
+  //   - paquete de pestañas: 'lite'
+  //
+  // `requireActiveSubscription` deja pasar si (1) plan_status='active' o
+  // (2) plan='trial' con trial_ends_at futuro. Así que marcar a un cliente como
+  // Lite (`plan='lite'`) **le mataba el periodo de prueba**: dejaba de cumplir
+  // la regla 2 y había que ponerle plan_status='active' a mano, es decir,
+  // tratarlo como si ya pagara. Vender Lite con trial era imposible.
+  //
+  // Con `plan_tier` aparte, un cliente nuevo puede tener a la vez
+  // `plan='trial'` (con su prueba viva) y `plan_tier='lite'` (con sus pestañas).
+  //
+  // Backfill conservador: se copia `plan` a `plan_tier` SOLO donde `plan` es un
+  // tier conocido, y NO se toca `plan` ni `plan_status`. Los tenants que ya
+  // funcionan siguen igual; la mejora es para los que vengan.
+  // ==========================================================================
+  try {
+    await pool.query(`
+      ALTER TABLE restaurantes ADD COLUMN IF NOT EXISTS plan_tier VARCHAR(20);
+
+      UPDATE restaurantes
+         SET plan_tier = lower(plan)
+       WHERE plan_tier IS NULL
+         AND lower(coalesce(plan,'')) IN ('lite');
+
+      CREATE INDEX IF NOT EXISTS idx_restaurantes_plan_tier
+        ON restaurantes (plan_tier) WHERE plan_tier IS NOT NULL;
+    `);
+    log('info', 'Columna plan_tier (paquete de pestañas) verificada');
+  } catch (e) { log('warn', 'Migración plan_tier', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
