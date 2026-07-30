@@ -17,7 +17,7 @@ La Caleta 102 API is a Node.js/Express monolith backend for restaurant cost mana
 - `token` field in login JSON response — frontend stores it in sessionStorage and depends on it.
 - Bcrypt 5 rounds for API tokens (auth.routes.js) — tokens are `crypto.randomBytes(32)`, not passwords. 5 rounds is fine.
 - Token blacklist `Set` in `src/middleware/auth.js` — already has automatic cleanup every 15 minutes (lines 23-37).
-- `DEFAULT_ORIGINS` in server.js — only 5 production/dev origins. Do NOT add localhost:3001 here.
+- CORS: la lista de orígenes vive SOLO en `src/config/index.js` y `server.js` la LEE de ahí (`corsConfig.allowedOrigins`). NO recrear una lista propia en server.js — ya pasó (`DEFAULT_ORIGINS`) y costó un incidente: se arregló la copia equivocada con el test en verde. Guardián: `tests/unit/cors-aislamiento-casas.test.js` (valida server.js, el archivo que manda).
 
 ## Testing
 
@@ -27,10 +27,52 @@ La Caleta 102 API is a Node.js/Express monolith backend for restaurant cost mana
 - Auth tests and rate-limiting tests run in isolation AFTER all other tests (see ci.yml).
 - Run `npm test` before any PR.
 
+## Entornos — las tres casas (2026-07-31)
+
+Tres despliegues COMPLETAMENTE separados. Cada casa tiene su web, su API, su
+servicio Postgres, su base y su usuario. Nada se comparte.
+
+| Casa | Rama | Web | API | Postgres (servicio / base / user) |
+|---|---|---|---|---|
+| **Producción** (La Nave 5 — INTOCABLE) | `main` | app.mindloop.cloud | lacaleta-api.mindloop.cloud | `anais-postgres-2s8h7q` / `db` / `admin` — PG 17.10 |
+| **Staging** (ensayo, OCR en prueba) | `develop` (= main + OCR) | staging.mindloop.cloud | staging-api.mindloop.cloud | `mindloopstaging-...db-3jgixw` / `mindloop_staging` / `mindloop_staging_admin` — PG 17.10 |
+| **Lite** (producto escalable, clientes nuevos) | `lite` (nace de develop) | lite.mindloop.cloud | lite-api.mindloop.cloud | `mindloop-lite-...litedb-osgout` / `mindloop_lite` / `lite_admin` — PG 17.10 |
+
+Reglas que salen de esta separación:
+
+- **CORS por casa**: en producción los orígenes salen SOLO de `ALLOWED_ORIGINS`
+  (env en Dokploy). Cada API acepta únicamente su(s) frontend(s). Producción
+  lleva además `admin.mindloop.cloud` (el panel admin habla con lacaleta-api).
+  Si la lista queda vacía en producción, el servidor NO ARRANCA (a propósito).
+- **OCR**: gating GLOBAL por `OCR_ENABLED` (env). Prod = apagado (410).
+  Staging y Lite = encendido (401 sin token). Vender OCR por cliente = proyecto
+  de gating por tenant, aún no hecho.
+- **`plan` ≠ `plan_tier`** (restaurantes): `plan`/`plan_status`/`trial_ends_at`
+  = FACTURACIÓN (trial, active…). `plan_tier` = PAQUETE de pestañas ('lite' →
+  8 pestañas). Un cliente puede estar en trial Y ver el paquete Lite a la vez.
+  Poner `plan='lite'` BLOQUEA la cuenta (no pasa el gate) — ya pasó.
+  Guardián: `tests/unit/plan-tier-separado.test.js`.
+- **`init.js` es la única verdad del esquema**: debe crear TODO lo que el
+  código escribe — es lo único que corre en una BD nueva (= cliente nuevo).
+  Columnas nuevas van al `CREATE TABLE` además del `ALTER` (un índice sobre
+  una columna que aún no existe tumbó el bloque entero de índices).
+  Guardián: `tests/unit/schema-init-cubre-codigo.test.js`.
+- **El CI es quien prueba al cliente nuevo**: levanta Postgres desde cero con
+  init.js. Las BD vivas tienen deriva de esquema que TAPA fallos (ej.: un
+  parámetro SQL reutilizado en columnas DATE y TIMESTAMP revienta solo en BD
+  nueva → cast `::date` explícito). CI verde > prueba manual en staging/Lite.
+- **Modelo de IA**: el id de Anthropic vive SOLO en `src/config/aiModels.js`.
+  Guardián: `tests/unit/ai-model-single-source.test.js`.
+- **Deploy**: mergear ≠ desplegado. Tras merge: Redeploy (+ Clean Cache) en
+  Dokploy y verificación EN VIVO (health + un endpoint con Origin correcto).
+- La config persistente de Dokploy vive en su Postgres (`dokploy-postgres`,
+  tabla `postgres`, columna `dockerImage`): si cambias la imagen de una BD por
+  fuera de la UI, actualízala TAMBIÉN ahí o el próximo Redeploy la revierte.
+
 ## Security
 
 - Never hardcode secrets. All secrets via environment variables.
-- CORS: 5 DEFAULT_ORIGINS hardcoded + ALLOWED_ORIGINS env var merged at runtime.
+- CORS: lista única en `src/config/index.js`; en producción SOLO `ALLOWED_ORIGINS` (ver Entornos).
 - Helmet handles all security headers. Do not add manual ones.
 - Rate limiting via `src/middleware/rateLimit.js` (globalLimiter, authLimiter, costlyApiLimiter).
 
@@ -98,12 +140,22 @@ DO NOT change price normalization in approve endpoints without verifying:
 - `restaurante_id` in EVERY query. No exceptions.
 - Frontend owns stock adjustments. Backend orders POST/PUT NEVER touch stock_actual.
 
-### OCR/Purchase Flow
-- n8n + Gemini → POST /purchases/pending → user reviews → approve
-- App scanner endpoint exists but is disabled
-- Dedup: fuzzy matching (7 days for n8n, 60 days for scanner)
-- Guardrail: stock additions > 10,000 units are auto-rejected
-- Guardrail: precio < 0.05 + cantidad > 100 flagged as suspicious
+### OCR/Purchase Flow (actualizado 2026-07-31)
+- Flujo principal (móvil): foto albarán → `POST /parse-albaran` (Claude Vision)
+  → líneas en `compras_pendientes` (matcheo por `ingredientMatcher`) → revisión
+  → `POST /purchases/pending/approve-batch`.
+- **Aprobar CREA UN PEDIDO en estado `'recibido'`** (fecha = la del ALBARÁN, no
+  la de hoy) y enlaza el Diario por `pedido_id` — así la compra sale en la
+  pestaña Pedidos y se puede revertir con `DELETE /orders/:id`. Aplica a las
+  DOS puertas (batch y línea suelta). Guardián:
+  `tests/unit/aprobar-compra-crea-pedido.test.js`.
+- Los TRES flujos OCR (parse, alta pendientes, bulk legacy n8n) matchean con
+  `src/utils/ingredientMatcher.js` (por palabras). NUNCA matchear por inclusión
+  de cadena: "sal" está dentro de "salmón". Guardián:
+  `tests/unit/ocr-matcheo-unico.test.js`.
+- Dedup: fuzzy matching contra `estado IN ('pendiente','aprobado','recibido_en_pedido')`.
+- Guardrail: stock additions > 10,000 units are auto-rejected.
+- Guardrail: precio < 0.05 + cantidad > 100 flagged as suspicious.
 
 ### Trial / Billing (Polar) — ⛔ NO romper (es dinero)
 - Alta nueva (`/auth/register`): `plan='trial'`, `plan_status='trialing'`, `trial_ends_at = alta + TRIAL_DAYS` (**TRIAL_DAYS=10**), `max_users=5`.
