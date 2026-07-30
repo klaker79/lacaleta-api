@@ -104,7 +104,10 @@ async function initializeDatabase(pool) {
         id SERIAL PRIMARY KEY,
         ingrediente_id INTEGER NOT NULL REFERENCES ingredientes(id) ON DELETE CASCADE,
         proveedor_id INTEGER NOT NULL REFERENCES proveedores(id) ON DELETE CASCADE,
-        precio DECIMAL(10, 2) NOT NULL,
+        -- €/UNIDAD-BASE (canónico). 6 decimales: un producto con formato grande
+        -- (LATA de 900 g a 7,58 €) da 0,008422 €/g — con 2 decimales se redondeaba
+        -- a 0,01 y al reconstruir el formato salían 9,00 € en vez de 7,58 €.
+        precio DECIMAL(12, 6) NOT NULL,
         es_proveedor_principal BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(ingrediente_id, proveedor_id)
@@ -479,6 +482,22 @@ async function initializeDatabase(pool) {
         `);
     log('info', 'Migración 017 ingredientes_proveedores formato de compra completada');
   } catch (e) { log('warn', 'Migración 017 ingredientes_proveedores.formato', { error: e.message }); }
+
+  // Migración 018 — precisión de `ingredientes_proveedores.precio` (bug ARAU 2026-07-31).
+  //
+  // `precio` es €/UNIDAD-BASE y se DERIVA como precio_formato / cantidad_por_formato
+  // (ver migración 017 arriba). Con DECIMAL(10,2) esa división era irrepresentable en
+  // cuanto el formato era grande: una LATA de 900 g a 7,58 € da 0,008422 €/g, que se
+  // guardaba como 0,01 → al reconstruir el precio del formato salían 9,00 € en vez de
+  // 7,58 € (+19 %). Ampliar la escala es NO DESTRUCTIVO: ningún valor existente pierde
+  // información, solo gana decimales disponibles.
+  try {
+    await pool.query(`
+            ALTER TABLE ingredientes_proveedores
+                ALTER COLUMN precio TYPE NUMERIC(12,6);
+        `);
+    log('info', 'Migración 018 ingredientes_proveedores.precio NUMERIC(12,6) completada');
+  } catch (e) { log('warn', 'Migración 018 ingredientes_proveedores.precio precisión', { error: e.message }); }
 
   // Añadir columnas para verificación de email
   try {
