@@ -96,6 +96,80 @@ describe.each(Object.entries(RUTAS))('Aprobar por %s crea un pedido', (_nombre, 
     });
 });
 
+describe('Un parámetro reutilizado en dos columnas lleva cast explícito', () => {
+    /**
+     * La misma fecha va a `fecha` (DATE) y a `fecha_recepcion` (TIMESTAMP). Si
+     * el parámetro no se castea, Postgres intenta deducir UN tipo a partir de
+     * dos columnas distintas y aborta:
+     *
+     *     ERROR: inconsistent types deduced for parameter $2
+     *
+     * En la base de datos de Lite no se veía, porque ahí `fecha_recepcion` ya
+     * es DATE por deriva de esquema. Pero en una base NUEVA —la de cualquier
+     * cliente nuevo— consolidar un albarán devolvía un 500. Lo cazó el CI, que
+     * sí levanta la base desde cero.
+     */
+    const inserts = fuente.match(/INSERT INTO pedidos[\s\S]{0,400}?RETURNING/g) || [];
+
+    test('hay INSERTs de pedidos que analizar (sanity check)', () => {
+        expect(inserts.length).toBeGreaterThan(0);
+    });
+
+    test.each(inserts.map((s, i) => [i, s]))('INSERT #%i castea el parámetro repetido', (_i, sql) => {
+        const values = sql.match(/VALUES\s*\(([^)]*)\)/)?.[1] || '';
+        const usos = values.match(/\$\d+/g) || [];
+        const repetidos = usos.filter((p, i, a) => a.indexOf(p) !== i);
+        for (const p of new Set(repetidos)) {
+            // Cada aparición del parámetro repetido debe llevar `::tipo`.
+            const escapado = p.replace('$', '\\$');
+            const sinCast = new RegExp(`${escapado}(?!::)`, 'g');
+            expect(values.match(sinCast)).toBeNull();
+        }
+    });
+});
+
+describe('Los índices de init.js no usan columnas que aún no existen', () => {
+    /**
+     * `idx_precios_compra_pedido` se creaba sobre `pedido_id` ANTES del ALTER
+     * que añadía esa columna. En una base nueva fallaba — y como las sentencias
+     * van juntas en una sola query, se caía el BLOQUE ENTERO de índices, no
+     * solo ese: los siguientes tampoco llegaban a crearse.
+     */
+    const initSql = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'db', 'init.js'), 'utf8');
+
+    /** Posición en el fichero donde cada columna pasa a existir. */
+    function primeraAparicionDeColumna(tabla, columna) {
+        // En su CREATE TABLE...
+        const create = new RegExp(`CREATE TABLE IF NOT EXISTS ${tabla}\\s*\\(([\\s\\S]*?)\\n\\s*\\);`);
+        const m = initSql.match(create);
+        if (m && new RegExp(`^\\s*${columna}\\s`, 'm').test(m[1])) return m.index;
+        // ...o en un ALTER que la añade.
+        const alter = new RegExp(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS ${columna}\\b`);
+        const a = initSql.search(alter);
+        return a === -1 ? Infinity : a;
+    }
+
+    const indices = [...initSql.matchAll(/CREATE INDEX IF NOT EXISTS (\w+)\s*\n?\s*ON (\w+)\s*\(([^)]*)\)/g)];
+
+    test('se encuentran índices que analizar (sanity check)', () => {
+        expect(indices.length).toBeGreaterThan(5);
+    });
+
+    test.each(indices.map(m => [m[1], m[2], m[3], m.index]))(
+        '%s (sobre %s) usa columnas que ya existen',
+        (_nombre, tabla, columnas, posIndice) => {
+            const nombres = columnas
+                .split(',')
+                .map(c => c.trim().replace(/\s+(ASC|DESC)$/i, ''))
+                // Solo identificadores simples: nada de expresiones ni funciones.
+                .filter(c => /^\w+$/.test(c));
+            for (const col of nombres) {
+                expect(primeraAparicionDeColumna(tabla, col)).toBeLessThan(posIndice);
+            }
+        }
+    );
+});
+
 describe('Las dos puertas siguen compartiendo las fórmulas', () => {
     // Lo que separó a las dos rutas fue tener el cuerpo duplicado. El cálculo sí
     // está en un helper común; que siga así.

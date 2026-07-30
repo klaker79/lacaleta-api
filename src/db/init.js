@@ -270,6 +270,16 @@ async function initializeDatabase(pool) {
         cantidad_comprada DECIMAL(10, 2) NOT NULL,
         total_compra DECIMAL(10, 2) NOT NULL,
         proveedor_id INTEGER,
+        -- Enlaza la compra con el pedido que la trajo, para poder revertirla
+        -- por el camino preciso al borrar el pedido.
+        --
+        -- Estaba SOLO en el ALTER de más abajo, y el índice sobre esta columna
+        -- se crea ANTES que ese ALTER. En una base de datos nueva eso reventaba
+        -- el bloque entero de índices, no solo este: las sentencias van juntas
+        -- en una sola query, fallaba con "pedido_id does not exist" y los
+        -- índices siguientes tampoco llegaban a crearse. Creándola aquí, una BD
+        -- nueva nace completa; el ALTER se queda para las que ya existen.
+        pedido_id INTEGER,
         notas TEXT,
         restaurante_id INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

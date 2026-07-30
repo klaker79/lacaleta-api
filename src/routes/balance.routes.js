@@ -1789,9 +1789,17 @@ REGLAS:
             // La fecha es la del ALBARÁN, no la de hoy: la compra pertenece
             // contablemente al día que la hizo el proveedor.
             const pedidoIns = await client.query(
+                // `$2::date` explícito en los DOS sitios: la misma fecha va a
+                // `fecha` (DATE) y a `fecha_recepcion` (TIMESTAMP). Sin el cast,
+                // Postgres intenta deducir UN tipo para el parámetro a partir de
+                // dos columnas distintas y aborta con "inconsistent types deduced
+                // for parameter $2". En la BD de Lite no se veía porque ahí
+                // `fecha_recepcion` ya es DATE por deriva de esquema — pero en una
+                // base de datos NUEVA, la de cualquier cliente nuevo, consolidar
+                // un albarán fallaba con un 500.
                 `INSERT INTO pedidos
                    (proveedor_id, fecha, ingredientes, total, estado, fecha_recepcion, total_recibido, restaurante_id)
-                 VALUES ($1, $2, '[]'::jsonb, 0, 'recibido', $2, 0, $3)
+                 VALUES ($1, $2::date, '[]'::jsonb, 0, 'recibido', $2::date, 0, $3)
                  RETURNING id`,
                 [proveedorId, item.fecha, req.restauranteId]
             );
@@ -1947,9 +1955,13 @@ REGLAS:
             // curso, para que no parezca que no ha pasado nada.
             const fechaAlbaran = itemsResult.rows[0].fecha;
             const pedidoIns = await client.query(
+                // `$1::date` explícito en los DOS sitios — ver la nota del
+                // endpoint de línea suelta. Sin el cast, en una base de datos
+                // nueva esto falla con "inconsistent types deduced for parameter
+                // $1" y consolidar un albarán devuelve un 500.
                 `INSERT INTO pedidos
                    (proveedor_id, fecha, ingredientes, total, estado, fecha_recepcion, total_recibido, restaurante_id)
-                 VALUES (NULL, $1, '[]'::jsonb, 0, 'recibido', $1, 0, $2)
+                 VALUES (NULL, $1::date, '[]'::jsonb, 0, 'recibido', $1::date, 0, $2)
                  RETURNING id`,
                 [fechaAlbaran, req.restauranteId]
             );
