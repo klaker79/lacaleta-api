@@ -1206,6 +1206,66 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla chat_addon_subscriptions verificada');
   } catch (e) { log('warn', 'Migración chat_addon_subscriptions', { error: e.message }); }
 
+  // ==========================================================================
+  // RELLENO del onboarding para tenants que YA tenían datos.
+  //
+  // El onboarding se marca con timestamps que escribe `markStep` en el momento
+  // de crear cada cosa (proveedor, ingrediente, receta, pedido). Los tenants
+  // cuyos datos se crearon ANTES de que existieran estas columnas nunca
+  // llegaron a marcarse: el UPDATE fallaba y el try/catch de markStep se lo
+  // tragaba a propósito para no romper el flujo principal.
+  //
+  // Resultado visible (ARAU, casa Lite, 2026-07-30): un restaurante con 6
+  // proveedores, 37 ingredientes, 6 recetas y 2 pedidos entraba en la app y le
+  // volvía a salir el checklist de "crea tu primer proveedor". Antes no se
+  // notaba solo porque /onboarding/status fallaba entero y el checklist ni se
+  // pintaba.
+  //
+  // Se rellena a partir de los DATOS REALES y con la fecha real de creación
+  // (no NOW()): un paso se marca si el tenant ya tiene algo de ese tipo, con la
+  // fecha del primero que creó. Un tenant sin datos se queda sin marcar, que es
+  // lo correcto — en producción, Merci y Test están vacíos y deben seguir
+  // viendo su onboarding.
+  //
+  // Idempotente: COALESCE solo rellena lo que está a NULL, así que en arranques
+  // posteriores no toca nada y nunca sobrescribe una marca existente. Coherente
+  // con la regla de que una vez completado no se desmarca jamás.
+  // ==========================================================================
+  try {
+    await pool.query(`
+      UPDATE restaurantes r SET
+        onboarding_proveedores_at = COALESCE(r.onboarding_proveedores_at, (
+          SELECT MIN(p.created_at) FROM proveedores p
+           WHERE p.restaurante_id = r.id AND p.deleted_at IS NULL)),
+        onboarding_ingredientes_at = COALESCE(r.onboarding_ingredientes_at, (
+          SELECT MIN(i.created_at) FROM ingredientes i
+           WHERE i.restaurante_id = r.id AND i.deleted_at IS NULL)),
+        onboarding_recetas_at = COALESCE(r.onboarding_recetas_at, (
+          SELECT MIN(re.created_at) FROM recetas re
+           WHERE re.restaurante_id = r.id AND re.deleted_at IS NULL)),
+        onboarding_pedidos_at = COALESCE(r.onboarding_pedidos_at, (
+          SELECT MIN(pe.fecha_creacion) FROM pedidos pe
+           WHERE pe.restaurante_id = r.id AND pe.deleted_at IS NULL))
+      WHERE r.onboarding_proveedores_at  IS NULL
+         OR r.onboarding_ingredientes_at IS NULL
+         OR r.onboarding_recetas_at      IS NULL
+         OR r.onboarding_pedidos_at      IS NULL;
+
+      -- Completado = el último de los cuatro pasos, no la fecha de hoy.
+      UPDATE restaurantes SET
+        onboarding_completado_at = COALESCE(
+          onboarding_completado_at,
+          GREATEST(onboarding_proveedores_at, onboarding_ingredientes_at,
+                   onboarding_recetas_at, onboarding_pedidos_at))
+      WHERE onboarding_completado_at   IS NULL
+        AND onboarding_proveedores_at  IS NOT NULL
+        AND onboarding_ingredientes_at IS NOT NULL
+        AND onboarding_recetas_at      IS NOT NULL
+        AND onboarding_pedidos_at      IS NOT NULL;
+    `);
+    log('info', 'Relleno de onboarding para tenants con datos previos verificado');
+  } catch (e) { log('warn', 'Relleno de onboarding', { error: e.message }); }
+
   // ========== TABLAS OBSOLETAS (ya eliminadas) ==========
   // daily_records, lanave_ventas_tpv, producto_id_tpv, snapshots_diarios, inventory_counts
   // fueron eliminadas previamente. DROP CASCADE removido por seguridad (no ejecutar DDL destructivo en startup).
