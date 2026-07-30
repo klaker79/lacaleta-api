@@ -90,24 +90,20 @@ if (!JWT_SECRET) {
 }
 const PORT = process.env.PORT || 3000;
 
-// CORS: Orígenes permitidos (Combinar entorno + defaults)
-const DEFAULT_ORIGINS = [
-    'https://klaker79.github.io',
-    'https://app.mindloop.cloud',
-    'https://admin.mindloop.cloud',
-    // 🔒 FIX B2: Localhost solo en desarrollo (no exponer en producción)
-    ...(process.env.NODE_ENV !== 'production' ? [
-        'http://localhost:3000',    // Vite dev (demo)
-        'http://localhost:5173',    // Vite dev
-        'http://localhost:5174',    // Admin panel dev
-        'http://localhost:5500',    // Live Server
-        'http://127.0.0.1:5500'
-    ] : [])
-];
-const ENV_ORIGINS = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : [];
-const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ORIGINS, ...ENV_ORIGINS])];
+// CORS: una SOLA lista de orígenes, la de `src/config`.
+//
+// Aquí había una segunda copia con los dominios cableados, y `src/config` tenía
+// la suya. Duplicarlas costó caro: arreglando el aislamiento de la casa Lite se
+// tocó la copia de `src/config`, el test dio verde... y la API siguió usando
+// ESTA, que no se había tocado. Se descubrió solo al comprobarlo contra la API
+// viva. De ahí que ahora haya una lista y un test que mira este archivo, no el
+// que parece.
+//
+// En producción los orígenes salen SOLO de ALLOWED_ORIGINS, para que cada casa
+// (producción / staging / Lite) acepte únicamente su propio frontend. Los
+// localhost siguen valiendo en desarrollo, donde no hay nada que aislar.
+const { cors: corsConfig } = require('./src/config');
+const ALLOWED_ORIGINS = corsConfig.allowedOrigins;
 
 const app = express();
 
