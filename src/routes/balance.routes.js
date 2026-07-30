@@ -1772,7 +1772,43 @@ REGLAS:
                 return res.status(400).json({ error: `Stock a sumar (${stockASumar}) es absurdo (>10000). Revisa cantidad y formato.` });
             }
 
-            // Insertar en precios_compra_diarios con precio UNITARIO normalizado
+            // ── Pedido recibido, también aquí (2026-07-30) ─────────────────────
+            // `approve-batch` ya crea un pedido en estado 'recibido' al consolidar
+            // un albarán; este endpoint, que aprueba UNA línea suelta, no lo hacía.
+            // Escribía la compra en el Diario y sumaba stock, pero sin pedido: la
+            // compra no salía en la pestaña Pedidos, la fila del Diario quedaba
+            // suelta (`pedido_id NULL`) y —lo más serio— no había forma de
+            // deshacerla desde la app, porque el único borrado con reversión es el
+            // de pedidos.
+            //
+            // Hoy no lo llama nadie desde la interfaz (el móvil consolida siempre
+            // por lote), pero eso es justo lo que lo hace peligroso: quedaba una
+            // segunda puerta con el comportamiento viejo, lista para reintroducir
+            // el bug en cuanto alguien la conectara.
+            //
+            // La fecha es la del ALBARÁN, no la de hoy: la compra pertenece
+            // contablemente al día que la hizo el proveedor.
+            const pedidoIns = await client.query(
+                // `$2::date` explícito en los DOS sitios: la misma fecha va a
+                // `fecha` (DATE) y a `fecha_recepcion` (TIMESTAMP). Sin el cast,
+                // Postgres intenta deducir UN tipo para el parámetro a partir de
+                // dos columnas distintas y aborta con "inconsistent types deduced
+                // for parameter $2". En la BD de Lite no se veía porque ahí
+                // `fecha_recepcion` ya es DATE por deriva de esquema — pero en una
+                // base de datos NUEVA, la de cualquier cliente nuevo, consolidar
+                // un albarán fallaba con un 500.
+                `INSERT INTO pedidos
+                   (proveedor_id, fecha, ingredientes, total, estado, fecha_recepcion, total_recibido, restaurante_id)
+                 VALUES ($1, $2::date, '[]'::jsonb, 0, 'recibido', $2::date, 0, $3)
+                 RETURNING id`,
+                [proveedorId, item.fecha, req.restauranteId]
+            );
+            const pedidoId = pedidoIns.rows[0].id;
+
+            // Insertar en precios_compra_diarios con precio UNITARIO normalizado.
+            // `pedidoId` enlaza la fila con el pedido: así el borrado del pedido
+            // revierte esta compra por el camino preciso (DELETE ... WHERE
+            // pedido_id = ...) en vez del fallback legacy de restar cantidades.
             await upsertCompraDiaria(client, {
                 ingredienteId: item.ingrediente_id,
                 fecha: item.fecha,
@@ -1780,8 +1816,35 @@ REGLAS:
                 cantidad: stockASumar,
                 total: totalAlbaran,
                 restauranteId: req.restauranteId,
-                proveedorId
+                proveedorId,
+                pedidoId
             });
+
+            // Línea del pedido. MISMO formato que una recepción manual y que
+            // approve-batch — es lo que leen la pestaña Pedidos y el rollback de
+            // DELETE /orders/:id. Como no hubo pedido previo, lo "pedido" es lo
+            // recibido.
+            await client.query(
+                `UPDATE pedidos
+                    SET ingredientes = $1::jsonb, total = $2, total_recibido = $2
+                  WHERE id = $3 AND restaurante_id = $4`,
+                [
+                    JSON.stringify([{
+                        ingredienteId: item.ingrediente_id,
+                        ingrediente_id: item.ingrediente_id,
+                        cantidad: stockASumar,
+                        cantidadRecibida: stockASumar,
+                        precioUnitario: precioUnitarioNormalizado,
+                        precio_unitario: precioUnitarioNormalizado,
+                        precioReal: precioUnitarioNormalizado,
+                        personal: false,
+                        estado: 'ok'
+                    }]),
+                    totalAlbaran,
+                    pedidoId,
+                    req.restauranteId
+                ]
+            );
 
             // Actualizar precio en ingredientes_proveedores para tracking de precios
             await updateProveedorPrecio(client, {
@@ -1802,7 +1865,7 @@ REGLAS:
             );
 
             await client.query('COMMIT');
-            log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id, proveedorId });
+            log('info', 'Compra pendiente aprobada', { id: req.params.id, ingredienteId: item.ingrediente_id, proveedorId, pedidoId });
 
             // Audit log: aprobación de compra (afecta stock + precio_medio_compra)
             logChange(pool, {
@@ -1840,7 +1903,7 @@ REGLAS:
                 });
             }
 
-            res.json({ success: true, message: 'Compra aprobada y registrada' });
+            res.json({ success: true, message: 'Compra aprobada y registrada', pedidoId, fecha: item.fecha });
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error aprobando compra pendiente', { error: err.message });
@@ -1892,9 +1955,13 @@ REGLAS:
             // curso, para que no parezca que no ha pasado nada.
             const fechaAlbaran = itemsResult.rows[0].fecha;
             const pedidoIns = await client.query(
+                // `$1::date` explícito en los DOS sitios — ver la nota del
+                // endpoint de línea suelta. Sin el cast, en una base de datos
+                // nueva esto falla con "inconsistent types deduced for parameter
+                // $1" y consolidar un albarán devuelve un 500.
                 `INSERT INTO pedidos
                    (proveedor_id, fecha, ingredientes, total, estado, fecha_recepcion, total_recibido, restaurante_id)
-                 VALUES (NULL, $1, '[]'::jsonb, 0, 'recibido', $1, 0, $2)
+                 VALUES (NULL, $1::date, '[]'::jsonb, 0, 'recibido', $1::date, 0, $2)
                  RETURNING id`,
                 [fechaAlbaran, req.restauranteId]
             );
@@ -2289,81 +2356,60 @@ REGLAS:
 
             const resultados = { procesados: 0, fallidos: 0, duplicados: 0, errores: [] };
 
-            // Función para normalizar nombres (quitar acentos, mayúsculas, espacios extra)
-            const normalizar = (str) => {
-                return (str || '')
-                    .toLowerCase()
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar acentos
-                    .replace(/[^a-z0-9\s]/g, '') // quitar caracteres especiales
-                    .replace(/\s+/g, ' ') // espacios múltiples a uno
-                    .trim();
-            };
-
-            // Obtener todos los ingredientes para búsqueda flexible (incluyendo cantidad_por_formato)
+            // ── Matcheo por palabras, igual que los otros dos flujos OCR ───────
+            // Este endpoint tenía su propio matcheo, escrito antes que el helper:
+            // normalizaba BORRANDO la puntuación y comparaba la cadena entera por
+            // igualdad o inclusión. Con lo que devuelve de verdad un OCR eso falla
+            // en casi todo:
+            //   - "ATUN AC.GIR.SERVIHOSTEL" quedaba como "atunacgirservihostel"
+            //     (al borrar los puntos, las palabras se PEGAN), que ni incluye ni
+            //     está incluido en "atun";
+            //   - los códigos de formato ("12/800G") ensuciaban la comparación;
+            //   - una errata del OCR ("GASEOGA" por "GASEOSA") no casaba con nada.
+            // Y al revés, comparar por inclusión casaba de MÁS: "sal" está dentro
+            // de "salmon", así que una línea de sal podía sumar stock de salmón.
+            //
+            // `matchIngrediente` compara por PALABRAS significativas: descarta
+            // formato y unidades, entiende abreviaturas ("GIR." → "GIRASOL"),
+            // tolera erratas pequeñas y exige DOS palabras cubiertas cuando el
+            // nombre tiene varias — que es justo lo que corta el falso positivo
+            // de "sal"/"salmón".
+            //
+            // Con esto los tres flujos OCR (parse de albarán, alta de pendientes
+            // y este bulk) usan el mismo criterio: la misma foto casa igual por
+            // donde entre.
             const ingredientesResult = await client.query(
-                'SELECT id, nombre, cantidad_por_formato FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
+                'SELECT id, nombre FROM ingredientes WHERE restaurante_id = $1 AND deleted_at IS NULL',
                 [req.restauranteId]
             );
-            const ingredientesMap = new Map();
-            ingredientesResult.rows.forEach(i => {
-                ingredientesMap.set(normalizar(i.nombre), { id: i.id, cantidadPorFormato: parseFloat(i.cantidad_por_formato) || 0 });
-            });
 
-            // Obtener todos los alias para búsqueda.
             // 🔒 i.deleted_at IS NULL (auditoria 2026-04-28 capa 4): si un alias
             //    apunta a un ingrediente soft-deleted, este flujo OCR le inyectaría
             //    compras reactivando datos zombi. Match con los otros 2 JOINs
             //    alias→ingredientes en balance.js (líneas 587 y 783).
             const aliasResult = await client.query(
-                `SELECT a.alias, a.ingrediente_id, i.cantidad_por_formato
+                `SELECT a.alias, a.ingrediente_id
              FROM ingredientes_alias a
              JOIN ingredientes i ON a.ingrediente_id = i.id
              WHERE a.restaurante_id = $1 AND i.deleted_at IS NULL`,
                 [req.restauranteId]
             );
-            const aliasMap = new Map();
-            aliasResult.rows.forEach(a => {
-                aliasMap.set(normalizar(a.alias), { id: a.ingrediente_id, cantidadPorFormato: parseFloat(a.cantidad_por_formato) || 0 });
-            });
+
+            const candidatosMatch = [
+                ...ingredientesResult.rows.map(i => ({ id: i.id, nombre: i.nombre })),
+                ...aliasResult.rows.map(a => ({ id: a.ingrediente_id, nombre: a.alias })),
+            ];
 
             for (const compra of compras) {
-                const nombreNormalizado = normalizar(compra.ingrediente);
-                let ingredienteData = ingredientesMap.get(nombreNormalizado);
+                const _m = matchIngrediente(compra.ingrediente, candidatosMatch);
 
-                // Si no encuentra exacto, buscar coincidencia parcial
-                if (!ingredienteData) {
-                    for (const [nombreDB, data] of ingredientesMap) {
-                        if (nombreDB.includes(nombreNormalizado) || nombreNormalizado.includes(nombreDB)) {
-                            ingredienteData = data;
-                            break;
-                        }
-                    }
-                }
-
-                // Si aún no encuentra, buscar en tabla de alias
-                if (!ingredienteData) {
-                    ingredienteData = aliasMap.get(nombreNormalizado);
-                }
-
-                // Si aún no encuentra, buscar alias con coincidencia parcial
-                if (!ingredienteData) {
-                    for (const [aliasNombre, data] of aliasMap) {
-                        if (aliasNombre.includes(nombreNormalizado) || nombreNormalizado.includes(aliasNombre)) {
-                            ingredienteData = data;
-                            break;
-                        }
-                    }
-                }
-
-                if (!ingredienteData) {
+                if (!_m) {
                     resultados.fallidos++;
                     resultados.errores.push({ ingrediente: compra.ingrediente, error: 'Ingrediente no encontrado' });
                     continue;
                 }
 
-                const ingredienteId = ingredienteData.id;
-                const cantidadPorFormato = ingredienteData.cantidadPorFormato;
-
+                const ingredienteId = _m.id;
                 const precio = parseFloat(compra.precio) || 0;
                 const cantidad = parseFloat(compra.cantidad) || 0;
                 const total = precio * cantidad;
