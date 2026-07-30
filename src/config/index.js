@@ -45,19 +45,34 @@ const config = {
         isProduction: process.env.NODE_ENV === 'production'
     },
 
-    // CORS
+    // CORS — UNA sola lista, y en producción sale SOLO de ALLOWED_ORIGINS.
+    //
+    // Antes los dominios de producción estaban cableados aquí y además en
+    // `server.js`, cada uno con su copia. Eso es lo que permitió, arreglando la
+    // casa Lite, tocar la copia de este archivo, ver el test en verde, y que la
+    // API siguiera usando la OTRA lista. Se descubrió solo porque se comprobó
+    // contra la API viva.
+    //
+    // Con los dominios fuera del código, cada casa (producción / staging /
+    // Lite) acepta únicamente el frontend que le corresponde, y cambiar eso es
+    // cambiar una variable, no desplegar código. Los localhost se quedan para
+    // desarrollo, donde sí hacen falta y no hay nada que aislar.
     cors: {
-        defaultOrigins: [
-            'https://klaker79.github.io',
-            'https://app.mindloop.cloud',
-            'http://localhost:5500',
-            'http://127.0.0.1:5500',
-            'http://localhost:3000',
-            'http://localhost:3001',
-            'http://localhost:3002',
-            'http://localhost:8080'
-        ],
-        envOrigins: process.env.ALLOWED_ORIGINS?.split(',') || []
+        defaultOrigins: process.env.NODE_ENV === 'production'
+            ? []
+            : [
+                'http://localhost:3000',    // Vite dev (demo)
+                'http://localhost:3001',
+                'http://localhost:3002',
+                'http://localhost:5173',    // Vite dev
+                'http://localhost:5174',    // Admin panel dev
+                'http://localhost:5500',    // Live Server
+                'http://127.0.0.1:5500',
+                'http://localhost:8080'
+            ],
+        // `.trim()` porque la variable se escribe a mano en Dokploy y un espacio
+        // detrás de la coma dejaba el origen fuera sin avisar.
+        envOrigins: process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean) || []
     },
 
     // Rate limiting
@@ -85,5 +100,20 @@ const config = {
 config.cors.allowedOrigins = [
     ...new Set([...config.cors.defaultOrigins, ...config.cors.envOrigins])
 ];
+
+// En producción los orígenes salen solo de ALLOWED_ORIGINS. Si falta, la lista
+// queda vacía y el navegador bloquea TODAS las llamadas del frontend: la app
+// parece caída y el motivo no se ve por ningún lado. Mejor no arrancar y
+// decirlo claro que arrancar rota.
+if (config.server.isProduction && config.cors.allowedOrigins.length === 0) {
+    console.error(
+        '❌ FATAL ERROR: ALLOWED_ORIGINS no configurado.\n'
+        + '   En producción los orígenes CORS salen solo de esta variable.\n'
+        // Sin dominios reales en el ejemplo: el sentido de este cambio es que
+        // los dominios de cada casa vivan en la variable, no en el código.
+        + '   Formato: ALLOWED_ORIGINS=https://tu-frontend,https://tu-panel-admin'
+    );
+    process.exit(1);
+}
 
 module.exports = config;
