@@ -23,7 +23,7 @@ module.exports = function (pool) {
     router.get('/stripe/subscription-status', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(
-                `SELECT plan, plan_status, trial_ends_at, max_users, stripe_subscription_id
+                `SELECT plan, plan_tier, plan_status, trial_ends_at, max_users, stripe_subscription_id
                  FROM restaurantes WHERE id = $1`,
                 [req.restauranteId]
             );
@@ -40,6 +40,10 @@ module.exports = function (pool) {
 
             res.json({
                 plan: row.plan,
+                // Paquete de pestañas, independiente del plan de facturación: un
+                // cliente puede estar en trial (plan) y ver el paquete Lite
+                // (plan_tier) a la vez. Lo consume plan-tabs.js en el frontend.
+                plan_tier: row.plan_tier || null,
                 plan_status: trialExpired ? 'expired' : row.plan_status,
                 trial_ends_at: row.trial_ends_at,
                 trial_days_left: daysLeft,
