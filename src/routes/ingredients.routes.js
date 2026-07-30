@@ -388,12 +388,24 @@ module.exports = function (pool) {
             // esa tabla; sin sync, el modal mostraba el precio viejo aunque la ficha del
             // ingrediente ya tenia el nuevo. No tocamos los precios de proveedores secundarios:
             // siguen siendo precios comparativos legitimos.
+            //
+            // ⚠️ UNIDADES (bug ARAU 2026-07-31): `ingredientes.precio` es €/FORMATO
+            // (7,58 €/LATA de 900 g), pero `ingredientes_proveedores.precio` es
+            // €/UNIDAD-BASE (0,0084 €/g) — la pivot tiene su propia columna
+            // `precio_formato` para el precio del formato. Sincronizar el valor
+            // crudo metia €/formato en una columna €/base, y el desplegable de
+            // "Nuevo pedido" (que hace precio × cantidad_por_formato para pasarlo
+            // a €/formato) lo multiplicaba OTRA VEZ: 7,58 × 900 = 6.822 € por una
+            // lata de atun. Hay que dividir por cpf antes de propagar.
             const oldPrecio = parseFloat(existing.precio) || 0;
             if (Math.abs(finalPrecio - oldPrecio) > 0.001) {
                 try {
+                    const cpfSync = parseFloat(finalCantidadPorFormato) > 1
+                        ? parseFloat(finalCantidadPorFormato)
+                        : 1;
                     await pool.query(
                         'UPDATE ingredientes_proveedores SET precio = $1 WHERE ingrediente_id = $2 AND es_proveedor_principal = TRUE',
-                        [finalPrecio, id]
+                        [finalPrecio / cpfSync, id]
                     );
                 } catch (syncErr) {
                     log('warn', 'Sync precio ingrediente -> proveedor principal fallido', {
