@@ -438,7 +438,10 @@ module.exports = function (pool) {
                         MAX(proveedor) as proveedor, array_agg(ingrediente_nombre) as items
                  FROM compras_pendientes
                  WHERE restaurante_id = $1 AND image_hash = $2
-                   AND estado IN ('pendiente', 'aprobado')
+                   -- 'recibido_en_pedido' cuenta como duplicado: ese albarán ya se
+                   -- usó para recibir un pedido, así que reescanear la misma foto
+                   -- debe avisar igual que si se hubiera aprobado.
+                   AND estado IN ('pendiente', 'aprobado', 'recibido_en_pedido')
                  GROUP BY batch_id, fecha
                  LIMIT 1`,
                 [req.restauranteId, imageHash]
@@ -671,7 +674,7 @@ REGLAS CRÍTICAS DE PRECISIÓN:
                      FROM compras_pendientes
                      WHERE restaurante_id = $1
                        AND TRIM(numero_factura) = $2
-                       AND estado IN ('pendiente', 'aprobado')
+                       AND estado IN ('pendiente', 'aprobado', 'recibido_en_pedido')
                      GROUP BY batch_id, fecha
                      ORDER BY fecha DESC
                      LIMIT 1`,
@@ -1283,7 +1286,7 @@ REGLAS:
                          FROM compras_pendientes cp
                          WHERE cp.restaurante_id = $1
                            AND cp.ingrediente_id = ANY($2)
-                           AND cp.estado IN ('pendiente', 'aprobado')
+                           AND cp.estado IN ('pendiente', 'aprobado', 'recibido_en_pedido')
                            AND cp.created_at >= NOW() - INTERVAL '3 days'
                          LIMIT 1`,
                         [req.restauranteId, resolvedIds]
@@ -1309,7 +1312,7 @@ REGLAS:
                         COUNT(*) OVER (PARTITION BY batch_id) as batch_size
                  FROM compras_pendientes
                  WHERE restaurante_id = $1
-                   AND estado IN ('pendiente', 'aprobado')
+                   AND estado IN ('pendiente', 'aprobado', 'recibido_en_pedido')
                    AND created_at >= NOW() - INTERVAL '60 days'
                  ORDER BY batch_id`,
                 [req.restauranteId]
@@ -1871,6 +1874,35 @@ REGLAS:
 
             const resultados = { aprobados: 0, omitidos: 0 };
 
+            // ── Pedido recibido a partir del albarán (2026-07-30) ──────────────
+            // Antes, consolidar un albarán escribía la compra en el Diario y sumaba
+            // stock, pero NO creaba ningún pedido. Consecuencias: la compra no
+            // aparecía en la pestaña Pedidos, la fila del Diario quedaba suelta
+            // (`pedido_id NULL`) y —lo más serio— esa compra no se podía deshacer
+            // desde la app, porque el único borrado con reversión es el de pedidos.
+            //
+            // Ahora el albarán genera un pedido en estado 'recibido', igual que una
+            // recepción manual. Se crea aquí, antes del bucle, para poder enlazar
+            // cada fila del Diario con su `pedido_id`; al final se completa con las
+            // líneas y el total reales.
+            //
+            // La fecha es la del ALBARÁN, no la de hoy (decisión Iker 2026-07-30):
+            // contablemente la compra pertenece al día que la hizo el proveedor. El
+            // cliente recibe el aviso en pantalla cuando esa fecha no es del mes en
+            // curso, para que no parezca que no ha pasado nada.
+            const fechaAlbaran = itemsResult.rows[0].fecha;
+            const pedidoIns = await client.query(
+                `INSERT INTO pedidos
+                   (proveedor_id, fecha, ingredientes, total, estado, fecha_recepcion, total_recibido, restaurante_id)
+                 VALUES (NULL, $1, '[]'::jsonb, 0, 'recibido', $1, 0, $2)
+                 RETURNING id`,
+                [fechaAlbaran, req.restauranteId]
+            );
+            const pedidoId = pedidoIns.rows[0].id;
+            const lineasPedido = [];
+            let totalPedido = 0;
+            let proveedorIdPedido = null;
+
             for (const item of itemsResult.rows) {
                 if (!item.ingrediente_id) {
                     resultados.omitidos++;
@@ -1915,7 +1947,11 @@ REGLAS:
                     continue;
                 }
 
-                // Insertar en precios_compra_diarios con precio UNITARIO normalizado
+                // Insertar en precios_compra_diarios con precio UNITARIO normalizado.
+                // `pedidoId` enlaza la fila con el pedido recién creado: así el
+                // borrado del pedido puede revertir esta compra por el camino
+                // preciso (DELETE ... WHERE pedido_id = ...) en vez del fallback
+                // legacy de restar cantidades.
                 await upsertCompraDiaria(client, {
                     ingredienteId: item.ingrediente_id,
                     fecha: item.fecha,
@@ -1923,8 +1959,26 @@ REGLAS:
                     cantidad: stockASumar,
                     total: totalAlbaran,
                     restauranteId: req.restauranteId,
-                    proveedorId
+                    proveedorId,
+                    pedidoId
                 });
+
+                // Línea del pedido. Mismo formato que una recepción manual — es lo
+                // que leen la pestaña Pedidos y el rollback de DELETE /orders/:id.
+                // Como no hubo pedido previo, lo "pedido" es lo recibido.
+                if (proveedorIdPedido === null) proveedorIdPedido = proveedorId;
+                lineasPedido.push({
+                    ingredienteId: item.ingrediente_id,
+                    ingrediente_id: item.ingrediente_id,
+                    cantidad: stockASumar,
+                    cantidadRecibida: stockASumar,
+                    precioUnitario: precioUnitarioNormalizado,
+                    precio_unitario: precioUnitarioNormalizado,
+                    precioReal: precioUnitarioNormalizado,
+                    personal: false,
+                    estado: 'ok'
+                });
+                totalPedido += totalAlbaran;
 
                 // Actualizar precio en ingredientes_proveedores para tracking de precios
                 await updateProveedorPrecio(client, {
@@ -1947,8 +2001,32 @@ REGLAS:
                 resultados.aprobados++;
             }
 
+            // Completar el pedido con lo realmente aprobado. Si no se aprobó ni una
+            // línea (todas omitidas por ingrediente borrado o valor absurdo), se
+            // borra el pedido en vez de dejar uno vacío de 0 € en la pestaña.
+            let pedidoCreadoId = null;
+            if (resultados.aprobados > 0) {
+                await client.query(
+                    `UPDATE pedidos
+                        SET ingredientes = $1::jsonb,
+                            total = $2,
+                            total_recibido = $2,
+                            proveedor_id = $3
+                      WHERE id = $4 AND restaurante_id = $5`,
+                    [JSON.stringify(lineasPedido), totalPedido, proveedorIdPedido, pedidoId, req.restauranteId]
+                );
+                pedidoCreadoId = pedidoId;
+            } else {
+                await client.query(
+                    'DELETE FROM pedidos WHERE id = $1 AND restaurante_id = $2',
+                    [pedidoId, req.restauranteId]
+                );
+            }
+
             await client.query('COMMIT');
-            log('info', 'Batch de compras aprobado', { batchId, aprobados: resultados.aprobados, omitidos: resultados.omitidos });
+            log('info', 'Batch de compras aprobado', {
+                batchId, aprobados: resultados.aprobados, omitidos: resultados.omitidos, pedidoId: pedidoCreadoId
+            });
 
             // Audit log: aprobación MASIVA de compras (acción muy sensible)
             logChange(pool, {
@@ -2049,13 +2127,61 @@ REGLAS:
                 });
             }
 
-            res.json(resultados);
+            // `pedidoId` + `fecha` para que el cliente pueda enlazar al pedido y
+            // avisar si la compra se registró en un mes distinto al actual.
+            res.json({ ...resultados, pedidoId: pedidoCreadoId, fecha: fechaAlbaran });
         } catch (err) {
             await client.query('ROLLBACK');
             log('error', 'Error aprobando batch', { error: err.message });
             res.status(500).json({ error: 'Error interno' });
         } finally {
             client.release();
+        }
+    });
+
+    /**
+     * POST /purchases/batch/:batchId/consumido
+     *
+     * Marca las líneas de un albarán como ya usadas para recibir un pedido.
+     *
+     * Bug que cierra (2026-07-30): "Recibir sobre este pedido" volcaba el albarán
+     * en la recepción del pedido, pero dejaba sus líneas en `pendiente`. Seguían
+     * saliendo en Compras Pendientes y, si alguien las aprobaba desde ahí, el
+     * albarán se contaba DOS veces: el stock se sumaba en la recepción y otra vez
+     * en la aprobación.
+     *
+     * Estado `recibido_en_pedido` en vez de reutilizar los existentes:
+     *  - `aprobado` mentiría: no se aprobó por esta vía, y encima lo colaría en
+     *    los informes de aprobaciones.
+     *  - `rechazado` lo sacaría del dedup por `image_hash`, y entonces reescanear
+     *    la misma foto ya no avisaría de duplicado — justo lo que no queremos.
+     *
+     * NO toca stock ni Diario: eso ya lo hizo la recepción del pedido.
+     */
+    router.post('/purchases/batch/:batchId/consumido', ocrDisabledGuard, authMiddleware, async (req, res) => {
+        try {
+            const { batchId } = req.params;
+            if (!batchId || typeof batchId !== 'string' || batchId.length > 64) {
+                return res.status(400).json({ error: 'batchId inválido' });
+            }
+            const { pedidoId } = req.body || {};
+
+            const result = await pool.query(
+                `UPDATE compras_pendientes
+                    SET estado = 'recibido_en_pedido', aprobado_at = NOW()
+                  WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'pendiente'
+                  RETURNING id`,
+                [batchId, req.restauranteId]
+            );
+
+            log('info', 'Albarán marcado como consumido en un pedido', {
+                batchId, lineas: result.rowCount, pedidoId: pedidoId || null
+            });
+
+            res.json({ success: true, batchId, lineas: result.rowCount });
+        } catch (err) {
+            log('error', 'Error marcando albarán como consumido', { error: err.message });
+            res.status(500).json({ error: 'Error interno' });
         }
     });
 
@@ -2129,7 +2255,7 @@ REGLAS:
     router.delete('/purchases/pending/:id', ocrDisabledGuard, authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(
-                "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado IN ('pendiente', 'aprobado') RETURNING id",
+                "UPDATE compras_pendientes SET estado = 'rechazado' WHERE id = $1 AND restaurante_id = $2 AND estado IN ('pendiente', 'aprobado', 'recibido_en_pedido') RETURNING id",
                 [req.params.id, req.restauranteId]
             );
 
