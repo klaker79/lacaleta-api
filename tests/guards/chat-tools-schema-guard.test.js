@@ -54,7 +54,7 @@ describe('🛡️ Herramientas del chat — SQL válido contra el esquema', () =
         } catch (err) {
             const msg = (err && err.message) ? err.message : String(err);
             if (SCHEMA_ERROR.test(msg)) {
-                throw new Error(`La tool "${name}" ejecuta SQL inválido contra el esquema: ${msg}`);
+                throw new Error(`La tool "${name}" ejecuta SQL inválido contra el esquema: ${msg}`, { cause: err });
             }
             // Otros errores (arg, dato no encontrado, etc.) NO son de esquema → se toleran.
         }
