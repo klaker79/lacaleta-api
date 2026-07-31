@@ -28,7 +28,7 @@ const cleanupInterval = setInterval(() => {
     let cleaned = 0;
     for (const token of tokenBlacklist) {
         try {
-            jwt.verify(token, JWT_SECRET);
+            jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
         } catch {
             tokenBlacklist.delete(token);
             cleaned++;
@@ -72,7 +72,7 @@ const authMiddleware = (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
         req.user = decoded;
         req.restauranteId = decoded.restauranteId;
 
