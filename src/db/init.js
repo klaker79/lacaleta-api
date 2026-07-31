@@ -630,6 +630,37 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla personal_extra verificada');
   } catch (e) { log('warn', 'Migración personal_extra', { error: e.message }); }
 
+  // Tabla consumos_internos — un PLATO/BEBIDA de la carta consumido sin venta:
+  // comida del personal, prueba de cocina o invitación. DESCUENTA STOCK (a
+  // diferencia de la "comida personal" de los pedidos, que es compra desviada y
+  // NO toca stock, porque ese producto nunca llegó a entrar).
+  // `stock_deductions` guarda el snapshot de lo realmente descontado (mismo
+  // patrón que ventas.stock_deductions) para poder revertirlo al borrar.
+  try {
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS consumos_internos (
+                id SERIAL PRIMARY KEY,
+                restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id),
+                receta_id INTEGER,
+                receta_nombre VARCHAR(255),
+                variante_id INTEGER,
+                factor_variante NUMERIC(8, 4) NOT NULL DEFAULT 1,
+                porciones NUMERIC(10, 3) NOT NULL DEFAULT 1,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'personal',
+                coste NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                empleado_id INTEGER,
+                nota TEXT,
+                fecha DATE NOT NULL,
+                stock_deductions JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_consumos_internos_rest_fecha
+                ON consumos_internos (restaurante_id, fecha);
+        `);
+    log('info', 'Tabla consumos_internos verificada');
+  } catch (e) { log('warn', 'Migración consumos_internos', { error: e.message }); }
+
   // Columnas faltantes en ingredientes
   try {
     await pool.query(`
