@@ -301,7 +301,8 @@ LISTAS / DETALLE (para análisis por ítem concreto):
 - obtener_pedidos → devuelve { muestra_de_lineas, pedidos:[…] } — MUESTRA de las últimas 300 líneas (1 fila por ingrediente). Para nº de pedidos o totales usa resumen_compras_periodo (num_pedidos + total exactos).
 - obtener_gastos → Gastos fijos mensuales
 - obtener_proveedores → Lista proveedores
-- obtener_horarios → Turnos de trabajo
+- obtener_horarios → Turnos de trabajo de la PLANTILLA FIJA (por fecha/turno)
+- obtener_personal_extra(periodo) → Personal EXTRA por horas CON NOMBRES (fecha, nombre, horas, €/h, total). Úsala para "quién trabajó de extra", "nombres del personal extra de julio". Distinto de obtener_horarios.
 
 AGREGADOS EXACTOS (USA SIEMPRE estas para "cuánto", "total", "top", "peor", "mejor"):
 - resumen_inventario → Valor stock, nº ingredientes con/sin stock, stock bajo, activos/inactivos.
@@ -917,8 +918,21 @@ const TOOLS = [
     },
     {
         name: 'obtener_horarios',
-        description: 'Turnos de trabajo de los empleados.',
+        description: 'Turnos de trabajo de los empleados de PLANTILLA FIJA (por fecha y turno).',
         input_schema: { type: 'object', properties: {}, required: [] }
+    },
+    {
+        name: 'obtener_personal_extra',
+        description: 'Personal EXTRA contratado por horas, CON NOMBRES: fecha, nombre, horas, precio/hora y total. Úsala para "quién trabajó de extra", "nombres del personal extra de julio", "cuántos extras contraté". Es DISTINTO de obtener_horarios (esa es la plantilla fija). Acepta periodo (mes/semana/…) o fecha_desde+fecha_hasta.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                periodo: { type: 'string', enum: PERIODOS_VALIDOS, description: 'Período relativo (ÚSALO casi siempre: "este mes"→mes, "julio"→rango explícito). El backend lo convierte a las fechas exactas.' },
+                fecha_desde: { type: 'string', description: 'SOLO rango explícito (YYYY-MM-DD, inclusive). Si usas periodo, OMÍTELO.' },
+                fecha_hasta: { type: 'string', description: 'SOLO rango explícito (YYYY-MM-DD, exclusive, 1º del mes siguiente). Si usas periodo, OMÍTELO.' }
+            },
+            required: []
+        }
     },
     {
         name: 'stock_critico',
@@ -1188,13 +1202,25 @@ async function runTool(name, pool, restauranteId, args = {}) {
             `, [restauranteId])).rows;
 
         case 'obtener_horarios':
+            // La tabla `horarios` es por FECHA/turno (no tiene dia_semana).
             return (await pool.query(`
-                SELECT e.nombre as empleado, h.dia_semana, h.hora_inicio, h.hora_fin
+                SELECT e.nombre as empleado, h.fecha, h.turno, h.hora_inicio, h.hora_fin
                 FROM horarios h
                 LEFT JOIN empleados e ON h.empleado_id = e.id
                 WHERE h.restaurante_id = $1
-                ORDER BY e.nombre, h.dia_semana
+                ORDER BY h.fecha DESC, e.nombre
+                LIMIT 200
             `, [restauranteId])).rows;
+
+        case 'obtener_personal_extra': {
+            const { desde, hasta } = resolverRangoArgs(args);
+            return (await pool.query(`
+                SELECT fecha, nombre, horas, precio_hora, total, observaciones
+                FROM personal_extra
+                WHERE restaurante_id = $1 AND fecha >= $2 AND fecha < $3
+                ORDER BY fecha DESC, id DESC
+            `, [restauranteId, desde, hasta])).rows;
+        }
 
         case 'resumen_ventas_periodo': {
             const { desde, hasta } = resolverRangoArgs(args);
