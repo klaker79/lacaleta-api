@@ -455,9 +455,18 @@ menciónalas al usuario por si quería otro ítem.
 - Para VALORACIÓN DE INVENTARIO (¿cuánto vale mi stock?) → SUMA el campo "valor_stock"
   que ya devuelve la tool (precio nominal × stock_actual). Coincide con el dashboard.
 
+🧹 GÉNERO vs SUMINISTROS — el dashboard los cuenta por separado, tú también:
+- GÉNERO = familia "alimento" o "bebida". Es lo que se compra para cocinar y vender.
+- SUMINISTROS = familia "suministro" (guantes, servilletas, mantelillos, bolsas, cañas).
+  Entran por pedido pero NO salen por ninguna receta, así que su stock solo puede subir.
+- "¿Cuánto vale mi stock?" → responde con el GÉNERO, que es el número del KPI. Si los
+  suministros son relevantes, menciónalos aparte ("y otros X € en suministros"), NUNCA
+  sumados dentro del total. Para esto usa resumen_inventario, que ya trae los dos.
+
 ⚠️ CONTEOS DEL DASHBOARD — para que cuadren con lo que el usuario ve:
 - "Items con stock" o "Valor Stock (274 items)" → cuenta solo ingredientes con stock_actual > 0.
-- "Valor total stock" → suma valor_stock SOLO de los ingredientes con stock_actual > 0.
+- "Valor total stock" → suma valor_stock SOLO de los ingredientes con stock_actual > 0
+  Y SOLO de género (excluye familia suministro/suministros).
 - Si el usuario pregunta "¿cuántos ingredientes tengo?" responde con el conteo
   de ingredientes activos (activo != false). Los inactivos existen en DB pero no
   aparecen en la pestaña Ingredientes del usuario.
@@ -1569,15 +1578,23 @@ async function runTool(name, pool, restauranteId, args = {}) {
             };
         }
 
-        case 'resumen_inventario':
+        case 'resumen_inventario': {
             // Aggregated numbers matching the dashboard formulas exactly.
             // The model must NOT sum over obtener_ingredientes to answer
             // these questions — aritmética de lista larga es imprecisa.
-            return (await pool.query(`
+            //
+            // 🧹 2026-08-01: género (alimento/bebida) y suministros van separados,
+            // igual que el KPI Valor de Stock del dashboard. Los suministros
+            // (guantes, servilletas, mantelillos) entran por pedido pero no salen
+            // por ninguna receta, así que su stock solo sube y falseaba el total.
+            // `valor_stock_total` sigue siendo EL NÚMERO QUE VE EL USUARIO.
+            const resumen = (await pool.query(`
                 SELECT
-                    COUNT(*) FILTER (WHERE stock_actual > 0) AS items_con_stock,
+                    COUNT(*) FILTER (
+                        WHERE stock_actual > 0 AND LOWER(COALESCE(familia, 'alimento')) NOT IN ('suministro', 'suministros')
+                    ) AS items_con_stock,
                     ROUND(COALESCE(SUM(
-                        CASE WHEN stock_actual > 0 THEN
+                        CASE WHEN stock_actual > 0 AND LOWER(COALESCE(familia, 'alimento')) NOT IN ('suministro', 'suministros') THEN
                             stock_actual * CASE
                                 WHEN cantidad_por_formato IS NOT NULL AND cantidad_por_formato > 0
                                 THEN precio / cantidad_por_formato
@@ -1585,6 +1602,18 @@ async function runTool(name, pool, restauranteId, args = {}) {
                             END
                         ELSE 0 END
                     ), 0)::numeric, 2) AS valor_stock_total,
+                    COUNT(*) FILTER (
+                        WHERE stock_actual > 0 AND LOWER(COALESCE(familia, 'alimento')) IN ('suministro', 'suministros')
+                    ) AS items_suministros,
+                    ROUND(COALESCE(SUM(
+                        CASE WHEN stock_actual > 0 AND LOWER(COALESCE(familia, 'alimento')) IN ('suministro', 'suministros') THEN
+                            stock_actual * CASE
+                                WHEN cantidad_por_formato IS NOT NULL AND cantidad_por_formato > 0
+                                THEN precio / cantidad_por_formato
+                                ELSE precio
+                            END
+                        ELSE 0 END
+                    ), 0)::numeric, 2) AS valor_stock_suministros,
                     COUNT(*) FILTER (WHERE activo IS NULL OR activo = TRUE) AS ingredientes_activos,
                     COUNT(*) FILTER (WHERE activo = FALSE) AS ingredientes_inactivos,
                     COUNT(*) FILTER (WHERE stock_actual = 0) AS ingredientes_sin_stock,
@@ -1595,6 +1624,12 @@ async function runTool(name, pool, restauranteId, args = {}) {
                 FROM ingredientes
                 WHERE restaurante_id = $1 AND deleted_at IS NULL
             `, [restauranteId])).rows[0];
+
+            return {
+                ...resumen,
+                nota_suministros: 'valor_stock_total e items_con_stock cuentan SOLO género (alimento y bebida) — es el número que el usuario ve en el KPI Valor de Stock. Los suministros (material no comestible) van aparte en valor_stock_suministros / items_suministros porque entran por pedido pero no salen por ninguna receta.'
+            };
+        }
 
         case 'stock_critico':
             return (await pool.query(`
