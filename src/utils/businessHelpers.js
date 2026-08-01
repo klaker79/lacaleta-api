@@ -456,6 +456,117 @@ function computePriceDrift(rows, opts = {}) {
     return alertas.sort((a, b) => b.impacto_mes - a.impacto_mes);
 }
 
+/**
+ * Detecta suministros acumulados — material no comestible cuyo stock lleva
+ * creciendo sin freno.
+ *
+ * EL PROBLEMA: los suministros (guantes, servilletas, mantelillos, bolsas) no
+ * están en ninguna receta, así que vender NO los descuenta. Solo entran, nunca
+ * salen. Su stock no mide lo que hay en el almacén: mide lo que has comprado
+ * desde que empezaste. En La Nave 5, 45 de 54 suministros no habían bajado ni
+ * una unidad en 90 días y 0 de 69 tenían recuento físico.
+ *
+ * LA SEÑAL: un suministro no tiene ventas, pero sí COMPRAS — y las compras son
+ * el consumo real. Si sigues comprando propano cada mes es que lo gastas; si
+ * dejaras de gastarlo, dejarías de comprarlo. Así que el ritmo de compra es el
+ * mejor proxy de consumo disponible, y comparar stock contra ese ritmo da los
+ * "meses de cobertura": cuántos meses de compras llevas acumulados en la ficha.
+ *
+ * Cobertura alta = o sobrestockeas de verdad, o el contador está inflado.
+ * En ambos casos la acción es la misma y es la única honesta: **hacer recuento**.
+ * Por eso esto AVISA, no corrige: la app no puede saber cuántos guantes quedan
+ * en el cajón, y un tope automático solo cambiaría un número inflado por uno
+ * inventado, además de romper la trazabilidad del albarán.
+ *
+ * Filtros anti-ruido:
+ *  - minCompras: hace falta un ritmo, no una compra puntual (una sola entrada
+ *    de 500 copas no significa que acumules copas).
+ *  - minValor: material de 3 € no merece un aviso aunque la cobertura sea alta.
+ *
+ * Caso aparte: stock > 0 y CERO compras en la ventana. La cobertura es infinita
+ * y no se puede calcular, pero es igual de sospechoso (tienes 4.000 toallitas y
+ * llevas medio año sin reponer). Se marca `sin_compras_recientes` y se ordena
+ * por valor, sin inventar un número de meses.
+ *
+ * @param {Array} rows - filas con: id, nombre, unidad, stock_actual, precio,
+ *   cantidad_por_formato, cantidad_90d, n_compras_90d, ultima_compra, stock_real.
+ * @param {object} opts - { umbralMeses=2, minCompras=2, minValor=25, ventanaDias=90 }
+ * @returns {Array} alertas ordenadas por valor_exceso desc.
+ */
+function computeSuppliesOverstock(rows, opts = {}) {
+    const num = (v, def) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : def);
+    const umbralMeses = num(opts.umbralMeses, 2);
+    const minCompras = num(opts.minCompras, 2);
+    const minValor = num(opts.minValor, 25);
+    const ventanaDias = num(opts.ventanaDias, 90);
+    // Meses que cubre la ventana de compras (90 días ≈ 3 meses).
+    const mesesVentana = ventanaDias / 30;
+
+    const alertas = [];
+    (rows || []).forEach(row => {
+        const stock = parseFloat(row.stock_actual) || 0;
+        if (!(stock > 0)) return;
+
+        // Precio unitario NOMINAL (precio / cantidad_por_formato), el mismo que
+        // usa `valor_stock` en /inventory/complete. Así la cifra del aviso cuadra
+        // con la que el usuario ve en el KPI y en la pestaña Inventario.
+        const precio = parseFloat(row.precio) || 0;
+        const cpf = parseFloat(row.cantidad_por_formato) || 0;
+        const precioUnitario = cpf > 0 ? precio / cpf : precio;
+        const valor = stock * precioUnitario;
+        if (!(valor >= minValor)) return;
+
+        const comprado = parseFloat(row.cantidad_90d) || 0;
+        const nCompras = parseInt(row.n_compras_90d, 10) || 0;
+        const ritmoMes = comprado / mesesVentana;
+
+        // Sin compras en la ventana: no hay ritmo con el que comparar. Es señal,
+        // pero de otro tipo — no se le pone cobertura para no inventar un número.
+        if (!(comprado > 0) || nCompras < minCompras) {
+            if (comprado > 0) return; // compró poco/una vez → no es un ritmo, fuera
+            alertas.push({
+                id: row.id,
+                nombre: row.nombre,
+                unidad: row.unidad || '',
+                stock_actual: Math.round(stock * 1000) / 1000,
+                valor: Math.round(valor * 100) / 100,
+                ritmo_mes: 0,
+                meses_cobertura: null,
+                exceso: Math.round(stock * 1000) / 1000,
+                valor_exceso: Math.round(valor * 100) / 100,
+                sin_compras_recientes: true,
+                nunca_contado: row.stock_real === null || row.stock_real === undefined,
+                ultima_compra: row.ultima_compra || null
+            });
+            return;
+        }
+
+        const mesesCobertura = stock / ritmoMes;
+        if (mesesCobertura < umbralMeses) return;
+
+        // Lo que sobra respecto a la cobertura considerada sana. Es la cifra
+        // accionable: "esto es lo que te sobra en la ficha, cuéntalo".
+        const exceso = Math.max(0, stock - ritmoMes * umbralMeses);
+
+        alertas.push({
+            id: row.id,
+            nombre: row.nombre,
+            unidad: row.unidad || '',
+            stock_actual: Math.round(stock * 1000) / 1000,
+            valor: Math.round(valor * 100) / 100,
+            ritmo_mes: Math.round(ritmoMes * 100) / 100,
+            meses_cobertura: Math.round(mesesCobertura * 10) / 10,
+            exceso: Math.round(exceso * 1000) / 1000,
+            valor_exceso: Math.round(exceso * precioUnitario * 100) / 100,
+            sin_compras_recientes: false,
+            nunca_contado: row.stock_real === null || row.stock_real === undefined,
+            ultima_compra: row.ultima_compra || null
+        });
+    });
+
+    return alertas.sort((a, b) => b.valor_exceso - a.valor_exceso);
+}
+
 module.exports = {
     calcularPrecioUnitario,
     getBackendIngredientUnitPrice,
@@ -467,5 +578,6 @@ module.exports = {
     buildIngredientPriceMap,
     resolveProveedorId,
     updateProveedorPrecio,
-    computePriceDrift
+    computePriceDrift,
+    computeSuppliesOverstock
 };
