@@ -56,6 +56,7 @@ const TENANT_TABLES = [
     'ventas',
     'ventas_diarias_resumen',
     'mermas',
+    'consumos_internos', // 2026-08-01: plato de la carta consumido sin venta
     'empleados',
     'horarios',
     'proveedores',
