@@ -21,6 +21,7 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { globalLimiter } = require('../middleware/rateLimit');
 const { log } = require('../utils/logger');
 const { validateId, validateCantidad, validateDate, validateEnum, sanitizeString } = require('../utils/validators');
 const { expandRecipeToBase, loadYieldConfig, getRecipeCostBase, getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
@@ -41,7 +42,7 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== LISTAR ==========
-    router.get('/consumos-internos', authMiddleware, async (req, res) => {
+    router.get('/consumos-internos', globalLimiter, authMiddleware, async (req, res) => {
         try {
             const { desde, hasta } = req.query;
             const params = [req.restauranteId];
@@ -82,7 +83,7 @@ module.exports = function (pool) {
     });
 
     // ========== REGISTRAR (descuenta stock) ==========
-    router.post('/consumos-internos', authMiddleware, async (req, res) => {
+    router.post('/consumos-internos', globalLimiter, authMiddleware, async (req, res) => {
         const { recetaId, porciones, tipo, fecha, empleadoId, nota, varianteId } = req.body;
 
         const idCheck = validateId(recetaId);
@@ -255,7 +256,7 @@ module.exports = function (pool) {
     });
 
     // ========== BORRAR (revierte el stock descontado) ==========
-    router.delete('/consumos-internos/:id', authMiddleware, requireAdmin, async (req, res) => {
+    router.delete('/consumos-internos/:id', globalLimiter, authMiddleware, requireAdmin, async (req, res) => {
         const idCheck = validateId(req.params.id);
         if (!idCheck.valid) return res.status(400).json({ error: idCheck.error });
 
