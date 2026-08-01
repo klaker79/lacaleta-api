@@ -30,6 +30,12 @@ module.exports = function (pool) {
         i.cantidad_por_formato,
         i.precio,
         i.precio_fijado,
+        -- 🧹 2026-08-01: la familia viaja al frontend para que el Valor de Stock
+        -- pueda separar género (alimento/bebida) de suministros. Guantes, servilletas
+        -- y mantelillos entran por pedido pero no salen por ninguna receta, así que
+        -- inflaban el valor de inventario sin techo (11.283 € en La Nave 5).
+        -- valor_stock NO cambia de definición: quien decide qué sumar es el frontend.
+        COALESCE(i.familia, 'alimento') AS familia,
         CASE
             WHEN i.stock_real IS NULL THEN NULL
             ELSE (i.stock_real - i.stock_actual)
