@@ -567,6 +567,109 @@ function computeSuppliesOverstock(rows, opts = {}) {
     return alertas.sort((a, b) => b.valor_exceso - a.valor_exceso);
 }
 
+/**
+ * Agrupa los snapshots de recuento físico en SESIONES y valora la diferencia en €.
+ *
+ * QUÉ ES ESTE NÚMERO: la distancia entre lo que el sistema creía tener y lo que
+ * había de verdad en la cámara. No es merma, ni robo, ni un error de la app: es
+ * la suma de todo lo que no quedó registrado — producto tirado sin apuntar,
+ * escandallos cortos, pesajes flojos en recepción, raciones generosas. Por eso
+ * NO se intenta corregir sola: el inventario virtual es una aproximación y el
+ * recuento físico es lo único que pone los dos mundos a cero.
+ *
+ * Lo que sí hace este número es medir CUÁNTO te fías de tu propio stock. Un
+ * restaurante que cuenta y se desvía un 2% controla; uno que se desvía un 30%
+ * está tomando decisiones de compra sobre datos que no existen.
+ *
+ * SESIÓN: el recuento se guarda fila a fila, así que las filas del mismo minuto
+ * son una sola vuelta a la cámara. En La Nave 5 se cuenta por zonas (2, 25, 49
+ * ingredientes por sesión), no todo de golpe — de ahí que se agrupe por minuto
+ * y no por día: dos vueltas el mismo día son dos recuentos distintos.
+ *
+ * Valoración: precio unitario canónico vía getBackendIngredientUnitPrice, el
+ * mismo que usa el resto de la app, para que el dinero cuadre con el KPI.
+ *
+ * @param {Array} rows - filas de inventory_snapshots_v2 + datos del ingrediente:
+ *   { fecha, ingrediente_id, nombre, unidad, stock_virtual, stock_real, diferencia,
+ *     precio, cantidad_por_formato, precio_fijado, precio_medio_compra }
+ * @param {object} opts - { topN=5 }
+ * @returns {Array} sesiones (más reciente primero), cada una con su detalle.
+ */
+function computeInventoryDifference(rows, opts = {}) {
+    const topN = Number.isFinite(parseInt(opts.topN, 10)) ? parseInt(opts.topN, 10) : 5;
+    const sesiones = new Map();
+
+    (rows || []).forEach(row => {
+        if (!row || !row.fecha) return;
+        const d = row.fecha instanceof Date ? row.fecha : new Date(row.fecha);
+        if (Number.isNaN(d.getTime())) return;
+        // Clave por minuto: una vuelta a la cámara.
+        const clave = d.toISOString().slice(0, 16);
+
+        if (!sesiones.has(clave)) {
+            sesiones.set(clave, {
+                fecha: d.toISOString(),
+                contados: 0,
+                falta_eur: 0,
+                sobra_eur: 0,
+                neto_eur: 0,
+                valor_esperado: 0,
+                items: []
+            });
+        }
+        const s = sesiones.get(clave);
+
+        const virtual = parseFloat(row.stock_virtual) || 0;
+        const real = parseFloat(row.stock_real) || 0;
+        // `diferencia` viene calculada de la BD, pero se recalcula por si llegara nula.
+        const dif = row.diferencia !== null && row.diferencia !== undefined
+            ? parseFloat(row.diferencia)
+            : (real - virtual);
+        const precio = getBackendIngredientUnitPrice(row);
+        const eur = dif * precio;
+
+        s.contados++;
+        // Lo que el sistema decía que valía esa cámara: la referencia para el %.
+        s.valor_esperado += Math.abs(virtual) * precio;
+        if (eur < 0) s.falta_eur += -eur; else s.sobra_eur += eur;
+        s.neto_eur += eur;
+
+        s.items.push({
+            id: row.ingrediente_id,
+            nombre: row.nombre || 'Sin nombre',
+            unidad: row.unidad || '',
+            stock_virtual: Math.round(virtual * 1000) / 1000,
+            stock_real: Math.round(real * 1000) / 1000,
+            diferencia: Math.round(dif * 1000) / 1000,
+            eur: Math.round(eur * 100) / 100
+        });
+    });
+
+    const redondear = n => Math.round(n * 100) / 100;
+
+    return Array.from(sesiones.values())
+        .map(s => ({
+            fecha: s.fecha,
+            contados: s.contados,
+            falta_eur: redondear(s.falta_eur),
+            sobra_eur: redondear(s.sobra_eur),
+            neto_eur: redondear(s.neto_eur),
+            valor_esperado: redondear(s.valor_esperado),
+            // Cuánto se desvió respecto a lo que decía el sistema. Es la métrica
+            // comparable entre recuentos: 3.000 € de desviación no significan lo
+            // mismo contando la bodega entera que contando cuatro ingredientes.
+            desviacion_pct: s.valor_esperado > 0
+                ? Math.round((Math.abs(s.neto_eur) / s.valor_esperado) * 1000) / 10
+                : null,
+            // Los que más dinero mueven, para no leer una lista de 49 líneas.
+            top: s.items
+                .filter(i => Math.abs(i.eur) > 0.005)
+                .sort((a, b) => Math.abs(b.eur) - Math.abs(a.eur))
+                .slice(0, topN)
+        }))
+        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+}
+
 module.exports = {
     calcularPrecioUnitario,
     getBackendIngredientUnitPrice,
@@ -579,5 +682,6 @@ module.exports = {
     resolveProveedorId,
     updateProveedorPrecio,
     computePriceDrift,
-    computeSuppliesOverstock
+    computeSuppliesOverstock,
+    computeInventoryDifference
 };
