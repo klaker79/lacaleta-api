@@ -7,6 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { validateNumber, validateId } = require('../utils/validators');
 const { getBackendIngredientUnitPrice, computeInventoryDifference } = require('../utils/businessHelpers');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -24,7 +25,10 @@ module.exports = function (pool) {
     // virtual es una aproximación y el recuento es lo único que pone los dos mundos a
     // cero. Lo que mide es cuánto puedes fiarte de tu propio stock entre recuento y
     // recuento, que es una decisión de negocio, no un número técnico.
-    router.get('/inventory/differences', authMiddleware, async (req, res) => {
+    // Con `costlyApiLimiter` como el resto de endpoints de análisis: la consulta
+    // cruza los snapshots con la media de compras de todo el histórico, así que no
+    // debe poder martillearse. CodeQL lo marcó como "Missing rate limiting" en #450.
+    router.get('/inventory/differences', costlyApiLimiter, authMiddleware, async (req, res) => {
         try {
             const lim = parseInt(req.query.limit, 10);
             const limite = Number.isFinite(lim) ? Math.min(50, Math.max(1, lim)) : 12;
