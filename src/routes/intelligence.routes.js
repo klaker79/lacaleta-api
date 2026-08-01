@@ -7,7 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 // 2026-06-08: requirePlan retirado. El gating ahora es global en server.js.
 const { log } = require('../utils/logger');
-const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift } = require('../utils/businessHelpers');
+const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift, computeSuppliesOverstock } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -403,6 +403,74 @@ module.exports = function (pool) {
             });
         } catch (err) {
             log('error', 'Error en intelligence/price-drift', { error: err.message });
+            res.status(500).json({ error: 'Error interno', alertas: [] });
+        }
+    });
+
+    // ========== 🧹 INTELIGENCIA - SUMINISTROS ACUMULADOS ==========
+    // Los suministros no están en ninguna receta ⇒ vender NO los descuenta: solo
+    // entran, nunca salen. Su stock deja de medir el almacén y pasa a medir todo
+    // lo comprado desde el primer día. Aquí se compara el stock contra el RITMO
+    // REAL DE COMPRA (el único proxy de consumo que existe para ellos) y se avisa
+    // para que el usuario haga recuento. NO corrige nada: la app no puede saber
+    // cuántos guantes quedan en el cajón.
+    router.get('/intelligence/supplies-overstock', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const VENTANA_DIAS = 90;
+            const clamp = (v, lo, hi, def) => {
+                const n = parseFloat(v);
+                return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
+            };
+            const umbralMeses = clamp(req.query.umbral_meses, 0.5, 60, 2);
+            const minCompras = clamp(req.query.min_compras, 1, 30, 2);
+            const minValor = clamp(req.query.min_valor, 0, 100000, 25);
+
+            const result = await pool.query(`
+            SELECT i.id, i.nombre, i.unidad, i.stock_actual, i.stock_real,
+                   i.precio, i.cantidad_por_formato,
+                   COALESCE(c.cantidad_90d, 0)  AS cantidad_90d,
+                   COALESCE(c.n_compras_90d, 0) AS n_compras_90d,
+                   c.ultima_compra
+            FROM ingredientes i
+            LEFT JOIN (
+                SELECT ingrediente_id,
+                       SUM(cantidad_comprada) AS cantidad_90d,
+                       COUNT(*)               AS n_compras_90d,
+                       MAX(fecha)             AS ultima_compra
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1
+                  AND fecha >= CURRENT_DATE - INTERVAL '${VENTANA_DIAS} days'
+                GROUP BY ingrediente_id
+            ) c ON c.ingrediente_id = i.id
+            WHERE i.restaurante_id = $1
+              AND i.deleted_at IS NULL
+              AND LOWER(COALESCE(i.familia, 'alimento')) IN ('suministro', 'suministros')
+        `, [req.restauranteId]);
+
+            const alertas = computeSuppliesOverstock(result.rows, { umbralMeses, minCompras, minValor, ventanaDias: VENTANA_DIAS });
+
+            // Contexto agregado: el frontend muestra UN aviso resumen (no 60), así
+            // que necesita el total y cuántos suministros no se han contado nunca.
+            const conStock = result.rows.filter(r => (parseFloat(r.stock_actual) || 0) > 0);
+            const valorTotal = conStock.reduce((s, r) => {
+                const cpf = parseFloat(r.cantidad_por_formato) || 0;
+                const precio = parseFloat(r.precio) || 0;
+                return s + (parseFloat(r.stock_actual) || 0) * (cpf > 0 ? precio / cpf : precio);
+            }, 0);
+
+            res.json({
+                ventana_dias: VENTANA_DIAS,
+                umbral_meses: umbralMeses,
+                min_compras: minCompras,
+                min_valor: minValor,
+                n_suministros_con_stock: conStock.length,
+                valor_total: Math.round(valorTotal * 100) / 100,
+                valor_exceso_total: Math.round(alertas.reduce((s, a) => s + a.valor_exceso, 0) * 100) / 100,
+                nunca_contados: conStock.filter(r => r.stock_real === null || r.stock_real === undefined).length,
+                alertas
+            });
+        } catch (err) {
+            log('error', 'Error en intelligence/supplies-overstock', { error: err.message });
             res.status(500).json({ error: 'Error interno', alertas: [] });
         }
     });
