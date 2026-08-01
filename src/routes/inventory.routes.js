@@ -6,7 +6,8 @@ const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { validateNumber, validateId } = require('../utils/validators');
-const { getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
+const { getBackendIngredientUnitPrice, computeInventoryDifference } = require('../utils/businessHelpers');
+const { costlyApiLimiter } = require('../middleware/rateLimit');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -15,6 +16,67 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== INVENTARIO AVANZADO ==========
+    // ========== 📉 DIFERENCIA DE INVENTARIO ==========
+    // Cada recuento físico guarda en inventory_snapshots_v2 lo que el sistema creía
+    // tener y lo que había de verdad. Se llevaba haciendo desde diciembre de 2025 —560
+    // registros en La Nave 5— y NADIE lo leía: se calculaba y se tiraba.
+    //
+    // Este endpoint lo saca a la luz valorado en euros. NO corrige nada: el stock
+    // virtual es una aproximación y el recuento es lo único que pone los dos mundos a
+    // cero. Lo que mide es cuánto puedes fiarte de tu propio stock entre recuento y
+    // recuento, que es una decisión de negocio, no un número técnico.
+    // Con `costlyApiLimiter` como el resto de endpoints de análisis: la consulta
+    // cruza los snapshots con la media de compras de todo el histórico, así que no
+    // debe poder martillearse. CodeQL lo marcó como "Missing rate limiting" en #450.
+    router.get('/inventory/differences', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const lim = parseInt(req.query.limit, 10);
+            const limite = Number.isFinite(lim) ? Math.min(50, Math.max(1, lim)) : 12;
+            // 90 días por defecto. Con ventanas más largas el acumulado se contamina
+            // con la carga INICIAL de stock (en La Nave 5, diciembre de 2025): dar de
+            // alta el inventario por primera vez aparece como una diferencia positiva
+            // enorme y le da la vuelta al signo del total (a 365 días sale +48.927 €
+            // cuando la realidad de los últimos 90 es −39.199 €).
+            const dias = Number.isFinite(parseInt(req.query.dias, 10))
+                ? Math.min(730, Math.max(1, parseInt(req.query.dias, 10)))
+                : 90;
+
+            const result = await pool.query(`
+            SELECT s.fecha, s.ingrediente_id, s.stock_virtual, s.stock_real, s.diferencia,
+                   i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.precio_fijado,
+                   pcd.precio_medio_compra
+            FROM inventory_snapshots_v2 s
+            JOIN ingredientes i ON i.id = s.ingrediente_id AND i.restaurante_id = $1
+            LEFT JOIN (
+                SELECT ingrediente_id,
+                       ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                FROM precios_compra_diarios WHERE restaurante_id = $1
+                GROUP BY ingrediente_id
+            ) pcd ON pcd.ingrediente_id = s.ingrediente_id
+            WHERE s.restaurante_id = $1
+              AND s.fecha >= CURRENT_DATE - ($2 || ' days')::interval
+            ORDER BY s.fecha DESC
+        `, [req.restauranteId, String(dias)]);
+
+            const sesiones = computeInventoryDifference(result.rows).slice(0, limite);
+
+            // El frontend enseña el último recuento en grande y compara con el anterior:
+            // lo que importa no es el número suelto, es si mejora o empeora.
+            res.json({
+                dias,
+                sesiones,
+                ultimo: sesiones[0] || null,
+                anterior: sesiones[1] || null,
+                // Acumulado del periodo: cuánto se ha desviado el stock en total.
+                acumulado_eur: Math.round(sesiones.reduce((s, x) => s + x.neto_eur, 0) * 100) / 100,
+                recuentos: sesiones.length
+            });
+        } catch (err) {
+            log('error', 'Error en inventory/differences', { error: err.message });
+            res.status(500).json({ error: 'Error interno', sesiones: [] });
+        }
+    });
+
     router.get('/inventory/complete', authMiddleware, async (req, res) => {
         try {
             const result = await pool.query(`
