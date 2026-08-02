@@ -288,12 +288,20 @@ module.exports = function (pool) {
                     cantidad_vendida = ventas_diarias_resumen.cantidad_vendida + EXCLUDED.cantidad_vendida,
                     coste_ingredientes = ventas_diarias_resumen.coste_ingredientes + EXCLUDED.coste_ingredientes,
                     total_ingresos = ventas_diarias_resumen.total_ingresos + EXCLUDED.total_ingresos,
-                    beneficio_bruto = ventas_diarias_resumen.beneficio_bruto + EXCLUDED.beneficio_bruto
+                    beneficio_bruto = ventas_diarias_resumen.beneficio_bruto + EXCLUDED.beneficio_bruto,
+                    -- precio = ingresos/unidades ACUMULADOS (no el precio de catálogo).
+                    -- Mantiene la invariante total_ingresos ≈ cantidad_vendida * precio_venta_unitario.
+                    precio_venta_unitario = COALESCE(ROUND((
+                        (ventas_diarias_resumen.total_ingresos + EXCLUDED.total_ingresos)
+                        / NULLIF(ventas_diarias_resumen.cantidad_vendida + EXCLUDED.cantidad_vendida, 0)
+                    )::numeric, 2), ventas_diarias_resumen.precio_venta_unitario)
             `, [
                 recetaId,
                 fechaResumen,
                 cantidadValidada,
-                precioUnitario,
+                // Precio REALIZADO (ingresos/unidades), no el de catálogo: si el importe
+                // cobrado difiere del PVP de la ficha, manda el dinero real.
+                cantidadValidada > 0 ? (total / cantidadValidada) : precioUnitario,
                 costeIngredientes,
                 total,
                 total - costeIngredientes,
@@ -416,23 +424,49 @@ module.exports = function (pool) {
             // 5. Actualizar ventas_diarias_resumen (restar la venta eliminada)
             const fechaVenta = new Date(venta.fecha).toISOString().split('T')[0];
 
-            // Calcular coste proporcional de la venta a borrar
+            // Calcular coste proporcional de la venta a borrar.
+            // ⚠️ NO usar coste_ingredientes/cantidad_vendida: cantidad_vendida suma unidades
+            // de VARIANTES distintas (copa y botella caen en la misma fila porque el UNIQUE
+            // no incluye variante_id), así que ese "coste medio por unidad" mezcla unidades
+            // heterogéneas y cada borrado dejaba el coste peor que antes, de forma acumulativa.
+            // Repartimos por unidades PONDERADAS por factor_variante, que es como se calculó
+            // el coste al insertar (costeIngredientes = costeUnitario * cantidad * factor).
             let costeVentaBorrada = 0;
             const resumenActual = await client.query(
                 'SELECT coste_ingredientes, cantidad_vendida FROM ventas_diarias_resumen WHERE receta_id = $1 AND fecha = $2 AND restaurante_id = $3',
                 [venta.receta_id, fechaVenta, req.restauranteId]
             );
-            if (resumenActual.rows.length > 0 && resumenActual.rows[0].cantidad_vendida > 0) {
-                const costePorUnidad = parseFloat(resumenActual.rows[0].coste_ingredientes) / resumenActual.rows[0].cantidad_vendida;
-                costeVentaBorrada = costePorUnidad * venta.cantidad;
+            if (resumenActual.rows.length > 0 && parseFloat(resumenActual.rows[0].coste_ingredientes) > 0) {
+                // ⚠️ El SOFT DELETE del paso 4 YA marcó esta venta como deleted_at, así que
+                // esta consulta devuelve solo las que SOBREVIVEN. El denominador correcto es
+                // el total que había cuando se acumuló el coste = supervivientes + la borrada.
+                // (Sin sumarla, el ratio sale >1 y el GREATEST(0,...) vaciaba el coste a 0.)
+                const ponderadas = await client.query(
+                    `SELECT COALESCE(SUM(cantidad * COALESCE(factor_variante, 1)), 0) AS total
+                     FROM ventas
+                     WHERE receta_id = $1 AND DATE(fecha) = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
+                    [venta.receta_id, fechaVenta, req.restauranteId]
+                );
+                const ponderadaSupervivientes = parseFloat(ponderadas.rows[0].total) || 0;
+                const ponderadaBorrada = (parseFloat(venta.cantidad) || 0) * (parseFloat(venta.factor_variante) || 1);
+                const totalPonderado = ponderadaSupervivientes + ponderadaBorrada;
+                if (totalPonderado > 0) {
+                    costeVentaBorrada = parseFloat(resumenActual.rows[0].coste_ingredientes) * (ponderadaBorrada / totalPonderado);
+                }
             }
 
             await client.query(`
-            UPDATE ventas_diarias_resumen 
+            UPDATE ventas_diarias_resumen
             SET cantidad_vendida = GREATEST(0, cantidad_vendida - $1),
                 total_ingresos = GREATEST(0, total_ingresos - $2),
                 coste_ingredientes = GREATEST(0, coste_ingredientes - $3),
-                beneficio_bruto = GREATEST(0, (total_ingresos - $2) - (coste_ingredientes - $3))
+                -- beneficio SIEMPRE = ingresos - coste con los valores YA acotados,
+                -- para que la fila nunca quede internamente incoherente.
+                beneficio_bruto = GREATEST(0, total_ingresos - $2) - GREATEST(0, coste_ingredientes - $3),
+                -- y el precio sigue siendo ingresos/unidades tras el borrado
+                precio_venta_unitario = COALESCE(ROUND((
+                    GREATEST(0, total_ingresos - $2) / NULLIF(GREATEST(0, cantidad_vendida - $1), 0)
+                )::numeric, 2), precio_venta_unitario)
             WHERE receta_id = $4 AND fecha = $5 AND restaurante_id = $6
         `, [venta.cantidad, parseFloat(venta.total) || 0, costeVentaBorrada, venta.receta_id, fechaVenta, req.restauranteId]);
 
@@ -862,16 +896,25 @@ REGLAS:
                 (receta_id, fecha, cantidad_vendida, precio_venta_unitario, coste_ingredientes, total_ingresos, beneficio_bruto, restaurante_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (receta_id, fecha, restaurante_id)
-                DO UPDATE SET 
+                DO UPDATE SET
                     cantidad_vendida = ventas_diarias_resumen.cantidad_vendida + EXCLUDED.cantidad_vendida,
                     coste_ingredientes = ventas_diarias_resumen.coste_ingredientes + EXCLUDED.coste_ingredientes,
                     total_ingresos = ventas_diarias_resumen.total_ingresos + EXCLUDED.total_ingresos,
-                    beneficio_bruto = ventas_diarias_resumen.beneficio_bruto + EXCLUDED.beneficio_bruto
+                    beneficio_bruto = ventas_diarias_resumen.beneficio_bruto + EXCLUDED.beneficio_bruto,
+                    -- precio = ingresos/unidades ACUMULADOS (no el precio de catálogo).
+                    -- Mantiene la invariante total_ingresos ≈ cantidad_vendida * precio_venta_unitario.
+                    precio_venta_unitario = COALESCE(ROUND((
+                        (ventas_diarias_resumen.total_ingresos + EXCLUDED.total_ingresos)
+                        / NULLIF(ventas_diarias_resumen.cantidad_vendida + EXCLUDED.cantidad_vendida, 0)
+                    )::numeric, 2), ventas_diarias_resumen.precio_venta_unitario)
             `, [
                     data.recetaId,
                     data.fecha,
                     data.cantidad,
-                    data.precioVenta,
+                    // Precio REALIZADO del TPV (ingresos/unidades), no el PVP de la ficha.
+                    // Antes se guardaba data.precioVenta (catálogo) junto a ingresos del TPV:
+                    // dos fuentes distintas sin validar → el 25% de las filas descuadraba.
+                    data.cantidad > 0 ? (data.ingresos / data.cantidad) : data.precioVenta,
                     data.coste,
                     data.ingresos,
                     data.ingresos - data.coste,
