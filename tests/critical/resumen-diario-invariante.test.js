@@ -10,19 +10,16 @@
  * DOS FUENTES DISTINTAS sin validarlas entre sí:
  *   - precio_venta_unitario  ← recetas.precio_venta (catálogo de la app)
  *   - total_ingresos         ← venta.total (importe REAL del ticket)
- * Si el TPV cobraba 18 € y la ficha decía 19 €, la fila guardaba las dos
- * cifras a la vez. Ejemplo real: AMEIXAS ficha 19,00 / cobrado 18,00
- * todos los días desde marzo; NAVAJAS ficha 18,00 / cobrado 16,00.
+ * Ejemplo real: AMEIXAS ficha 19,00 / cobrado 18,00 todos los días.
  *
  * FIX: precio_venta_unitario pasa a ser el precio REALIZADO
- * (total_ingresos / cantidad_vendida), tanto en el INSERT como en el
- * ON CONFLICT DO UPDATE y en el DELETE. Es la misma fórmula que ya usaba
- * POST /analytics/recalculate-cogs, que era el único sitio que lo hacía bien.
+ * (total_ingresos / cantidad_vendida), en INSERT, ON CONFLICT y DELETE.
  *
- * NINGÚN test cubría esta invariante. Por eso el bug vivió meses sin
- * que ninguna auditoría lo detectara. Este test existe para que no vuelva.
- *
- * Se usa fecha futura (2099-12-30) para no tocar datos reales del tenant.
+ * ⚠️ ESTE TEST SE CREA SUS PROPIOS DATOS (ingrediente + receta).
+ * En CI el tenant nace VACÍO: si el test dependiera de que existan recetas,
+ * se saltaría y quedaría en verde sin haber probado nada — que es
+ * exactamente lo que pasó en su primera versión (2026-08-02). Por eso aquí
+ * el setup FALLA RUIDOSAMENTE si no puede montar sus datos.
  */
 
 const request = require('supertest');
@@ -33,44 +30,75 @@ const ORIGIN = 'http://localhost:3001';
 // se cumple con una tolerancia de medio céntimo por unidad vendida.
 const toleranciaPara = (unidades) => Math.max(0.01, unidades * 0.005 + 0.01);
 
+const sufijo = Date.now();
+
 describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
     let authToken;
+    let ingredienteId;
     let recetaId;
-    let recetaPrecioCatalogo;
-    const fechaTest = '2099-12-30';
+    let setupError = null;
     const ventasCreadas = [];
+    const fechaTest = '2099-12-30';
+
+    // PVP de catálogo deliberadamente DISTINTO del coste, para que la fila
+    // tenga precio e ingresos que puedan divergir si el fix se revierte.
+    const PVP_CATALOGO = 20;
 
     beforeAll(async () => {
         authToken = await global.getAuthToken();
-        if (!authToken) return;
+        if (!authToken) { setupError = 'no se pudo obtener token de auth'; return; }
 
-        const recetasRes = await request(API_URL)
-            .get('/api/recipes')
+        const ingRes = await request(API_URL)
+            .post('/api/ingredients')
             .set('Origin', ORIGIN)
-            .set('Authorization', `Bearer ${authToken}`);
+            .set('Authorization', `Bearer ${authToken}`)
+            .send({
+                nombre: `_TEST_INVARIANTE_ING_${sufijo}`,
+                unidad: 'kg',
+                precio: 4,
+                stock_actual: 1000,
+                stock_minimo: 0,
+                categoria: 'test'
+            });
 
-        if (recetasRes.status !== 200 || !Array.isArray(recetasRes.body)) return;
-
-        const recetaFood = recetasRes.body.find(r => {
-            const cat = (r.categoria || '').toLowerCase().trim();
-            const esNoFood = ['bebida', 'bebidas', 'base', 'preparacion base', 'suministro', 'suministros'].includes(cat);
-            return !esNoFood && parseFloat(r.precio_venta) > 0 && parseInt(r.porciones) >= 1;
-        });
-
-        if (recetaFood) {
-            recetaId = recetaFood.id;
-            recetaPrecioCatalogo = parseFloat(recetaFood.precio_venta);
+        if (![200, 201].includes(ingRes.status) || !ingRes.body?.id) {
+            setupError = `no se pudo crear el ingrediente (status ${ingRes.status})`;
+            return;
         }
+        ingredienteId = ingRes.body.id;
+
+        const recRes = await request(API_URL)
+            .post('/api/recipes')
+            .set('Origin', ORIGIN)
+            .set('Authorization', `Bearer ${authToken}`)
+            .send({
+                nombre: `_TEST_INVARIANTE_REC_${sufijo}`,
+                categoria: 'alimentos',
+                precio_venta: PVP_CATALOGO,
+                porciones: 1,
+                ingredientes: [{ ingredienteId, cantidad: 0.5 }]
+            });
+
+        if (recRes.status !== 201 || !recRes.body?.id) {
+            setupError = `no se pudo crear la receta (status ${recRes.status})`;
+            return;
+        }
+        recetaId = recRes.body.id;
     });
 
     afterAll(async () => {
-        // Cleanup: borrar las ventas de test para no dejar basura en el tenant.
+        if (!authToken) return;
         for (const id of ventasCreadas) {
-            await request(API_URL)
-                .delete(`/api/sales/${id}`)
-                .set('Origin', ORIGIN)
-                .set('Authorization', `Bearer ${authToken}`)
-                .catch(() => { });
+            await request(API_URL).delete(`/api/sales/${id}`)
+                .set('Origin', ORIGIN).set('Authorization', `Bearer ${authToken}`).catch(() => { });
+        }
+        if (recetaId) {
+            await request(API_URL).delete(`/api/recipes/${recetaId}`)
+                .set('Origin', ORIGIN).set('Authorization', `Bearer ${authToken}`).catch(() => { });
+        }
+        if (ingredienteId) {
+            await request(API_URL).delete(`/api/ingredients/${ingredienteId}`)
+                .set('Origin', ORIGIN).set('Authorization', `Bearer ${authToken}`).catch(() => { });
         }
     });
 
@@ -83,52 +111,40 @@ describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
         return res.body.find(r => r.receta_id === recetaId) || null;
     };
 
-    it('1. El precio guardado es el REALIZADO, no el de catálogo, aunque el importe cobrado difiera', async () => {
-        if (!authToken || !recetaId) {
-            console.log('⏭️ Skip: sin auth o sin receta FOOD disponible');
-            return;
-        }
+    it('0. El setup montó sus propios datos (si esto falla, los demás no prueban nada)', () => {
+        // Deliberadamente NO es un skip: un guardián que se salta en silencio
+        // es peor que no tener guardián, porque da falsa confianza.
+        expect(setupError).toBeNull();
+        expect(recetaId).toBeDefined();
+        console.log(`✅ Setup: receta ${recetaId} con ingrediente ${ingredienteId}`);
+    });
 
-        // Importe deliberadamente DISTINTO al precio de catálogo: simula el caso
-        // real de AMEIXAS (ficha 19 €, TPV cobra 18 €).
-        const cantidad = 4;
-        const precioReal = Math.max(1, Math.round((recetaPrecioCatalogo * 0.8) * 100) / 100);
-        const totalReal = Math.round(precioReal * cantidad * 100) / 100;
-
-        expect(precioReal).not.toBeCloseTo(recetaPrecioCatalogo, 2); // el test debe ser significativo
+    it('1. Tras la primera venta, total_ingresos == cantidad_vendida × precio_venta_unitario', async () => {
+        expect(setupError).toBeNull();
 
         const postRes = await request(API_URL)
             .post('/api/sales')
             .set('Origin', ORIGIN)
             .set('Authorization', `Bearer ${authToken}`)
-            .send({ receta_id: recetaId, cantidad, fecha: fechaTest });
+            .send({ receta_id: recetaId, cantidad: 4, fecha: fechaTest });
 
         expect(postRes.status).toBe(201);
-        if (postRes.body.id) ventasCreadas.push(postRes.body.id);
+        ventasCreadas.push(postRes.body.id);
 
         const fila = await leerFila();
         expect(fila).not.toBeNull();
 
-        const cantidadVendida = parseFloat(fila.cantidad_vendida);
-        const totalIngresos = parseFloat(fila.total_ingresos);
-        const precioUnit = parseFloat(fila.precio_venta_unitario);
+        const qty = parseFloat(fila.cantidad_vendida);
+        const ing = parseFloat(fila.total_ingresos);
+        const pvu = parseFloat(fila.precio_venta_unitario);
 
-        // ── INVARIANTE CENTRAL ───────────────────────────────────────────
-        // total_ingresos debe reconstruirse desde cantidad × precio.
-        expect(cantidadVendida).toBeGreaterThan(0);
-        expect(Math.abs(cantidadVendida * precioUnit - totalIngresos))
-            .toBeLessThanOrEqual(toleranciaPara(cantidadVendida));
-
-        console.log(`✅ Invariante OK: ${cantidadVendida} uds × ${precioUnit} € ≈ ${totalIngresos} €`);
-        // referencia no usada en aserción, sólo informativa
-        void totalReal;
+        expect(qty).toBe(4);
+        expect(Math.abs(qty * pvu - ing)).toBeLessThanOrEqual(toleranciaPara(qty));
+        console.log(`✅ ${qty} uds × ${pvu} € ≈ ${ing} €`);
     });
 
     it('2. Tras acumular una segunda venta el mismo día, la invariante se mantiene', async () => {
-        if (!authToken || !recetaId) {
-            console.log('⏭️ Skip: sin auth o sin receta FOOD disponible');
-            return;
-        }
+        expect(setupError).toBeNull();
 
         const postRes = await request(API_URL)
             .post('/api/sales')
@@ -137,45 +153,40 @@ describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
             .send({ receta_id: recetaId, cantidad: 3, fecha: fechaTest });
 
         expect(postRes.status).toBe(201);
-        if (postRes.body.id) ventasCreadas.push(postRes.body.id);
+        ventasCreadas.push(postRes.body.id);
 
         const fila = await leerFila();
         expect(fila).not.toBeNull();
 
-        const cantidadVendida = parseFloat(fila.cantidad_vendida);
-        const totalIngresos = parseFloat(fila.total_ingresos);
-        const precioUnit = parseFloat(fila.precio_venta_unitario);
+        const qty = parseFloat(fila.cantidad_vendida);
+        const ing = parseFloat(fila.total_ingresos);
+        const pvu = parseFloat(fila.precio_venta_unitario);
 
-        // El ON CONFLICT DO UPDATE debe RECALCULAR el precio, no dejarlo congelado
-        // con el de la primera venta del día.
-        expect(Math.abs(cantidadVendida * precioUnit - totalIngresos))
-            .toBeLessThanOrEqual(toleranciaPara(cantidadVendida));
-
-        console.log(`✅ Invariante tras acumular: ${cantidadVendida} uds × ${precioUnit} € ≈ ${totalIngresos} €`);
+        // El ON CONFLICT DO UPDATE debe RECALCULAR el precio, no dejarlo
+        // congelado con el de la primera venta del día.
+        expect(qty).toBe(7);
+        expect(Math.abs(qty * pvu - ing)).toBeLessThanOrEqual(toleranciaPara(qty));
+        console.log(`✅ Tras acumular: ${qty} uds × ${pvu} € ≈ ${ing} €`);
     });
 
     it('3. beneficio_bruto siempre es total_ingresos − coste_ingredientes', async () => {
-        if (!authToken || !recetaId) {
-            console.log('⏭️ Skip: sin auth o sin receta FOOD disponible');
-            return;
-        }
+        expect(setupError).toBeNull();
 
         const fila = await leerFila();
         expect(fila).not.toBeNull();
 
-        const totalIngresos = parseFloat(fila.total_ingresos);
+        const ing = parseFloat(fila.total_ingresos);
         const coste = parseFloat(fila.coste_ingredientes);
-        const beneficio = parseFloat(fila.beneficio_bruto);
+        const benef = parseFloat(fila.beneficio_bruto);
 
-        expect(beneficio).toBeCloseTo(totalIngresos - coste, 2);
-        console.log(`✅ beneficio_bruto coherente: ${totalIngresos} − ${coste} = ${beneficio}`);
+        expect(coste).toBeGreaterThan(0); // la receta tiene ingrediente con precio
+        expect(benef).toBeCloseTo(ing - coste, 2);
+        console.log(`✅ ${ing} − ${coste} = ${benef}`);
     });
 
-    it('4. Tras BORRAR una venta, la fila sigue siendo coherente (invariante + beneficio)', async () => {
-        if (!authToken || !recetaId || ventasCreadas.length === 0) {
-            console.log('⏭️ Skip: sin auth, sin receta o sin ventas que borrar');
-            return;
-        }
+    it('4. Tras BORRAR una venta, la fila sigue siendo coherente', async () => {
+        expect(setupError).toBeNull();
+        expect(ventasCreadas.length).toBeGreaterThan(0);
 
         const idABorrar = ventasCreadas.shift();
         const delRes = await request(API_URL)
@@ -186,31 +197,24 @@ describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
         expect([200, 204]).toContain(delRes.status);
 
         const fila = await leerFila();
-        if (!fila) {
-            console.log('ℹ️ La fila desapareció tras el borrado (nada que validar)');
-            return;
-        }
+        expect(fila).not.toBeNull();
 
-        const cantidadVendida = parseFloat(fila.cantidad_vendida);
-        const totalIngresos = parseFloat(fila.total_ingresos);
-        const precioUnit = parseFloat(fila.precio_venta_unitario);
+        const qty = parseFloat(fila.cantidad_vendida);
+        const ing = parseFloat(fila.total_ingresos);
+        const pvu = parseFloat(fila.precio_venta_unitario);
         const coste = parseFloat(fila.coste_ingredientes);
-        const beneficio = parseFloat(fila.beneficio_bruto);
+        const benef = parseFloat(fila.beneficio_bruto);
 
-        if (cantidadVendida > 0) {
-            expect(Math.abs(cantidadVendida * precioUnit - totalIngresos))
-                .toBeLessThanOrEqual(toleranciaPara(cantidadVendida));
-        }
+        // Quedan las 3 unidades de la segunda venta.
+        expect(qty).toBe(3);
+        expect(Math.abs(qty * pvu - ing)).toBeLessThanOrEqual(toleranciaPara(qty));
 
-        // El DELETE clampaba beneficio_bruto con GREATEST(0,...) sobre valores SIN
-        // acotar, dejando la fila incoherente en días con pérdida.
-        expect(beneficio).toBeCloseTo(totalIngresos - coste, 2);
+        // El DELETE clampaba beneficio_bruto con GREATEST(0,...) sobre valores
+        // SIN acotar, dejando la fila incoherente en días con pérdida.
+        expect(benef).toBeCloseTo(ing - coste, 2);
 
-        // Ningún importe puede quedar negativo.
-        expect(totalIngresos).toBeGreaterThanOrEqual(0);
+        expect(ing).toBeGreaterThanOrEqual(0);
         expect(coste).toBeGreaterThanOrEqual(0);
-        expect(cantidadVendida).toBeGreaterThanOrEqual(0);
-
-        console.log(`✅ Tras borrado sigue coherente: ${cantidadVendida} uds, ${totalIngresos} € ingresos, ${coste} € coste`);
+        console.log(`✅ Tras borrado: ${qty} uds, ${ing} € ingresos, ${coste} € coste, ${benef} € beneficio`);
     });
 });
