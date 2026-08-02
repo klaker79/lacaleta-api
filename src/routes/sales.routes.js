@@ -437,16 +437,19 @@ module.exports = function (pool) {
                 [venta.receta_id, fechaVenta, req.restauranteId]
             );
             if (resumenActual.rows.length > 0 && parseFloat(resumenActual.rows[0].coste_ingredientes) > 0) {
-                // Unidades ponderadas VIVAS del día (la venta que borramos aún no está marcada
-                // como deleted_at en esta transacción, así que entra en la suma).
+                // ⚠️ El SOFT DELETE del paso 4 YA marcó esta venta como deleted_at, así que
+                // esta consulta devuelve solo las que SOBREVIVEN. El denominador correcto es
+                // el total que había cuando se acumuló el coste = supervivientes + la borrada.
+                // (Sin sumarla, el ratio sale >1 y el GREATEST(0,...) vaciaba el coste a 0.)
                 const ponderadas = await client.query(
                     `SELECT COALESCE(SUM(cantidad * COALESCE(factor_variante, 1)), 0) AS total
                      FROM ventas
                      WHERE receta_id = $1 AND DATE(fecha) = $2 AND restaurante_id = $3 AND deleted_at IS NULL`,
                     [venta.receta_id, fechaVenta, req.restauranteId]
                 );
-                const totalPonderado = parseFloat(ponderadas.rows[0].total) || 0;
+                const ponderadaSupervivientes = parseFloat(ponderadas.rows[0].total) || 0;
                 const ponderadaBorrada = (parseFloat(venta.cantidad) || 0) * (parseFloat(venta.factor_variante) || 1);
+                const totalPonderado = ponderadaSupervivientes + ponderadaBorrada;
                 if (totalPonderado > 0) {
                     costeVentaBorrada = parseFloat(resumenActual.rows[0].coste_ingredientes) * (ponderadaBorrada / totalPonderado);
                 }
