@@ -52,7 +52,30 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('superadmin', require('./superadmin.routes'), pool, config);
     mount('integrations', require('./integrations.routes'), pool);
     mount('transfers', require('./transfers.routes'), pool);
-    mount('chat', require('./chat.routes'), pool);
+    // 📄 Informe mensual — router propio desde el 2026-08-02. Va SIEMPRE, con
+    // chat o sin él: es lo que le da valor a la casa Lite sin darle un asistente
+    // conversacional.
+    mount('informes', require('./informes.routes'), pool);
+
+    // 🤖 CHAT DE OMNES — apagable por casa.
+    // En LITE no se monta: la versión Lite no lleva chat inteligente (decisión de
+    // producto de Iker, 2026-08-02). Si el chat estuviera montado, cualquier
+    // cliente con sesión podría consumir la API de Anthropic a nuestra costa, y
+    // además difuminaría la diferencia con la app grande, que es justo por lo que
+    // se paga más.
+    //
+    // ⚠️ NO basta con esconder la pestaña en el frontend: eso solo tapa el botón.
+    // El corte de verdad es este, en el servidor.
+    //
+    // Se controla con CHAT_ENABLED (default: activado, para no cambiar el
+    // comportamiento de ninguna casa existente por accidente). En lite-api se
+    // pone CHAT_ENABLED=false.
+    const chatEnabled = String(process.env.CHAT_ENABLED ?? 'true').toLowerCase() !== 'false';
+    if (chatEnabled) {
+        mount('chat', require('./chat.routes'), pool);
+    } else {
+        console.log('[ROUTES] ⏭️  chat NO montado (CHAT_ENABLED=false) — casa sin Omnes');
+    }
     mount('subscription', require('./subscription.routes'), pool);
     mount('webhooks', require('./webhooks.routes'), pool);
     mount('search', require('./search.routes'), pool);
