@@ -37,6 +37,7 @@ describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
     let ingredienteId;
     let recetaId;
     let setupError = null;
+    let costeCon7Unidades = null;
     const ventasCreadas = [];
     const fechaTest = '2099-12-30';
 
@@ -181,6 +182,10 @@ describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
 
         expect(coste).toBeGreaterThan(0); // la receta tiene ingrediente con precio
         expect(benef).toBeCloseTo(ing - coste, 2);
+
+        // Se guarda para el caso 4: tras borrar 4 de las 7 unidades, el coste
+        // restante debe ser EXACTAMENTE proporcional (3/7), no cero ni el total.
+        costeCon7Unidades = coste;
         console.log(`✅ ${ing} − ${coste} = ${benef}`);
     });
 
@@ -213,8 +218,18 @@ describe('🛡️ ventas_diarias_resumen — invariantes de coherencia', () => {
         // SIN acotar, dejando la fila incoherente en días con pérdida.
         expect(benef).toBeCloseTo(ing - coste, 2);
 
+        // ── El coste restante debe ser EXACTAMENTE proporcional ──────────
+        // Regresión real (2026-08-02): el reparto usaba como denominador solo
+        // las ventas SUPERVIVIENTES, pero el soft delete ya había marcado la
+        // que se borra → ratio 4/3 > 1 → el GREATEST(0,...) vaciaba el coste
+        // a 0. Una aserción `coste >= 0` NO lo detectaba: por eso aquí se
+        // comprueba el valor exacto.
+        expect(costeCon7Unidades).not.toBeNull();
+        expect(costeCon7Unidades).toBeGreaterThan(0);
+        expect(coste).toBeCloseTo(costeCon7Unidades * (3 / 7), 2);
+        expect(coste).toBeGreaterThan(0);
+
         expect(ing).toBeGreaterThanOrEqual(0);
-        expect(coste).toBeGreaterThanOrEqual(0);
-        console.log(`✅ Tras borrado: ${qty} uds, ${ing} € ingresos, ${coste} € coste, ${benef} € beneficio`);
+        console.log(`✅ Tras borrado: ${qty} uds, ${ing} € ingresos, ${coste} € coste (esperado ${(costeCon7Unidades * 3 / 7).toFixed(2)}), ${benef} € beneficio`);
     });
 });
