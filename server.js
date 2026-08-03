@@ -57,7 +57,12 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 
 // ========== ARQUITECTURA LIMPIA V2 ==========
-const { setupEventHandlers } = require('./src/application/bootstrap');
+// Fase D (auditoría 2026-08-03): eliminado el bus de eventos (bootstrap +
+// 3 handlers + domain/events + EventBus). Nadie PUBLICABA eventos — los únicos
+// emisores eran los repositorios huérfanos ya borrados, así que los handlers
+// llevaban meses suscritos a un bus por el que no pasaba nada. El descuento de
+// stock real vive inline en sales.routes.js (con lock por orden de id), y las
+// alertas van por /api/v2/alerts (AlertService directo, sin eventos).
 const alertRoutes = require('./src/interfaces/http/routes/alert.routes');
 const SupplierController = require('./src/interfaces/http/controllers/SupplierController');
 // NOTA 2026-06-19: rutas v2/recipes y v2/kpis ELIMINADAS — el frontend nunca las
@@ -433,8 +438,6 @@ app.use((req, res) => {
 });
 
 // ========== INICIAR SERVIDOR ==========
-// Inicializar event handlers antes de escuchar
-setupEventHandlers();
 
 // Exportar app para tests E2E
 module.exports = app;

@@ -1150,8 +1150,9 @@ async function initializeDatabase(pool) {
   // Síntomas que producía en una BD nueva:
   //   - /onboarding y /chat-status devolvían error (columnas onboarding_* y
   //     chat_consultas_mes inexistentes).
-  //   - stock_movements no existe → InventoryService captura la excepción y
-  //     sigue. El histórico de movimientos de stock se pierde EN SILENCIO.
+  //   - stock_movements no existe → el escritor de entonces (InventoryService,
+  //     eliminado en Fase D 2026-08-04 por huérfano) tragaba la excepción y el
+  //     histórico se perdía EN SILENCIO.
   //
   // Todo aditivo e idempotente (IF NOT EXISTS): en una BD que ya las tenga
   // —producción— esto es un no-op. Tipos y defaults copiados literalmente del
@@ -1202,10 +1203,10 @@ async function initializeDatabase(pool) {
   } catch (e) { log('warn', 'Migración deriva de esquema (columnas)', { error: e.message }); }
 
   try {
-    // Histórico de movimientos de stock. InventoryService inserta aquí y hoy,
-    // si la tabla no existe, traga la excepción y sigue: el movimiento se pierde
-    // sin dejar rastro. Ojo: la columna es `restaurant_id` (en inglés), no
-    // `restaurante_id` — así está en producción y así la escribe el código.
+    // Histórico de movimientos de stock. Su único escritor (InventoryService)
+    // se eliminó en Fase D 2026-08-04 por huérfano: hoy la tabla se crea por
+    // compatibilidad con BDs existentes y NO tiene escritores. Ojo: la columna
+    // es `restaurant_id` (en inglés), no `restaurante_id` — así está en prod.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS stock_movements (
         id             SERIAL PRIMARY KEY,
