@@ -8,7 +8,7 @@ const { log } = require('../utils/logger');
 const { validatePrecio, validateCantidad, sanitizeString, validateRequired, validateId } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
 const onboardingService = require('../services/onboardingService');
-const { precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera, cpfSeguro } = require('../utils/supplierPricing');
+const { precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera, cpfSeguro, completarFormatoDesdeIngrediente } = require('../utils/supplierPricing');
 
 /**
  * Resuelve el precio CANÓNICO (€/unidad-base) de una asociación ingrediente↔proveedor
@@ -777,22 +777,33 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'proveedor_id es requerido' });
             }
 
-            // Resolver precio canónico (€/unidad-base) + formato opcional. Si viene
-            // un formato completo, el precio se DERIVA de él; si no, se usa el precio directo.
-            const fmt = resolverFormatoProveedor(req.body, true);
-            if (fmt.error) {
-                return res.status(400).json({ error: fmt.error });
-            }
-            const precioNum = fmt.precio;
-
-            // Verificar ingrediente
+            // Verificar ingrediente. Se traen también los datos de formato porque
+            // hacen falta para la red de seguridad de abajo.
             const checkIng = await pool.query(
-                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                'SELECT id, formato_compra, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
             if (checkIng.rows.length === 0) {
                 return res.status(404).json({ error: 'Ingrediente no encontrado' });
             }
+            const ingRow = checkIng.rows[0];
+
+            // 🛡️ Red de seguridad: si el ingrediente se compra por formato y la
+            // petición no lo declara, el precio recibido se trata como €/formato.
+            const body = completarFormatoDesdeIngrediente(req.body, ingRow);
+            if (body !== req.body) {
+                log('info', 'Precio de proveedor derivado del formato del ingrediente', {
+                    ingrediente_id: id, formato: ingRow.formato_compra, precio_formato: req.body.precio
+                });
+            }
+
+            // Resolver precio canónico (€/unidad-base) + formato opcional. Si viene
+            // un formato completo, el precio se DERIVA de él; si no, se usa el precio directo.
+            const fmt = resolverFormatoProveedor(body, true);
+            if (fmt.error) {
+                return res.status(400).json({ error: fmt.error });
+            }
+            const precioNum = fmt.precio;
 
             // Verificar proveedor
             const checkProv = await pool.query(
@@ -857,9 +868,24 @@ module.exports = function (pool) {
             const { id, supplierId } = req.params;
             const { es_proveedor_principal } = req.body;
 
+            // 🛡️ Misma red que en el POST: si el ingrediente se compra por formato y
+            // la petición manda un `precio` a secas, se trata como €/formato y se
+            // deriva. Sin esto, editar el precio de un proveedor volvía a meter
+            // €/formato en una columna €/unidad-base (bug JOSEBA 2026-08-03).
+            const ingFmt = await pool.query(
+                'SELECT formato_compra, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                [id, req.restauranteId]
+            );
+            const bodyPut = completarFormatoDesdeIngrediente(req.body, ingFmt.rows[0]);
+            if (bodyPut !== req.body) {
+                log('info', 'Precio de proveedor derivado del formato del ingrediente (PUT)', {
+                    ingrediente_id: id, formato: ingFmt.rows[0]?.formato_compra, precio_formato: req.body.precio
+                });
+            }
+
             // Resolver precio canónico + formato opcional. En PUT el precio NO es
             // obligatorio (se puede llamar solo para marcar principal).
-            const fmt = resolverFormatoProveedor(req.body, false);
+            const fmt = resolverFormatoProveedor(bodyPut, false);
             if (fmt.error) {
                 return res.status(400).json({ error: fmt.error });
             }
