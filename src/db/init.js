@@ -710,6 +710,23 @@ async function initializeDatabase(pool) {
     log('info', 'Columna image_hash en compras_pendientes verificada');
   } catch (e) { log('warn', 'Migración image_hash', { error: e.message }); }
 
+  // 🔗 Columna pedido_id en compras_pendientes — QUÉ PEDIDO consumió este albarán.
+  //
+  // BUG (Iker, 2026-08-03): al recibir un pedido con un albarán, sus líneas pasan a
+  // 'recibido_en_pedido' para que nadie las apruebe otra vez. `POST /purchases/batch/
+  // /:batchId/consumido` YA recibía `pedidoId`… y lo tiraba (solo lo escribía en el log).
+  // Sin ese dato, borrar el pedido dejaba las líneas marcadas PARA SIEMPRE: el albarán
+  // no volvía a la cola y "Pasarlo al pedido" fallaba con 404, sin salida desde la app.
+  // Nullable/aditiva. Índice para poder liberarlas al borrar el pedido.
+  try {
+    await pool.query(`
+            ALTER TABLE compras_pendientes ADD COLUMN IF NOT EXISTS pedido_id INTEGER;
+            CREATE INDEX IF NOT EXISTS idx_compras_pendientes_pedido
+              ON compras_pendientes (restaurante_id, pedido_id) WHERE pedido_id IS NOT NULL;
+        `);
+    log('info', 'Columna pedido_id en compras_pendientes verificada');
+  } catch (e) { log('warn', 'Migración pedido_id en compras_pendientes', { error: e.message }); }
+
   // Columna pedido_id en precios_compra_diarios + migración UNIQUE constraint
   // ⚡ FIX Stabilization v1: Permitir múltiples filas por ingrediente/fecha si vienen de pedidos distintos
   try {

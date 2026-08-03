@@ -1575,9 +1575,21 @@ REGLAS:
         try {
             await client.query('BEGIN');
 
+            // 📸 Dos estados, dos tratamientos (bug de Iker, 2026-08-03):
+            //  - 'aprobado'            → approve-batch SÍ aplicó stock y Diario: hay que
+            //                            revertirlos (lo de abajo).
+            //  - 'recibido_en_pedido'  → el albarán no aplicó nada por su cuenta; el
+            //                            stock/Diario los movió la RECEPCIÓN del pedido.
+            //                            Aquí solo hay que liberar la línea.
+            //
+            // Antes esta query solo miraba 'aprobado', así que el botón "Pasarlo al
+            // pedido #N" —que existe justamente para el segundo caso— devolvía 404
+            // SIEMPRE. Callejón sin salida: sin tocar la BD a mano no había forma de
+            // recuperar ese albarán.
             const { rows: items } = await client.query(
                 `SELECT * FROM compras_pendientes
-                  WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'aprobado'
+                  WHERE batch_id = $1 AND restaurante_id = $2
+                    AND estado IN ('aprobado', 'recibido_en_pedido')
                   ORDER BY id
                   FOR UPDATE`,
                 [batchId, req.restauranteId]
@@ -1585,13 +1597,40 @@ REGLAS:
 
             if (items.length === 0) {
                 await client.query('ROLLBACK');
-                return res.status(404).json({ error: 'No hay líneas aprobadas en este albarán' });
+                return res.status(404).json({ error: 'No hay líneas que deshacer en este albarán' });
+            }
+
+            // 🔒 Si el pedido que lo consumió sigue VIVO y RECIBIDO, su stock y su
+            // Diario están puestos: liberar el albarán aquí permitiría aprobarlo otra
+            // vez y contar la compra dos veces. Para deshacer eso hay que borrar (o
+            // reabrir) el pedido, que es lo que revierte sus efectos.
+            const consumidoPorPedidoVivo = items
+                .filter(i => i.estado === 'recibido_en_pedido' && i.pedido_id)
+                .map(i => i.pedido_id);
+            if (consumidoPorPedidoVivo.length > 0) {
+                const { rows: vivos } = await client.query(
+                    `SELECT id FROM pedidos
+                      WHERE id = ANY($1::int[]) AND restaurante_id = $2
+                        AND deleted_at IS NULL AND estado = 'recibido'`,
+                    [consumidoPorPedidoVivo, req.restauranteId]
+                );
+                if (vivos.length > 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({
+                        error: `Este albarán ya se usó para recibir el pedido #${vivos[0].id}. Deshaz la recepción de ese pedido antes de volver a procesarlo.`,
+                        pedidoId: vivos[0].id
+                    });
+                }
             }
 
             const ingredientesTocados = new Set();
             let revertidos = 0;
 
             for (const item of items) {
+                // 'recibido_en_pedido': el albarán NO aplicó stock ni Diario por su
+                // cuenta (lo hizo la recepción del pedido, ya deshecha). Restar aquí
+                // sería quitarlo dos veces. Solo se libera la línea, más abajo.
+                if (item.estado === 'recibido_en_pedido') continue;
                 if (!item.ingrediente_id) continue;   // nunca sumó nada
                 const calc = computePurchaseApproval(item);
                 if (calc.rejected) continue;          // approve-batch tampoco lo aplicó
@@ -1630,11 +1669,13 @@ REGLAS:
                 await recalcularPrecioPonderado(client, ingId, req.restauranteId);
             }
 
-            // 4) El albarán vuelve a estar disponible
+            // 4) El albarán vuelve a estar disponible — LOS DOS estados, y se suelta el
+            //    pedido que lo tenía marcado.
             await client.query(
                 `UPDATE compras_pendientes
-                    SET estado = 'pendiente', aprobado_at = NULL
-                  WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'aprobado'`,
+                    SET estado = 'pendiente', aprobado_at = NULL, pedido_id = NULL
+                  WHERE batch_id = $1 AND restaurante_id = $2
+                    AND estado IN ('aprobado', 'recibido_en_pedido')`,
                 [batchId, req.restauranteId]
             );
 
@@ -2233,12 +2274,16 @@ REGLAS:
             }
             const { pedidoId } = req.body || {};
 
+            // 🔗 Se GUARDA el pedidoId (antes solo se logueaba). Sin él, borrar el
+            // pedido dejaba estas líneas marcadas para siempre: el albarán no volvía
+            // a la cola y "Pasarlo al pedido" fallaba con 404, sin salida desde la app.
             const result = await pool.query(
                 `UPDATE compras_pendientes
-                    SET estado = 'recibido_en_pedido', aprobado_at = NOW()
+                    SET estado = 'recibido_en_pedido', aprobado_at = NOW(),
+                        pedido_id = $3
                   WHERE batch_id = $1 AND restaurante_id = $2 AND estado = 'pendiente'
                   RETURNING id`,
-                [batchId, req.restauranteId]
+                [batchId, req.restauranteId, Number.isInteger(pedidoId) ? pedidoId : (parseInt(pedidoId, 10) || null)]
             );
 
             log('info', 'Albarán marcado como consumido en un pedido', {
