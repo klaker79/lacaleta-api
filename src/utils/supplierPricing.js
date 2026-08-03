@@ -51,4 +51,59 @@ function desviacionSupera(unitNuevo, unitActual, umbral = 0.70) {
     return Math.abs(n - a) / a > umbral;
 }
 
-module.exports = { cpfSeguro, precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera };
+
+/**
+ * 🛡️ Red de seguridad del precio de proveedor (bug JOSEBA, 2026-08-03).
+ *
+ * `ingredientes_proveedores.precio` es €/UNIDAD-BASE. El formulario de ingredientes
+ * llamaba a POST/PUT `/ingredients/:id/suppliers` mandando SOLO `precio` con el valor
+ * de `ingredientes.precio`, que es €/FORMATO — y sin los campos de formato, así que no
+ * había con qué derivarlo y se guardaba tal cual. Después, el desplegable de pedidos lo
+ * multiplica por cantidad_por_formato para mostrarlo por formato: una CAJA de 10 l a
+ * 23,10 € salía a **231 €**.
+ *
+ * Los 6 ingredientes de JOSEBA nacieron así. En La Nave 5 el defecto llevaba MESES
+ * latente: el carrito prioriza la ÚLTIMA COMPRA real sobre este precio, y un
+ * restaurante con historial nunca llega a leerlo. Solo muerde a los clientes NUEVOS
+ * — que es justo a quien vendemos Lite.
+ *
+ * Si el ingrediente se compra por formato y la petición NO lo declara, se asume que el
+ * precio recibido es el DEL FORMATO (que es lo que tiene sentido para quien lo teclea)
+ * y se completan los campos para que `resolverFormatoProveedor` lo derive.
+ *
+ * Arreglar solo el frontend no basta: hay bundles viejos desplegados, la casa Lite no
+ * tiene autodeploy y el flujo OCR entra por los mismos endpoints.
+ *
+ * @param {object} body - req.body original (no se muta)
+ * @param {object} ingRow - fila del ingrediente {formato_compra, cantidad_por_formato}
+ * @returns {object} el body original, o una COPIA con los campos de formato completados
+ */
+function completarFormatoDesdeIngrediente(body, ingRow) {
+    if (!body || !ingRow) return body;
+    // Si ya declara formato, el caller sabe lo que hace: no tocar.
+    if (body.formato !== undefined && body.precio_formato !== undefined) return body;
+    if (body.precio === undefined || body.precio === null || body.precio === '') return body;
+
+    // ⚠️ EL FORMATO PUEDE SER MENOR QUE 1 (auditoría 2026-08-03). Una BOTELLA de vino
+    // son 0,75 l, un BOTE de mostaza 0,24 kg: el formato no siempre AGRUPA unidades
+    // base, a veces es una FRACCIÓN. La Nave 5 tiene 15 ingredientes así. Con la
+    // condición `cpf > 1` se quedaban fuera y el bug volvía invertido: 6,08 €/botella
+    // guardado como 6,08 €/l, y el carrito mostrando 4,56 € (−25 %). No canta como el
+    // ×10, así que se cuela directo en el food cost.
+    //
+    // `cpf > 0` es la condición que ya usan `resolverFormatoProveedor`, el sync del
+    // PUT de ingredientes y el desplegable de pedidos: aquí se alinea con ellas.
+    // cpf === 1 se excluye porque dividir por 1 no cambia nada y no queremos escribir
+    // campos de formato en un ingrediente que se compra por unidad base.
+    const cpf = parseFloat(ingRow.cantidad_por_formato);
+    if (!(cpf > 0) || cpf === 1 || !ingRow.formato_compra) return body;
+
+    return {
+        ...body,
+        formato: ingRow.formato_compra,
+        cantidad_por_formato: cpf,
+        precio_formato: body.precio,
+    };
+}
+
+module.exports = { cpfSeguro, precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera, completarFormatoDesdeIngrediente };

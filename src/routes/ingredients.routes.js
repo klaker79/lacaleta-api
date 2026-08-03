@@ -8,7 +8,7 @@ const { log } = require('../utils/logger');
 const { validatePrecio, validateCantidad, sanitizeString, validateRequired, validateId } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
 const onboardingService = require('../services/onboardingService');
-const { precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera, cpfSeguro } = require('../utils/supplierPricing');
+const { precioFichaDesdeBase, precioUnitarioIngrediente, desviacionSupera, cpfSeguro, completarFormatoDesdeIngrediente } = require('../utils/supplierPricing');
 
 /**
  * Resuelve el precio CANÓNICO (€/unidad-base) de una asociación ingrediente↔proveedor
@@ -43,9 +43,12 @@ function resolverFormatoProveedor(body, requerirPrecio = true) {
         if (isNaN(pf) || pf < 0) {
             return { error: 'precio_formato debe ser un número válido >= 0' };
         }
-        // Precio canónico €/unidad-base derivado, redondeado a 2 decimales (misma
-        // escala que la columna `precio` DECIMAL(10,2)).
-        const derivado = Math.round((pf / cant) * 100) / 100;
+        // Precio canónico €/unidad-base derivado, redondeado a 6 decimales (misma
+        // escala que la columna `precio` NUMERIC(12,6) — ver migración 018).
+        // ⚠️ Con los 2 decimales de antes, una LATA de 900 g a 7,58 € derivaba
+        // 0,01 €/g en vez de 0,008422, y al reconstruir el formato salían 9,00 €
+        // (+19 %). Es el mismo bug del sync del PUT, entrando por la otra puerta.
+        const derivado = Math.round((pf / cant) * 1e6) / 1e6;
         return {
             precio: derivado,
             formato: String(formato).trim().slice(0, 100),
@@ -388,12 +391,24 @@ module.exports = function (pool) {
             // esa tabla; sin sync, el modal mostraba el precio viejo aunque la ficha del
             // ingrediente ya tenia el nuevo. No tocamos los precios de proveedores secundarios:
             // siguen siendo precios comparativos legitimos.
+            //
+            // ⚠️ UNIDADES (bug ARAU 2026-07-31): `ingredientes.precio` es €/FORMATO
+            // (7,58 €/LATA de 900 g), pero `ingredientes_proveedores.precio` es
+            // €/UNIDAD-BASE (0,0084 €/g) — la pivot tiene su propia columna
+            // `precio_formato` para el precio del formato. Sincronizar el valor
+            // crudo metia €/formato en una columna €/base, y el desplegable de
+            // "Nuevo pedido" (que hace precio × cantidad_por_formato para pasarlo
+            // a €/formato) lo multiplicaba OTRA VEZ: 7,58 × 900 = 6.822 € por una
+            // lata de atun. Hay que dividir por cpf antes de propagar.
             const oldPrecio = parseFloat(existing.precio) || 0;
             if (Math.abs(finalPrecio - oldPrecio) > 0.001) {
                 try {
+                    const cpfSync = parseFloat(finalCantidadPorFormato) > 1
+                        ? parseFloat(finalCantidadPorFormato)
+                        : 1;
                     await pool.query(
                         'UPDATE ingredientes_proveedores SET precio = $1 WHERE ingrediente_id = $2 AND es_proveedor_principal = TRUE',
-                        [finalPrecio, id]
+                        [finalPrecio / cpfSync, id]
                     );
                 } catch (syncErr) {
                     log('warn', 'Sync precio ingrediente -> proveedor principal fallido', {
@@ -762,22 +777,33 @@ module.exports = function (pool) {
                 return res.status(400).json({ error: 'proveedor_id es requerido' });
             }
 
-            // Resolver precio canónico (€/unidad-base) + formato opcional. Si viene
-            // un formato completo, el precio se DERIVA de él; si no, se usa el precio directo.
-            const fmt = resolverFormatoProveedor(req.body, true);
-            if (fmt.error) {
-                return res.status(400).json({ error: fmt.error });
-            }
-            const precioNum = fmt.precio;
-
-            // Verificar ingrediente
+            // Verificar ingrediente. Se traen también los datos de formato porque
+            // hacen falta para la red de seguridad de abajo.
             const checkIng = await pool.query(
-                'SELECT id FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                'SELECT id, formato_compra, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
                 [id, req.restauranteId]
             );
             if (checkIng.rows.length === 0) {
                 return res.status(404).json({ error: 'Ingrediente no encontrado' });
             }
+            const ingRow = checkIng.rows[0];
+
+            // 🛡️ Red de seguridad: si el ingrediente se compra por formato y la
+            // petición no lo declara, el precio recibido se trata como €/formato.
+            const body = completarFormatoDesdeIngrediente(req.body, ingRow);
+            if (body !== req.body) {
+                log('info', 'Precio de proveedor derivado del formato del ingrediente', {
+                    ingrediente_id: id, formato: ingRow.formato_compra, precio_formato: req.body.precio
+                });
+            }
+
+            // Resolver precio canónico (€/unidad-base) + formato opcional. Si viene
+            // un formato completo, el precio se DERIVA de él; si no, se usa el precio directo.
+            const fmt = resolverFormatoProveedor(body, true);
+            if (fmt.error) {
+                return res.status(400).json({ error: fmt.error });
+            }
+            const precioNum = fmt.precio;
 
             // Verificar proveedor
             const checkProv = await pool.query(
@@ -842,9 +868,24 @@ module.exports = function (pool) {
             const { id, supplierId } = req.params;
             const { es_proveedor_principal } = req.body;
 
+            // 🛡️ Misma red que en el POST: si el ingrediente se compra por formato y
+            // la petición manda un `precio` a secas, se trata como €/formato y se
+            // deriva. Sin esto, editar el precio de un proveedor volvía a meter
+            // €/formato en una columna €/unidad-base (bug JOSEBA 2026-08-03).
+            const ingFmt = await pool.query(
+                'SELECT formato_compra, cantidad_por_formato FROM ingredientes WHERE id = $1 AND restaurante_id = $2 AND deleted_at IS NULL',
+                [id, req.restauranteId]
+            );
+            const bodyPut = completarFormatoDesdeIngrediente(req.body, ingFmt.rows[0]);
+            if (bodyPut !== req.body) {
+                log('info', 'Precio de proveedor derivado del formato del ingrediente (PUT)', {
+                    ingrediente_id: id, formato: ingFmt.rows[0]?.formato_compra, precio_formato: req.body.precio
+                });
+            }
+
             // Resolver precio canónico + formato opcional. En PUT el precio NO es
             // obligatorio (se puede llamar solo para marcar principal).
-            const fmt = resolverFormatoProveedor(req.body, false);
+            const fmt = resolverFormatoProveedor(bodyPut, false);
             if (fmt.error) {
                 return res.status(400).json({ error: fmt.error });
             }
