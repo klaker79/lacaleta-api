@@ -554,6 +554,31 @@ module.exports = function (pool) {
                 });
             }
 
+            // 2.bis 📸 LIBERAR EL ALBARÁN que se usó para recibir este pedido.
+            //
+            // BUG (Iker, 2026-08-03): al recibir un pedido con un albarán escaneado, sus
+            // líneas pasan a 'recibido_en_pedido' para que nadie las apruebe otra vez y
+            // el stock se cuente doble. Pero al BORRAR el pedido se quedaban así PARA
+            // SIEMPRE: el albarán no volvía a la cola, y "Pasarlo al pedido" moría con
+            // 404 (el revert solo mira líneas 'aprobado') — sin salida desde la app.
+            //
+            // Borrado el pedido, el albarán ya no está consumido por nada: vuelve a
+            // 'pendiente' y se puede volver a procesar. El stock y el Diario los revierte
+            // el bloque de arriba, así que aquí NO hay que tocar nada más.
+            const liberadas = await client.query(
+                `UPDATE compras_pendientes
+                    SET estado = 'pendiente', aprobado_at = NULL, pedido_id = NULL
+                  WHERE pedido_id = $1 AND restaurante_id = $2
+                    AND estado = 'recibido_en_pedido'
+                  RETURNING id`,
+                [req.params.id, req.restauranteId]
+            );
+            if (liberadas.rowCount > 0) {
+                log('info', 'Albarán liberado al borrar el pedido', {
+                    pedidoId: req.params.id, lineas: liberadas.rowCount
+                });
+            }
+
             // 3. SOFT DELETE del pedido
             await client.query(
                 'UPDATE pedidos SET deleted_at = CURRENT_TIMESTAMP WHERE id=$1 AND restaurante_id=$2',
