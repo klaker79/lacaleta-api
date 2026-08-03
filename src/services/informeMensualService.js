@@ -200,14 +200,30 @@ async function getCogsMes(pool, restauranteId, rango) {
     // Es la misma fórmula sellada en el baseline (project_kpis_sellados_2026_04_20).
     // Usar compras (precios_compra_diarios) inflaría food cost en meses con
     // pedidos grandes que aún no se han vendido.
+    // ⚠️ Se devuelve TAMBIÉN el ingreso de ESTA MISMA FUENTE. El food cost debe
+    // dividir COGS entre los ingresos de las ventas que APORTAN ese COGS, no
+    // entre `ventas.total` (otra tabla), o cualquier venta sin fila aquí infla
+    // el denominador y hunde el porcentaje.
+    // Medido en La Nave 5 (rid=3): hay 1.500 ventas sin fila en el resumen
+    // (65.830 €, todas de enero-marzo 2026). El informe daba:
+    //     enero  15,2 %  cuando el real es 32,0 %   (16,8 puntos de mentira)
+    //     marzo  28,3 %  cuando el real es 36,0 %   ( 7,7 puntos)
+    //     febrero: 0 filas de coste → habría salido 0 %
+    // De abril en adelante no hay huérfanas y ambos cálculos coinciden.
+    // Es el MISMO bug que ya se arregló en chatService.js (ver comentario de
+    // `fc_total`, bug detectado 2026-07-08); allí se corrigió y aquí no.
     const sql = `
-        SELECT COALESCE(SUM(coste_ingredientes), 0)::numeric AS cogs_actual
+        SELECT COALESCE(SUM(coste_ingredientes), 0)::numeric AS cogs_actual,
+               COALESCE(SUM(total_ingresos), 0)::numeric     AS ingresos_con_coste
         FROM ventas_diarias_resumen
         WHERE restaurante_id = $1
           AND fecha >= $2 AND fecha < $3
     `;
     const r = await pool.query(sql, [restauranteId, rango.inicio, rango.fin]);
-    return parseFloat(r.rows[0].cogs_actual) || 0;
+    return {
+        cogs: parseFloat(r.rows[0].cogs_actual) || 0,
+        ingresosConCoste: parseFloat(r.rows[0].ingresos_con_coste) || 0
+    };
 }
 
 async function getGastosFijosMes(pool, restauranteId) {
@@ -362,7 +378,7 @@ async function generarInformeMensual(pool, restauranteId, mes) {
     try {
         const [
             restaurante, ingresos, topRentables, topProblematicos, cambiosPrecio,
-            stock, cogsActual, gastosFijos, topProveedores, mermas, evolucion, comidaPersonal,
+            stock, cogsMes, gastosFijos, topProveedores, mermas, evolucion, comidaPersonal,
             personalExtra
         ] = await Promise.all([
             getRestaurante(pool, restauranteId),
@@ -380,8 +396,21 @@ async function generarInformeMensual(pool, restauranteId, mes) {
             getPersonalExtraMes(pool, restauranteId, rango)
         ]);
 
-        const foodCostPct = ingresos.mes_actual > 0
-            ? Math.round((cogsActual / ingresos.mes_actual) * 10000) / 100
+        const cogsActual = cogsMes.cogs;
+
+        // ⚠️ DENOMINADOR = ingresos de la MISMA fuente que el COGS.
+        // `ingresos.mes_actual` sale de `ventas` y `cogsActual` de
+        // `ventas_diarias_resumen`: si hay ventas sin fila en el resumen, el
+        // denominador crece sin que crezca el numerador y el food cost se
+        // hunde. En La Nave 5, enero salía 15,2 % cuando el real era 32,0 %.
+        // Fallback a `ingresos.mes_actual` solo si el resumen está vacío, para
+        // no devolver 0 cuando sí hay ventas.
+        const ingresosFoodCost = cogsMes.ingresosConCoste > 0
+            ? cogsMes.ingresosConCoste
+            : ingresos.mes_actual;
+
+        const foodCostPct = ingresosFoodCost > 0
+            ? Math.round((cogsActual / ingresosFoodCost) * 10000) / 100
             : 0;
 
         // Food cost REAL: incluye también lo perdido por mermas. Un plato
@@ -395,8 +424,10 @@ async function generarInformeMensual(pool, restauranteId, mes) {
         // de Iker 2026-05-12.
         const mermasValor = parseFloat(mermas.valor_total) || 0;
         const cogsConMermas = cogsActual + mermasValor;
-        const foodCostRealPct = ingresos.mes_actual > 0
-            ? Math.round((cogsConMermas / ingresos.mes_actual) * 10000) / 100
+        // Mismo denominador que foodCostPct, para que ambos porcentajes sean
+        // comparables entre sí y con el del chat.
+        const foodCostRealPct = ingresosFoodCost > 0
+            ? Math.round((cogsConMermas / ingresosFoodCost) * 10000) / 100
             : 0;
 
         // P&L: ingresos − COGS − gastos fijos − comida de personal = beneficio neto.
