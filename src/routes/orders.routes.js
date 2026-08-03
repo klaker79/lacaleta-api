@@ -86,9 +86,22 @@ module.exports = function (pool) {
         try {
             const { proveedorId, fecha, ingredientes, total, estado, iva_pct, bonificacion } = req.body;
 
-            // 🔒 Validar fecha — un pedido/albarán no puede tener fecha futura
-            // (dedazo tipo 30-07). Retroactivas (pasadas) sí se permiten.
-            const fechaCheck = validateDate(fecha, { allowFuture: false });
+            // 🔒 Validar fecha. Retroactivas (pasadas) siempre se permiten: meter
+            // una compra olvidada es un flujo válido.
+            //
+            // El futuro depende del ESTADO (decisión de Iker, 2026-08-03):
+            //  - 'pendiente' → SÍ. Es un pedido programado ("pídeme esto para el
+            //    viernes"). No escribe en Diario, ni en stock, ni en precios: al
+            //    recibirlo, el Diario usa la fecha de RECEPCIÓN (ver el PUT), así
+            //    que una fecha futura aquí no descuadra absolutamente nada.
+            //  - 'recibido' → NO. Es la compra de mercado, que entra al Diario en
+            //    el acto con esta misma fecha: un dedazo (septiembre por agosto)
+            //    metería gasto en un día que no ha llegado.
+            //
+            // El modo laxo mantiene su tope de 1 año vista, así que un dedazo
+            // gordo (2027) sigue rebotando.
+            const entraAlDiarioYa = estado === 'recibido';
+            const fechaCheck = validateDate(fecha, { allowFuture: !entraAlDiarioYa });
             if (!fechaCheck.valid) {
                 return res.status(400).json({ error: fechaCheck.error });
             }
