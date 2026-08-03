@@ -25,15 +25,33 @@ module.exports = function (pool) {
     // ✅ PRODUCCIÓN: Rutas inline activas con descuento de inventario completo.
     router.get('/sales', authMiddleware, async (req, res) => {
         try {
-            const { fecha, limit, page } = req.query;
+            const { fecha, desde, hasta, limit, page } = req.query;
             let query = 'SELECT v.*, r.nombre as receta_nombre FROM ventas v LEFT JOIN recetas r ON v.receta_id = r.id WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL';
             let params = [req.restauranteId];
             let paramIdx = 1;
 
+            // `fecha` = UN día exacto (comportamiento histórico, no se toca).
             if (fecha) {
                 paramIdx++;
                 query += ` AND DATE(v.fecha) = $${paramIdx}`;
                 params.push(fecha);
+            }
+
+            // `desde`/`hasta` = RANGO [desde, hasta). Añadido 2026-08-03 porque la
+            // pestaña Balance pedía `fecha=<día 1 del mes>` creyendo que era "desde":
+            // el backend devolvía SOLO el día 1 y Balance lo pintaba como el mes
+            // entero. En La Nave 5, julio salía como 3.884,70 € en vez de 134.604,30 €.
+            // Se validan como YYYY-MM-DD para no meter basura en el parámetro.
+            const ES_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+            if (desde && ES_FECHA.test(desde)) {
+                paramIdx++;
+                query += ` AND v.fecha >= $${paramIdx}`;
+                params.push(desde);
+            }
+            if (hasta && ES_FECHA.test(hasta)) {
+                paramIdx++;
+                query += ` AND v.fecha < $${paramIdx}`;
+                params.push(hasta);
             }
 
             query += ' ORDER BY v.fecha DESC';
@@ -43,11 +61,25 @@ module.exports = function (pool) {
                 const pageNum = Math.max(parseInt(page) || 1, 1);
                 const offset = (pageNum - 1) * limitNum;
 
+                // ⚠️ El COUNT debe llevar EXACTAMENTE los mismos filtros que la query
+                // de datos, o X-Total-Count miente y la paginación se descuadra.
                 let countQuery = 'SELECT COUNT(*) FROM ventas v WHERE v.restaurante_id = $1 AND v.deleted_at IS NULL';
                 const countParams = [req.restauranteId];
+                let countIdx = 1;
                 if (fecha) {
-                    countQuery += ' AND DATE(v.fecha) = $2';
+                    countIdx++;
+                    countQuery += ` AND DATE(v.fecha) = $${countIdx}`;
                     countParams.push(fecha);
+                }
+                if (desde && ES_FECHA.test(desde)) {
+                    countIdx++;
+                    countQuery += ` AND v.fecha >= $${countIdx}`;
+                    countParams.push(desde);
+                }
+                if (hasta && ES_FECHA.test(hasta)) {
+                    countIdx++;
+                    countQuery += ` AND v.fecha < $${countIdx}`;
+                    countParams.push(hasta);
                 }
                 const countResult = await pool.query(countQuery, countParams);
                 res.set('X-Total-Count', countResult.rows[0].count);
