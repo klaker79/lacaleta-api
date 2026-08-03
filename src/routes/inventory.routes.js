@@ -6,6 +6,7 @@ const { Router } = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { log } = require('../utils/logger');
 const { validateNumber, validateId } = require('../utils/validators');
+const { getBackendIngredientUnitPrice } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -30,6 +31,12 @@ module.exports = function (pool) {
         i.cantidad_por_formato,
         i.precio,
         i.precio_fijado,
+        -- 🧹 2026-08-01: la familia viaja al frontend para que el Valor de Stock
+        -- pueda separar género (alimento/bebida) de suministros. Guantes, servilletas
+        -- y mantelillos entran por pedido pero no salen por ninguna receta, así que
+        -- inflaban el valor de inventario sin techo (11.283 € en La Nave 5).
+        -- valor_stock NO cambia de definición: quien decide qué sumar es el frontend.
+        COALESCE(i.familia, 'alimento') AS familia,
         CASE
             WHEN i.stock_real IS NULL THEN NULL
             ELSE (i.stock_real - i.stock_actual)
@@ -275,6 +282,50 @@ module.exports = function (pool) {
             }
 
             // 2. Guardar Ajustes
+            //
+            // 🩹 FIX 2026-08-01 — LA MERMA DEL RECUENTO ERA INVISIBLE
+            // Había DOS tablas de merma y solo una se leía:
+            //   · `mermas`                    ← escribe POST /mermas (modal "merma rápida").
+            //                                   La leen los informes, Omnes y el informe mensual.
+            //   · `inventory_adjustments_v2`  ← escribía SOLO este endpoint... y NADIE la leía.
+            // Resultado: todo lo que se perdía al cuadrar el inventario físico desaparecía de
+            // los informes. En La Nave 5 eran 551 registros invisibles; al auditar el pulpo,
+            // la tabla `mermas` decía 5,5 kg cuando el movimiento real era mucho mayor.
+            //
+            // Se mantiene el INSERT en inventory_adjustments_v2 (es el libro del recuento, con
+            // su snapshot asociado) y se AÑADE la fila en `mermas`, que es la tabla canónica de
+            // pérdida. Así los informes existentes funcionan sin tocar ni una consulta de lectura.
+            //
+            // Solo las pérdidas (cantidad < 0) son merma: un ajuste positivo significa que
+            // apareció más género del contabilizado, y eso no se ha perdido.
+            // OJO: aquí NO se toca el stock — de eso se encarga el paso 3 (finalStock). Duplicar
+            // el descuento dejaría el inventario recién contado a la mitad.
+            const ingredientesInfo = new Map();
+            if (adjustments && Array.isArray(adjustments) && adjustments.length > 0) {
+                const idsAjustados = adjustments
+                    .map(a => parseInt(a.ingrediente_id, 10))
+                    .filter(n => Number.isFinite(n));
+                if (idsAjustados.length > 0) {
+                    const infoRes = await client.query(
+                        `SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.precio_fijado,
+                                pcd.precio_medio_compra
+                         FROM ingredientes i
+                         LEFT JOIN (
+                             SELECT ingrediente_id,
+                                    ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                             FROM precios_compra_diarios WHERE restaurante_id = $1
+                             GROUP BY ingrediente_id
+                         ) pcd ON pcd.ingrediente_id = i.id
+                         WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL AND i.id = ANY($2::int[])`,
+                        [req.restauranteId, idsAjustados]
+                    );
+                    infoRes.rows.forEach(r => ingredientesInfo.set(r.id, r));
+                }
+            }
+            // periodo_id YYYYMM, mismo formato que POST /mermas.
+            const ahora = new Date();
+            const periodoId = ahora.getFullYear() * 100 + (ahora.getMonth() + 1);
+
             if (adjustments && Array.isArray(adjustments)) {
                 for (const adj of adjustments) {
                     const ingId = parseInt(adj.ingrediente_id, 10);
@@ -287,11 +338,38 @@ module.exports = function (pool) {
                     const safeCant = isNaN(cantidad) ? 0 : cantidad;
 
                     await client.query(
-                        `INSERT INTO inventory_adjustments_v2 
-                     (ingrediente_id, cantidad, motivo, notas, restaurante_id) 
+                        `INSERT INTO inventory_adjustments_v2
+                     (ingrediente_id, cantidad, motivo, notas, restaurante_id)
                      VALUES ($1, $2, $3, $4, $5)`,
                         [ingId, safeCant.toFixed(2), motivo, notas, req.restauranteId]
                     );
+
+                    // Espejo en `mermas` para que la pérdida sea visible en los informes.
+                    // Si el ingrediente no se resolvió (borrado o de otro tenant), se salta:
+                    // el libro del recuento ya quedó arriba, y `mermas` no admite huérfanos.
+                    const info = ingredientesInfo.get(ingId);
+                    if (safeCant < 0 && info) {
+                        const perdida = Math.abs(safeCant);
+                        const precioUnitario = getBackendIngredientUnitPrice(info);
+                        await client.query(`
+                            INSERT INTO mermas
+                            (ingrediente_id, ingrediente_nombre, cantidad, unidad, valor_perdida, motivo, nota, responsable_id, restaurante_id, periodo_id)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        `, [
+                            ingId,
+                            info.nombre || 'Sin nombre',
+                            perdida,
+                            info.unidad || 'ud',
+                            Math.round(perdida * precioUnitario * 100) / 100,
+                            motivo,
+                            notas || 'Diferencia detectada en el recuento de inventario',
+                            // responsable_id es nullable: si el token no trae id, se guarda null
+                            // antes que reventar el registro de la merma.
+                            req.user?.userId || req.user?.id || null,
+                            req.restauranteId,
+                            periodoId
+                        ]);
+                    }
                 }
             }
 
