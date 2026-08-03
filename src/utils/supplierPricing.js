@@ -84,9 +84,19 @@ function completarFormatoDesdeIngrediente(body, ingRow) {
     if (body.formato !== undefined && body.precio_formato !== undefined) return body;
     if (body.precio === undefined || body.precio === null || body.precio === '') return body;
 
-    // cpf de 1 (o ausente) significa "se compra por unidad base": no hay nada que derivar.
+    // ⚠️ EL FORMATO PUEDE SER MENOR QUE 1 (auditoría 2026-08-03). Una BOTELLA de vino
+    // son 0,75 l, un BOTE de mostaza 0,24 kg: el formato no siempre AGRUPA unidades
+    // base, a veces es una FRACCIÓN. La Nave 5 tiene 15 ingredientes así. Con la
+    // condición `cpf > 1` se quedaban fuera y el bug volvía invertido: 6,08 €/botella
+    // guardado como 6,08 €/l, y el carrito mostrando 4,56 € (−25 %). No canta como el
+    // ×10, así que se cuela directo en el food cost.
+    //
+    // `cpf > 0` es la condición que ya usan `resolverFormatoProveedor`, el sync del
+    // PUT de ingredientes y el desplegable de pedidos: aquí se alinea con ellas.
+    // cpf === 1 se excluye porque dividir por 1 no cambia nada y no queremos escribir
+    // campos de formato en un ingrediente que se compra por unidad base.
     const cpf = parseFloat(ingRow.cantidad_por_formato);
-    if (!(cpf > 1) || !ingRow.formato_compra) return body;
+    if (!(cpf > 0) || cpf === 1 || !ingRow.formato_compra) return body;
 
     return {
         ...body,
