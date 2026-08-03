@@ -58,6 +58,39 @@ describe('completa el formato cuando la petición no lo declara', () => {
     });
 });
 
+// ⚠️ EL FORMATO PUEDE SER UNA FRACCIÓN de la unidad base — una BOTELLA de vino son
+// 0,75 l. Estos 15 ingredientes existen en La Nave 5 y la primera versión del arreglo
+// (`cpf > 1`) los dejaba fuera: el bug volvía INVERTIDO, guardando 6,08 €/botella como
+// 6,08 €/l y mostrando 4,56 €. Un −25 % que no canta y se cuela en el food cost.
+describe('formatos MENORES que la unidad base (cpf < 1)', () => {
+    const BOTELLA = { formato_compra: 'BOTELLA', cantidad_por_formato: 0.75 };  // aguardiente
+    const BOTE_MOSTAZA = { formato_compra: 'BOTE', cantidad_por_formato: 0.24 };
+
+    test('AGUARDIENTE: 6,08 €/botella de 0,75 l → 8,106666 €/l', () => {
+        const out = completarFormatoDesdeIngrediente({ precio: 6.08 }, BOTELLA);
+        expect(out.cantidad_por_formato).toBe(0.75);
+        expect(out.precio_formato).toBe(6.08);
+        // Lo que importa: el precio canónico SUBE, no baja.
+        const canonico = out.precio_formato / out.cantidad_por_formato;
+        expect(canonico).toBeCloseTo(8.106667, 5);
+        expect(canonico).toBeGreaterThan(6.08);
+    });
+
+    test('reconstruir el formato devuelve el precio tecleado', () => {
+        const out = completarFormatoDesdeIngrediente({ precio: 3.45 }, BOTE_MOSTAZA);
+        const canonico = out.precio_formato / out.cantidad_por_formato;
+        expect(canonico * 0.24).toBeCloseTo(3.45, 6);
+    });
+
+    // El fallo concreto que tenía `cpf > 1`: devolvía el body intacto.
+    test('NO devuelve el body sin tocar (regresión de la condición cpf > 1)', () => {
+        const body = { precio: 5.50 };
+        const out = completarFormatoDesdeIngrediente(body, { formato_compra: 'BOTELLA', cantidad_por_formato: 0.75 });
+        expect(out).not.toBe(body);
+        expect(out.formato).toBe('BOTELLA');
+    });
+});
+
 describe('cuándo NO debe tocar nada', () => {
     // Si el caller ya declara el formato, sabe lo que hace: el alta manual de
     // proveedores manda los 3 campos y el precio ya viene bien derivado.
