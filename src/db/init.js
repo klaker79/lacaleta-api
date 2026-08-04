@@ -680,6 +680,34 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla consumos_internos verificada');
   } catch (e) { log('warn', 'Migración consumos_internos', { error: e.message }); }
 
+  // Tabla elaboraciones — pesaje real de una producción de cocina (crudo → cocido/
+  // limpio) para conocer el RENDIMIENTO REAL de un ingrediente y compararlo con el
+  // de la ficha. NO toca stock (el censo de escritores de stock está congelado y
+  // solo puede encoger): es un registro de medición, como pesar en báscula.
+  // `rendimiento_real` se guarda calculado (neta/bruta·100) — filosofía snapshot,
+  // igual que el coste en P&L: el histórico no cambia si cambia la fórmula.
+  try {
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS elaboraciones (
+                id SERIAL PRIMARY KEY,
+                restaurante_id INTEGER NOT NULL REFERENCES restaurantes(id),
+                ingrediente_id INTEGER NOT NULL,
+                ingrediente_nombre VARCHAR(255),
+                cantidad_bruta NUMERIC(10, 3) NOT NULL,
+                cantidad_neta NUMERIC(10, 3) NOT NULL,
+                rendimiento_real NUMERIC(6, 2) NOT NULL,
+                nota TEXT,
+                usuario_id INTEGER,
+                fecha DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_elaboraciones_rest_ing
+                ON elaboraciones (restaurante_id, ingrediente_id);
+        `);
+    log('info', 'Tabla elaboraciones verificada');
+  } catch (e) { log('warn', 'Migración elaboraciones', { error: e.message }); }
+
   // Columnas faltantes en ingredientes
   try {
     await pool.query(`
