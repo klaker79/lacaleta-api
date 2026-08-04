@@ -670,6 +670,73 @@ function computeInventoryDifference(rows, opts = {}) {
         .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 }
 
+/**
+ * Punto de pedido recomendado (idea del "recommended reorder level" de ERPNext,
+ * solo la idea): consumo diario real × plazo de entrega del proveedor + stock
+ * de seguridad. Si el stock actual está por debajo, toca pedir.
+ *
+ *  - consumo diario = lo que las VENTAS pidieron descontar en la ventana
+ *    (`calculado` de stock_deductions: refleja la demanda aunque el stock
+ *    estuviera a 0 y el clamp no descontara nada).
+ *  - plazo (lead) = media real de `fecha_recepcion − fecha_creacion` de los
+ *    pedidos recibidos de ese proveedor; sin historial → `leadDefault`.
+ *  - seguridad = `stock_minimo` de la ficha (0 si no está configurado).
+ *
+ * SOLO SUGIERE: no crea pedidos ni toca stock. El stock virtual es una
+ * aproximación (ley 2026-08-02), así que la cobertura en días se enseña para
+ * que el usuario juzgue, no se actúa sola.
+ *
+ * @param {Array} rows - una fila por ingrediente con consumo en la ventana:
+ *   { id, nombre, unidad, stock_actual, stock_minimo, proveedor_id,
+ *     proveedor_nombre, consumido_ventana, lead_dias_medio }
+ * @param {object} opts - { ventanaDias=90, leadDefault=2, coberturaObjetivoDias=7 }
+ * @returns {Array} sugerencias ordenadas por urgencia (menos días de cobertura primero)
+ */
+function computeReorderSuggestions(rows, opts = {}) {
+    const ventanaDias = Number.isFinite(parseFloat(opts.ventanaDias)) ? parseFloat(opts.ventanaDias) : 90;
+    const leadDefault = Number.isFinite(parseFloat(opts.leadDefault)) ? parseFloat(opts.leadDefault) : 2;
+    const coberturaObjetivo = Number.isFinite(parseFloat(opts.coberturaObjetivoDias))
+        ? parseFloat(opts.coberturaObjetivoDias) : 7;
+
+    const sugerencias = [];
+    (rows || []).forEach(row => {
+        const consumido = parseFloat(row.consumido_ventana);
+        if (!(consumido > 0)) return;
+
+        const consumoDiario = consumido / ventanaDias;
+        const stock = parseFloat(row.stock_actual) || 0;
+        const minimo = parseFloat(row.stock_minimo) || 0;
+        const leadReal = parseFloat(row.lead_dias_medio);
+        const leadDias = Number.isFinite(leadReal) && leadReal > 0
+            ? Math.round(leadReal * 10) / 10
+            : leadDefault;
+
+        const puntoPedido = consumoDiario * leadDias + minimo;
+        if (stock > puntoPedido) return;
+
+        // Pedir lo que cubre lead + objetivo de cobertura, descontando lo que queda.
+        const cantidadSugerida = Math.max(0, consumoDiario * (leadDias + coberturaObjetivo) + minimo - stock);
+
+        sugerencias.push({
+            id: row.id,
+            nombre: row.nombre,
+            unidad: row.unidad || '',
+            proveedor_id: row.proveedor_id || null,
+            proveedor_nombre: row.proveedor_nombre || null,
+            stock_actual: Math.round(stock * 1000) / 1000,
+            stock_minimo: minimo,
+            consumo_diario: Math.round(consumoDiario * 1000) / 1000,
+            lead_dias: leadDias,
+            lead_estimado: !(Number.isFinite(leadReal) && leadReal > 0),
+            punto_pedido: Math.round(puntoPedido * 100) / 100,
+            cobertura_dias: consumoDiario > 0 ? Math.round((stock / consumoDiario) * 10) / 10 : null,
+            cantidad_sugerida: Math.round(cantidadSugerida * 100) / 100
+        });
+    });
+
+    return sugerencias.sort((a, b) => (a.cobertura_dias ?? 0) - (b.cobertura_dias ?? 0));
+}
+
 module.exports = {
     calcularPrecioUnitario,
     getBackendIngredientUnitPrice,
@@ -683,5 +750,6 @@ module.exports = {
     updateProveedorPrecio,
     computePriceDrift,
     computeSuppliesOverstock,
-    computeInventoryDifference
+    computeInventoryDifference,
+    computeReorderSuggestions
 };
