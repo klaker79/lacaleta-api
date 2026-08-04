@@ -132,14 +132,11 @@ const TABLAS_EXTERNAS = new Set([
     'information_schema.columns', // catálogo de Postgres
     'pg_indexes',
 
-    // `ingrediente_proveedor` (SINGULAR) — NO se crea a propósito.
-    // Solo la escribe src/infrastructure/repositories/IngredientRepository.js,
-    // que no lo importa nadie: cero referencias en todo el repo. Y la tabla no
-    // existe en ninguna base de datos (la real es `ingredientes_proveedores`,
-    // en plural). Es decir: código huérfano que reventaría si alguien lo
-    // llamara. Crear la tabla sería darle vida a un error; lo que toca es
-    // borrar el fichero, y eso va en una limpieza aparte.
-    'ingrediente_proveedor',
+    // Aquí estuvo `ingrediente_proveedor` (SINGULAR), una tabla que no existe
+    // en ninguna base de datos —la real es `ingredientes_proveedores`, en
+    // plural— y que solo escribía un repositorio huérfano. Ese fichero ya se
+    // borró, así que la excepción sobra: si el nombre vuelve a aparecer, es un
+    // error de verdad y este test tiene que cantarlo.
 ]);
 
 describe('init.js cubre todo lo que el código escribe', () => {
