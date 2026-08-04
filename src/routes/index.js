@@ -48,6 +48,7 @@ module.exports = function mountRoutes(app, pool, { resend }) {
     mount('intelligence', require('./intelligence.routes'), pool);
     mount('mermas', require('./mermas.routes'), pool);
     mount('consumos-internos', require('./consumos-internos.routes'), pool);
+    mount('elaboraciones', require('./elaboraciones.routes'), pool);
     mount('system', require('./system.routes'), pool);
     mount('stripe', require('./stripe.routes'), pool);
     mount('superadmin', require('./superadmin.routes'), pool, config);
