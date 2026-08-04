@@ -17,14 +17,13 @@
  *      miente (una lista con muertos da la misma falsa confianza que un
  *      guardián que valida el archivo equivocado — incidente CORS).
  *
- * Las 10 puertas y su porqué (verificadas 2026-08-04):
+ * Las 9 puertas de LITE y su porqué (verificadas 2026-08-04; main tiene 10 — añade consumos-internos, feature que lite no monta):
  *   - routes/sales.routes.js        venta descuenta / borrar venta devuelve (con lock por id)
  *   - routes/orders.routes.js       borrar pedido RECIBIDO revierte su stock (solo delete)
  *   - routes/ingredients.routes.js  adjust-stock y bulk-adjust-stock (la puerta del frontend, dueño del stock)
  *   - routes/inventory.routes.js    recuento físico (stock-real / bulk-update / consolidate)
  *   - routes/mermas.routes.js       merma descuenta
- *   - routes/consumos-internos.routes.js  plato consumido sin venta descuenta
- *   - routes/transfers.routes.js    traspaso entre restaurantes (resta origen / suma destino)
+ * *   - routes/transfers.routes.js    traspaso entre restaurantes (resta origen / suma destino)
  *   - routes/balance.routes.js      compras pendientes aprobadas suman stock
  *   - services/SaleService.js       import masivo de ventas (bulk) descuenta
  *   - services/IngredientService.js gestión directa de ingrediente
@@ -45,7 +44,6 @@ const WRITER_RE = /UPDATE\s+ingredientes\b[\s\S]{0,400}?\bstock_actual\s*=/i;
 
 const PUERTAS_CENSADAS = [
     'routes/balance.routes.js',
-    'routes/consumos-internos.routes.js',
     'routes/ingredients.routes.js',
     'routes/inventory.routes.js',
     'routes/mermas.routes.js',
