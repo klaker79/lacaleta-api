@@ -7,7 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 // 2026-06-08: requirePlan retirado. El gating ahora es global en server.js.
 const { log } = require('../utils/logger');
-const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift, computeSuppliesOverstock } = require('../utils/businessHelpers');
+const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift, computeSuppliesOverstock, computeReorderSuggestions } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -404,6 +404,75 @@ module.exports = function (pool) {
         } catch (err) {
             log('error', 'Error en intelligence/price-drift', { error: err.message });
             res.status(500).json({ error: 'Error interno', alertas: [] });
+        }
+    });
+
+    // ========== 🛒 INTELIGENCIA - PUNTO DE PEDIDO RECOMENDADO ==========
+    // consumo diario real × plazo del proveedor + stock de seguridad. El consumo
+    // sale de `stock_deductions.calculado` (demanda real aunque el clamp no
+    // descontara) y el plazo de la media real de recepción de cada proveedor.
+    // SOLO SUGIERE: no crea pedidos ni toca stock.
+    router.get('/intelligence/reorder', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const VENTANA_DIAS = 90;
+            const clamp = (v, lo, hi, def) => {
+                const n = parseFloat(v);
+                return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
+            };
+            const leadDefault = clamp(req.query.lead_default, 1, 30, 2);
+            const coberturaObjetivoDias = clamp(req.query.cobertura, 1, 60, 7);
+
+            const result = await pool.query(`
+            SELECT i.id, i.nombre, i.unidad, i.stock_actual, i.stock_minimo,
+                   i.proveedor_id, p.nombre AS proveedor_nombre,
+                   c.consumido_ventana,
+                   lt.lead_dias_medio
+            FROM ingredientes i
+            JOIN (
+                SELECT (d->>'ingredienteId')::int AS ingrediente_id,
+                       SUM(COALESCE((d->>'calculado')::numeric, 0)) AS consumido_ventana
+                FROM ventas v
+                CROSS JOIN LATERAL jsonb_array_elements(v.stock_deductions) d
+                WHERE v.restaurante_id = $1
+                  AND v.deleted_at IS NULL
+                  AND v.stock_deductions IS NOT NULL
+                  AND v.fecha >= CURRENT_DATE - INTERVAL '${VENTANA_DIAS} days'
+                GROUP BY 1
+            ) c ON c.ingrediente_id = i.id
+            LEFT JOIN proveedores p
+                   ON p.id = i.proveedor_id
+                  AND p.restaurante_id = $1
+                  AND p.deleted_at IS NULL
+            LEFT JOIN (
+                SELECT proveedor_id,
+                       AVG(GREATEST(1, EXTRACT(EPOCH FROM (fecha_recepcion - fecha_creacion)) / 86400.0)) AS lead_dias_medio
+                FROM pedidos
+                WHERE restaurante_id = $1
+                  AND deleted_at IS NULL
+                  AND estado = 'recibido'
+                  AND fecha_recepcion IS NOT NULL
+                  AND fecha_creacion IS NOT NULL
+                  AND fecha_creacion >= CURRENT_DATE - INTERVAL '180 days'
+                GROUP BY proveedor_id
+            ) lt ON lt.proveedor_id = i.proveedor_id
+            WHERE i.restaurante_id = $1 AND i.deleted_at IS NULL
+        `, [req.restauranteId]);
+
+            const sugerencias = computeReorderSuggestions(result.rows, {
+                ventanaDias: VENTANA_DIAS,
+                leadDefault,
+                coberturaObjetivoDias
+            });
+
+            res.json({
+                ventana_dias: VENTANA_DIAS,
+                lead_default: leadDefault,
+                cobertura_objetivo_dias: coberturaObjetivoDias,
+                sugerencias
+            });
+        } catch (err) {
+            log('error', 'Error en intelligence/reorder', { error: err.message });
+            res.status(500).json({ error: 'Error interno', sugerencias: [] });
         }
     });
 
