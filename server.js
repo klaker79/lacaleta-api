@@ -238,15 +238,15 @@ pool.on('error', (err) => {
 
 
 // Test conexión e inicializar DB
-const { initializeDatabase } = require('./src/db/init');
+const { initializeDatabaseConReintentos } = require('./src/db/init');
 
+// 🔁 Con REINTENTOS (avería staging 2026-08-05): en un redeploy simultáneo de
+// API y BD, la primera conexión caducaba y las migraciones se saltaban ENTERAS
+// en silencio. Ahora se reintenta con backoff (~3 min) antes de rendirse.
 (async () => {
-    try {
-        await pool.query('SELECT NOW()');
-        log('info', 'Conectado a PostgreSQL');
-        await initializeDatabase(pool);
-    } catch (err) {
-        log('error', 'Error DB', { error: err.message });
+    const ok = await initializeDatabaseConReintentos(pool);
+    if (!ok) {
+        log('error', 'Error DB: agotados los reintentos de conexión — el API arranca SIN migraciones');
     }
 })();
 

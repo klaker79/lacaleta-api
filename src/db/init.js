@@ -1171,4 +1171,50 @@ async function initializeDatabase(pool) {
   log('info', 'Tablas y migraciones completadas');
 }
 
-module.exports = { initializeDatabase };
+/**
+ * Arranque robusto: conectar + migrar con REINTENTOS.
+ *
+ * La avería que motiva esto (staging, 2026-08-05): en un redeploy simultáneo
+ * de API y BD, la primera conexión caducó ("connection timeout") y el arranque
+ * se saltó TODAS las migraciones en silencio — el API sirvió tráfico sin la
+ * tabla nueva. Reintentar es seguro: init.js es idempotente (IF NOT EXISTS y
+ * try/catch por bloque), así que repetirlo nunca duplica nada.
+ *
+ * Backoff exponencial acotado (3s, 6s, 12s, 24s, 30s, 30s...). Si tras todos
+ * los intentos la BD sigue caída, se registra error y se devuelve false —
+ * mismo comportamiento final que antes, pero tras ~3 minutos de margen en vez
+ * de rendirse a la primera.
+ *
+ * @param {Pool} pool
+ * @param {object} opts - intentos, baseMs, maxMs, esperar/inicializar (inyectables en tests)
+ * @returns {Promise<boolean>} true si conectó y migró; false si se agotaron los intentos
+ */
+async function initializeDatabaseConReintentos(pool, opts = {}) {
+    const intentos = opts.intentos ?? 10;
+    const baseMs = opts.baseMs ?? 3000;
+    const maxMs = opts.maxMs ?? 30000;
+    const esperar = opts.esperar ?? ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
+    const inicializar = opts.inicializar ?? initializeDatabase;
+
+    for (let intento = 1; intento <= intentos; intento++) {
+        try {
+            await pool.query('SELECT NOW()');
+            log('info', `Conectado a PostgreSQL (intento ${intento}/${intentos})`);
+            await inicializar(pool);
+            return true;
+        } catch (err) {
+            const esUltimo = intento === intentos;
+            const esperaMs = Math.min(baseMs * 2 ** (intento - 1), maxMs);
+            log(esUltimo ? 'error' : 'warn', 'BD no lista en el arranque', {
+                intento,
+                de: intentos,
+                error: err.message,
+                reintentoEnMs: esUltimo ? null : esperaMs
+            });
+            if (!esUltimo) await esperar(esperaMs);
+        }
+    }
+    return false;
+}
+
+module.exports = { initializeDatabase, initializeDatabaseConReintentos };
