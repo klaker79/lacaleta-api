@@ -661,6 +661,39 @@ async function initializeDatabase(pool) {
     log('info', 'Tabla consumos_internos verificada');
   } catch (e) { log('warn', 'Migración consumos_internos', { error: e.message }); }
 
+  // Tabla rendimientos_estandar — referencia GLOBAL (sin restaurante_id, solo
+  // lectura para los tenants): rendimiento de limpieza por alimento según USDA
+  // SR-28 (dominio público), curada para hostelería española. Alimenta la
+  // SUGERENCIA al crear ingrediente ("Alcachofa: 40% estándar") — la app sugiere,
+  // el usuario confirma; NUNCA se aplica sola ni pisa fichas existentes.
+  try {
+    await pool.query(`
+            CREATE TABLE IF NOT EXISTS rendimientos_estandar (
+                id SERIAL PRIMARY KEY,
+                nombre VARCHAR(120) NOT NULL UNIQUE,
+                aliases JSONB NOT NULL DEFAULT '[]',
+                familia VARCHAR(30) NOT NULL,
+                rendimiento INTEGER NOT NULL,
+                que_se_quita VARCHAR(120),
+                fuente VARCHAR(60) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+    const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM rendimientos_estandar');
+    if (count === 0) {
+      const seed = require('./rendimientosEstandarSeed');
+      for (const e of seed) {
+        await pool.query(
+          `INSERT INTO rendimientos_estandar (nombre, aliases, familia, rendimiento, que_se_quita, fuente)
+                     VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (nombre) DO NOTHING`,
+          [e.nombre, JSON.stringify(e.aliases), e.familia, e.rendimiento, e.queSeQuita, e.fuente]
+        );
+      }
+      log('info', `Seed rendimientos_estandar cargado: ${seed.length} entradas (USDA SR-28)`);
+    }
+    log('info', 'Tabla rendimientos_estandar verificada');
+  } catch (e) { log('warn', 'Migración rendimientos_estandar', { error: e.message }); }
+
   // Columnas faltantes en ingredientes
   try {
     await pool.query(`

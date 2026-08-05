@@ -4,6 +4,8 @@
  */
 const { Router } = require('express');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { globalLimiter } = require('../middleware/rateLimit');
+const { buscarRendimientoEstandar } = require('../utils/rendimientoEstandar');
 const { log } = require('../utils/logger');
 const { validatePrecio, validateCantidad, sanitizeString, validateRequired, validateId } = require('../utils/validators');
 const { logChange } = require('../utils/auditLog');
@@ -75,6 +77,45 @@ module.exports = function (pool) {
     const router = Router();
 
     // ========== INGREDIENTES ==========
+    // ── Rendimiento estándar sugerido (tabla GLOBAL USDA SR-28, solo lectura) ──
+    // Al crear un ingrediente, el front pregunta aquí con el nombre tecleado y,
+    // si hay match fiable, pinta la sugerencia ("Alcachofa: 40% — estándar
+    // oficial"). El usuario CONFIRMA; esto nunca escribe nada.
+    // La tabla es estática (seed en init.js): se cachea en memoria tras la
+    // primera consulta para no tocar la BD en cada pulsación.
+    let _rendimientosCache = null;
+    router.get('/ingredients/rendimiento-sugerido', globalLimiter, authMiddleware, async (req, res) => {
+        try {
+            const nombre = String(req.query.nombre || '').slice(0, 120);
+            if (!nombre.trim()) {
+                return res.status(400).json({ error: 'Falta el parámetro nombre' });
+            }
+
+            if (!_rendimientosCache) {
+                const { rows } = await pool.query(
+                    'SELECT nombre, aliases, familia, rendimiento, que_se_quita, fuente FROM rendimientos_estandar'
+                );
+                _rendimientosCache = rows;
+            }
+
+            const match = buscarRendimientoEstandar(nombre, _rendimientosCache);
+            if (!match) return res.json({ sugerencia: null });
+
+            res.json({
+                sugerencia: {
+                    nombre_estandar: match.nombre,
+                    rendimiento: match.rendimiento,
+                    que_se_quita: match.que_se_quita,
+                    fuente: match.fuente
+                }
+            });
+        } catch (err) {
+            log('error', 'Error en rendimiento-sugerido', { error: err.message });
+            // Fail-open: sin sugerencia el alta sigue como siempre.
+            res.json({ sugerencia: null });
+        }
+    });
+
     router.get('/ingredients', authMiddleware, async (req, res) => {
         try {
             const { include_inactive } = req.query;
