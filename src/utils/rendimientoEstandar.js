@@ -15,11 +15,9 @@
 function normalizar(texto) {
     return String(texto || '')
         .toLowerCase()
-        .replace(/ñ/g, '') // proteger la ñ: NFD la descompondría en n+tilde
         .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '') // sin acentos (combinantes tras NFD)
-        .replace(//g, 'ñ')
-        .replace(/[^a-z0-9ñ\s]/g, ' ')
+        .replace(/[̀-ͯ]/g, '') // sin acentos; la ñ queda como n (ambos lados igual)
+        .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }

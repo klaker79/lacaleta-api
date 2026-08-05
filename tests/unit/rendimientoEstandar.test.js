@@ -13,8 +13,9 @@ describe('normalizar', () => {
         expect(normalizar('  Espárrago   VERDE ')).toBe('esparrago verde');
         expect(normalizar('Calabacín')).toBe('calabacin');
     });
-    test('conserva la ñ (piña ≠ pina de otra cosa)', () => {
-        expect(normalizar('Piña')).toBe('piña');
+    test('la ñ se normaliza a n en AMBOS lados — "piña" sigue encontrando a Piña', () => {
+        expect(normalizar('Piña')).toBe('pina');
+        expect(buscarRendimientoEstandar('piña', seed)?.nombre).toBe('Piña');
     });
 });
 
