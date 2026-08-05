@@ -7,15 +7,17 @@
  */
 const { runTool } = require('../../src/services/chatService');
 
-// resumen_pyg ejecuta 5 queries en este orden:
+// resumen_pyg ejecuta 6 queries en este orden:
 //  1) ventas  2) compras  3) cogsSplit  4) gastos_fijos  5) personal_extra
-function poolPyg({ ingresos, comida_personal, cogsFood, ingFood, gastosFijosMes, personalExtra }) {
+//  6) dias_con_ventas (devengo de fijos por días con ventas, criterio 2026-07-08)
+function poolPyg({ ingresos, comida_personal, cogsFood, ingFood, gastosFijosMes, personalExtra, diasConVentas = 31 }) {
     const query = jest.fn()
         .mockResolvedValueOnce({ rows: [{ ingresos: String(ingresos), num_tickets: '10' }] })
         .mockResolvedValueOnce({ rows: [{ total_compras: '0', comida_personal: String(comida_personal) }] })
         .mockResolvedValueOnce({ rows: [{ tipo: 'food', cogs: String(cogsFood), ingresos_cat: String(ingFood) }] })
         .mockResolvedValueOnce({ rows: [{ gastos_fijos_mes: String(gastosFijosMes) }] })
-        .mockResolvedValueOnce({ rows: [{ personal_extra_periodo: String(personalExtra) }] });
+        .mockResolvedValueOnce({ rows: [{ personal_extra_periodo: String(personalExtra) }] })
+        .mockResolvedValueOnce({ rows: [{ dias_con_ventas: String(diasConVentas) }] });
     return { query };
 }
 
@@ -38,5 +40,12 @@ describe('resumen_pyg — personal extra resta al beneficio', () => {
         expect(con.personal_extra_periodo).toBe(80);
         // Aislamos el efecto del extra del prorrateo de gastos fijos:
         expect(Math.round((sin.margen_neto_aprox - con.margen_neto_aprox) * 100) / 100).toBe(80);
+    });
+
+    test('gastos fijos se devengan por DÍAS CON VENTAS (criterio Cuenta de Resultados)', async () => {
+        // Mayo (31 días naturales), solo 4 días con ventas → 200 × 4/31 = 25.81.
+        const r = await runTool('resumen_pyg', poolPyg({ ...BASE, personalExtra: 0, diasConVentas: 4 }), 3, RANGO);
+        expect(r.periodo.dias_con_ventas).toBe(4);
+        expect(r.gastos_fijos_periodo).toBe(Math.round((200 * 4 / 31) * 100) / 100);
     });
 });
