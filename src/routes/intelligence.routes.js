@@ -7,7 +7,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { costlyApiLimiter } = require('../middleware/rateLimit');
 // 2026-06-08: requirePlan retirado. El gating ahora es global en server.js.
 const { log } = require('../utils/logger');
-const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift, computeSuppliesOverstock } = require('../utils/businessHelpers');
+const { buildIngredientPriceMap, getBackendIngredientUnitPrice, getRecipeCostBase, computePriceDrift, computeSuppliesOverstock, computeUnregisteredEntries } = require('../utils/businessHelpers');
 
 /**
  * @param {Pool} pool - PostgreSQL connection pool
@@ -471,6 +471,76 @@ module.exports = function (pool) {
             });
         } catch (err) {
             log('error', 'Error en intelligence/supplies-overstock', { error: err.message });
+            res.status(500).json({ error: 'Error interno', alertas: [] });
+        }
+    });
+
+    // ========== 📥 ENTRADAS SIN REGISTRAR ==========
+    // Mercancía que se sirvió y se cobró pero nunca salió del inventario, porque
+    // el stock ya estaba a 0 (GREATEST(0,...) en sales.routes.js). Señal de que
+    // las ENTRADAS de ese producto no se registran (caso PAN de LN5: 1,4 uds
+    // compradas en 6 meses frente a cientos de raciones servidas).
+    //
+    // SOLO LECTURA: no toca stock, ni compensa, ni crea deuda (ley de producto —
+    // el stock virtual es una aproximación y solo el recuento físico resetea).
+    router.get('/intelligence/unregistered-entries', costlyApiLimiter, authMiddleware, async (req, res) => {
+        try {
+            const VENTANA_DIAS = 90;
+            const clamp = (v, lo, hi, def) => {
+                const n = parseFloat(v);
+                return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
+            };
+            const minVentas = clamp(req.query.min_ventas, 1, 1000, 5);
+            const minEuros = clamp(req.query.min_euros, 0, 100000, 50);
+
+            // Una fila por ingrediente con déficit en la ventana. El JOIN (no LEFT)
+            // contra compras exige ≥1 compra registrada en el histórico: si nunca se
+            // ha comprado, el restaurante no lleva ese producto por stock → no es un
+            // proceso roto, es que no lo gestiona (anti-ruido, ver businessHelpers).
+            const result = await pool.query(`
+            SELECT i.id, i.nombre, i.unidad, i.precio, i.cantidad_por_formato, i.precio_fijado,
+                   hist.precio_medio_compra,
+                   c.uds_sin_descontar, c.n_ventas, c.primera, c.ultima
+            FROM (
+                SELECT (d->>'ingredienteId')::int AS ingrediente_id,
+                       SUM(COALESCE((d->>'calculado')::numeric, 0)
+                         - COALESCE((d->>'real')::numeric, 0))     AS uds_sin_descontar,
+                       COUNT(DISTINCT v.id)                        AS n_ventas,
+                       MIN(v.fecha)::date                          AS primera,
+                       MAX(v.fecha)::date                          AS ultima
+                FROM ventas v
+                CROSS JOIN LATERAL jsonb_array_elements(v.stock_deductions) d
+                WHERE v.restaurante_id = $1
+                  AND v.deleted_at IS NULL
+                  AND v.stock_deductions IS NOT NULL
+                  AND jsonb_typeof(v.stock_deductions) = 'array'
+                  AND v.fecha >= NOW() - INTERVAL '${VENTANA_DIAS} days'
+                  AND (d->>'ingredienteId') ~ '^[0-9]+$'
+                  AND COALESCE((d->>'calculado')::numeric, 0)
+                    > COALESCE((d->>'real')::numeric, 0) + 0.001
+                GROUP BY 1
+            ) c
+            JOIN ingredientes i
+              ON i.id = c.ingrediente_id AND i.restaurante_id = $1 AND i.deleted_at IS NULL
+            JOIN (
+                SELECT ingrediente_id,
+                       ROUND((SUM(total_compra) / NULLIF(SUM(cantidad_comprada), 0))::numeric, 4) AS precio_medio_compra
+                FROM precios_compra_diarios
+                WHERE restaurante_id = $1
+                GROUP BY ingrediente_id
+            ) hist ON hist.ingrediente_id = i.id
+        `, [req.restauranteId]);
+
+            const alertas = computeUnregisteredEntries(result.rows, { minVentas, minEuros });
+
+            res.json({
+                ventana_dias: VENTANA_DIAS,
+                min_ventas: minVentas,
+                min_euros: minEuros,
+                alertas
+            });
+        } catch (err) {
+            log('error', 'Error en intelligence/unregistered-entries', { error: err.message });
             res.status(500).json({ error: 'Error interno', alertas: [] });
         }
     });
