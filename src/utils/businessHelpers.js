@@ -567,6 +567,65 @@ function computeSuppliesOverstock(rows, opts = {}) {
     return alertas.sort((a, b) => b.valor_exceso - a.valor_exceso);
 }
 
+/**
+ * ENTRADAS SIN REGISTRAR — mercancía que entra en la cocina sin pasar por la app.
+ *
+ * Al vender, el stock se descuenta con GREATEST(0, ...) (regla de negocio: nunca
+ * negativo, ver sales.routes.js). Cada venta guarda en `ventas.stock_deductions`
+ * lo que se PUDO descontar (`real`) y lo que TOCABA descontar (`calculado`). Si
+ * `calculado > real`, esa mercancía se sirvió y se cobró, pero nunca salió del
+ * inventario: señal de que las ENTRADAS de ese producto no se están registrando.
+ *
+ * Esta función es 100% PURA y ADITIVA: no cambia ningún cálculo existente ni toca
+ * el stock. Solo lee lo que ya se guardaba y lo valora con la función canónica
+ * `getBackendIngredientUnitPrice` (respeta precio_fijado 📌 y la prioridad de
+ * precios), para que el € coincida con el resto de la app.
+ *
+ * Anti-ruido (por diseño, calibrado con datos reales de LN5 2026-08):
+ *  - La query EXIGE al menos una compra registrada en el histórico. Sin ese filtro
+ *    salían 126 ingredientes en LN5, de los cuales 62 no se han comprado JAMÁS:
+ *    son productos que el restaurante no gestiona por stock a propósito (o un
+ *    tenant que no lleva inventario), y avisar de ellos es ruido puro.
+ *  - minVentas: un despiste suelto no es un proceso roto.
+ *  - minEuros: si no mueve dinero, no merece una tarjeta.
+ *  - Ventana de 90 días (en la query): así el aviso SE APAGA SOLO cuando el
+ *    proceso se arregla, en vez de gritar para siempre por un histórico viejo.
+ *
+ * @param {Array} rows - filas con: id, nombre, unidad, precio, cantidad_por_formato,
+ *   precio_fijado, precio_medio_compra, uds_sin_descontar, n_ventas, primera, ultima.
+ * @param {object} opts - { minVentas=5, minEuros=50 }
+ * @returns {Array} alertas ordenadas por importe desc.
+ */
+function computeUnregisteredEntries(rows, opts = {}) {
+    const minVentas = Number.isFinite(parseInt(opts.minVentas)) ? parseInt(opts.minVentas) : 5;
+    const minEuros = Number.isFinite(parseFloat(opts.minEuros)) ? parseFloat(opts.minEuros) : 50;
+
+    const alertas = [];
+    (rows || []).forEach(row => {
+        const uds = parseFloat(row.uds_sin_descontar);
+        const nVentas = parseInt(row.n_ventas) || 0;
+        if (!(uds > 0) || nVentas < minVentas) return;
+
+        // Mismo precio unitario (€/unidad base) que usan food cost, recetas y chat.
+        const precioUnitario = getBackendIngredientUnitPrice(row);
+        const importe = Math.round(uds * precioUnitario * 100) / 100;
+        if (!(importe >= minEuros)) return;
+
+        alertas.push({
+            id: row.id,
+            nombre: row.nombre,
+            unidad: row.unidad || '',
+            uds_sin_descontar: Math.round(uds * 100) / 100,
+            importe_eur: importe,
+            n_ventas: nVentas,
+            primera: row.primera || null,
+            ultima: row.ultima || null
+        });
+    });
+
+    return alertas.sort((a, b) => b.importe_eur - a.importe_eur);
+}
+
 module.exports = {
     calcularPrecioUnitario,
     getBackendIngredientUnitPrice,
@@ -579,5 +638,6 @@ module.exports = {
     resolveProveedorId,
     updateProveedorPrecio,
     computePriceDrift,
-    computeSuppliesOverstock
+    computeSuppliesOverstock,
+    computeUnregisteredEntries
 };
